@@ -14,6 +14,8 @@ export async function POST(request: Request) {
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const bucket = process.env.SUPABASE_STORAGE_BUCKET || DEFAULT_BUCKET;
   const devUserId = process.env.DEV_USER_ID;
+  const workerUrl = process.env.WORKER_URL;
+  const workerToken = process.env.WORKER_AUTH_TOKEN;
 
   if (!supabaseUrl || !supabaseServiceKey) {
     return NextResponse.json(
@@ -117,6 +119,15 @@ export async function POST(request: Request) {
       { error: jobError.message || "Failed to queue analysis job." },
       { status: 500 }
     );
+  }
+
+  if (workerUrl) {
+    fetch(`${workerUrl.replace(/\/$/, "")}/run`, {
+      method: "POST",
+      headers: workerToken ? { "X-Worker-Token": workerToken } : undefined
+    }).catch((error) => {
+      console.warn("Immediate worker trigger failed:", error);
+    });
   }
 
   return NextResponse.json({

@@ -68,6 +68,33 @@ Return strict JSON with this schema and no extra text:
     { "frame": number, "shots": [number|null, number|null, number|null], "confidence": number }
   ]
 }
+
+function resolveThinkingConfig(mode) {
+  if (!mode) {
+    return null;
+  }
+  const normalized = String(mode).trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "minimal") {
+    return { thinkingBudget: 0 };
+  }
+  if (normalized === "low") {
+    return { thinkingBudget: 128 };
+  }
+  if (normalized === "medium") {
+    return { thinkingBudget: 512 };
+  }
+  if (normalized === "high") {
+    return { thinkingBudget: 2048 };
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (Number.isFinite(parsed)) {
+    return { thinkingBudget: parsed };
+  }
+  return null;
+}
 Rules:
 - Frames 1-9 have up to 2 shots; frame 10 can have up to 3.
 - Use null for any unreadable shot.
@@ -148,11 +175,13 @@ async function processJob() {
   const base64 = Buffer.from(arrayBuffer).toString("base64");
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const thinkingConfig = resolveThinkingConfig(process.env.WORKER_THINKING_MODE);
   const model = genAI.getGenerativeModel({
     model: GEMINI_MODEL,
     generationConfig: {
       temperature: 0.2,
-      responseMimeType: "application/json"
+      responseMimeType: "application/json",
+      ...(thinkingConfig ? { thinkingConfig } : {})
     }
   });
 

@@ -7,6 +7,7 @@ type Message = {
   content: string;
   variant?: "error" | "offline";
   note?: string;
+  meta?: string;
 };
 
 type ChatPanelProps = {
@@ -67,8 +68,10 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
 
       const payload = (await response.json()) as {
         answer?: string;
+        meta?: string;
         onlineError?: string;
         offlineAnswer?: string;
+        offlineMeta?: string;
         offlineNote?: string;
       };
       if (payload.onlineError && payload.offlineAnswer) {
@@ -83,6 +86,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
             role: "assistant",
             content: payload.offlineAnswer,
             variant: "offline",
+            meta: payload.offlineMeta,
             note:
               payload.offlineNote ||
               "This response was done offline so it can't handle complex questions and may be wrong."
@@ -94,7 +98,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
       if (payload.answer) {
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: payload.answer }
+          { role: "assistant", content: payload.answer, meta: payload.meta }
         ]);
       } else {
         setMessages((prev) => [
@@ -215,6 +219,9 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
               key={`${message.role}-${index}`}
               className={`message ${message.role} ${message.variant || ""} ${isLast ? "group-end" : ""}`}
             >
+              {message.meta ? (
+                <div className="message-meta">{message.meta}</div>
+              ) : null}
               <div>{renderInlineBold(message.content)}</div>
               {message.note ? (
                 <div className="offline-note">

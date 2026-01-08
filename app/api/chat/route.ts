@@ -26,7 +26,6 @@ type Game = {
 };
 
 type OrderedGame = Game & {
-  game_number: number;
   game_name: string;
 };
 
@@ -55,6 +54,8 @@ type DateFilter = {
 
 type TimeFilter = {
   date?: DateFilter;
+  rangeStart?: DateFilter;
+  rangeEnd?: DateFilter;
   beforeMinutes?: number;
   afterMinutes?: number;
   utcDateStart?: string;
@@ -295,8 +296,9 @@ function buildSqlPrompt(
   // - Use table and column names exactly as defined.
   // - If you cannot answer, set sql to null and explain.
   // - The game index already reflects any time filters; only use games listed below.
-  // - Time filters are expressed in UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
+  // - The user's timezone offset (minutes from UTC) is *timezone offset*.
   // - Times mentioned in the question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
+  // - local time - *timezone offset* = UTC.
   //
   // Schema:
   // *schema*
@@ -311,8 +313,9 @@ Return JSON only with this schema: {"sql": string|null, "explanation": string}.
 - Use table and column names exactly as defined.
 - If you cannot answer, set sql to null and explain.
 - The game index already reflects any time filters; only use games listed below.
-- Time filters are expressed in UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
+- The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 - Times mentioned in the question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
+- local time - ${timezoneOffsetMinutes ?? "unknown"} = UTC.
 
 Schema:
 ${schema}
@@ -405,6 +408,10 @@ function extractGameNumbers(question: string) {
   return Array.from(numbers).sort((a, b) => a - b);
 }
 
+function mapNumbersToNames(numbers: number[]) {
+  return numbers.map((value) => `Game ${value}`);
+}
+
 function ensureSentence(text: string) {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -452,6 +459,33 @@ function formatAnswer(raw: string, question: string) {
 function formatOfflineAnswer(text: string) {
   const withoutNulls = text.replace(/\bnull\b/gi, "n/a");
   return ensureSentence(withoutNulls);
+}
+
+function formatTiming(ms: number) {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return "0ms";
+  }
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`;
+  }
+  return `${(ms / 1000).toFixed(2)}s`;
+}
+
+function buildAnswerMeta(
+  method: "sql" | "context" | "offline",
+  startedAt: number,
+  showMethod: boolean,
+  showTiming: boolean
+) {
+  const parts: string[] = [];
+  if (showMethod) {
+    parts.push(`Method: ${method}`);
+  }
+  if (showTiming) {
+    const elapsed = Date.now() - startedAt;
+    parts.push(`Time: ${formatTiming(elapsed)}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 function normalizeQuestion(question: string) {
@@ -534,6 +568,33 @@ function applyOfflineBold(text: string) {
     .join("\n");
 }
 
+function resolveThinkingConfig(mode?: string) {
+  if (!mode) {
+    return null;
+  }
+  const normalized = mode.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === "minimal") {
+    return { thinkingBudget: 0 };
+  }
+  if (normalized === "low") {
+    return { thinkingBudget: 128 };
+  }
+  if (normalized === "medium") {
+    return { thinkingBudget: 512 };
+  }
+  if (normalized === "high") {
+    return { thinkingBudget: 2048 };
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (Number.isFinite(parsed)) {
+    return { thinkingBudget: parsed };
+  }
+  return null;
+}
+
 function extractFrameNumbers(question: string) {
   const numbers = new Set<number>();
   const listMatch = question.match(/frames?\s+([0-9,\s]+)/i);
@@ -561,45 +622,41 @@ function extractFrameNumbers(question: string) {
     .sort((a, b) => a - b);
 }
 
-function extractDateFilter(question: string): DateFilter | null {
-  const monthRegex =
-    /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?/i;
-  const match = question.match(monthRegex);
-  if (!match) {
-    return null;
-  }
-  const monthMap: Record<string, number> = {
-    jan: 0,
-    january: 0,
-    feb: 1,
-    february: 1,
-    mar: 2,
-    march: 2,
-    apr: 3,
-    april: 3,
-    may: 4,
-    jun: 5,
-    june: 5,
-    jul: 6,
-    july: 6,
-    aug: 7,
-    august: 7,
-    sep: 8,
-    sept: 8,
-    september: 8,
-    oct: 9,
-    october: 9,
-    nov: 10,
-    november: 10,
-    dec: 11,
-    december: 11
-  };
+const monthRegex =
+  /\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|september|oct|october|nov|november|dec|december)\b\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(\d{4}))?/gi;
+const monthMap: Record<string, number> = {
+  jan: 0,
+  january: 0,
+  feb: 1,
+  february: 1,
+  mar: 2,
+  march: 2,
+  apr: 3,
+  april: 3,
+  may: 4,
+  jun: 5,
+  june: 5,
+  jul: 6,
+  july: 6,
+  aug: 7,
+  august: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  oct: 9,
+  october: 9,
+  nov: 10,
+  november: 10,
+  dec: 11,
+  december: 11
+};
+
+function parseDateMatch(match: RegExpExecArray) {
   const monthKey = match[1].toLowerCase();
   const day = Number.parseInt(match[2], 10);
   const year = match[3]
     ? Number.parseInt(match[3], 10)
     : new Date().getFullYear();
-
   if (!Number.isFinite(day) || day < 1 || day > 31) {
     return null;
   }
@@ -608,6 +665,23 @@ function extractDateFilter(question: string): DateFilter | null {
     return null;
   }
   return { year, month, day };
+}
+
+function extractAllDates(question: string) {
+  const matches = question.matchAll(monthRegex);
+  const dates: DateFilter[] = [];
+  for (const match of matches) {
+    const parsed = parseDateMatch(match);
+    if (parsed) {
+      dates.push(parsed);
+    }
+  }
+  return dates;
+}
+
+function extractDateFilter(question: string): DateFilter | null {
+  const dates = extractAllDates(question);
+  return dates.length > 0 ? dates[0] : null;
 }
 
 function parseTimeToMinutes(hour: number, minute: number, meridiem?: string) {
@@ -661,6 +735,19 @@ function normalizeTimeFilterToUtc(
   const hasTime =
     filter.beforeMinutes !== undefined || filter.afterMinutes !== undefined;
 
+  if (filter.rangeStart && filter.rangeEnd) {
+    const startUtc =
+      Date.UTC(filter.rangeStart.year, filter.rangeStart.month, filter.rangeStart.day) +
+      offset * 60000;
+    const endUtc =
+      Date.UTC(filter.rangeEnd.year, filter.rangeEnd.month, filter.rangeEnd.day + 1) +
+      offset * 60000;
+    next.utcDateStart = new Date(startUtc).toISOString();
+    next.utcDateEnd = new Date(endUtc).toISOString();
+    next.rangeStart = undefined;
+    next.rangeEnd = undefined;
+  }
+
   if (filter.beforeMinutes !== undefined) {
     const converted = convertMinutesToUtc(filter.beforeMinutes, offset);
     next.beforeMinutes = converted.minutes;
@@ -681,7 +768,7 @@ function normalizeTimeFilterToUtc(
     next.date = nextDate;
   }
 
-  if (filter.date && !hasTime) {
+  if (filter.date && !hasTime && !filter.rangeStart && !filter.rangeEnd) {
     const startUtc =
       Date.UTC(filter.date.year, filter.date.month, filter.date.day) +
       offset * 60000;
@@ -697,29 +784,42 @@ function normalizeTimeFilterToUtc(
 }
 
 function extractTimeFilter(question: string): TimeFilter {
-  const date = extractDateFilter(question) || undefined;
+  const dates = extractAllDates(question);
+  let rangeStart: DateFilter | undefined;
+  let rangeEnd: DateFilter | undefined;
+  if (dates.length >= 2) {
+    rangeStart = dates[0];
+    rangeEnd = dates[1];
+  }
+  const date = dates.length === 1 ? dates[0] : undefined;
   const timeRegex = /\b(before|after)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i;
   const match = question.match(timeRegex);
   if (!match) {
-    return date ? { date } : {};
+    return date || rangeStart
+      ? { date, rangeStart, rangeEnd }
+      : {};
   }
   const operator = match[1].toLowerCase();
   const hour = Number.parseInt(match[2], 10);
   const minute = match[3] ? Number.parseInt(match[3], 10) : 0;
   if (!Number.isFinite(hour) || hour < 0 || hour > 23) {
-    return date ? { date } : {};
+    return date || rangeStart
+      ? { date, rangeStart, rangeEnd }
+      : {};
   }
   if (!Number.isFinite(minute) || minute < 0 || minute > 59) {
-    return date ? { date } : {};
+    return date || rangeStart
+      ? { date, rangeStart, rangeEnd }
+      : {};
   }
   const minutes = parseTimeToMinutes(hour, minute, match[4]);
   if (operator === "before") {
-    return { date, beforeMinutes: minutes };
+    return { date, rangeStart, rangeEnd, beforeMinutes: minutes };
   }
   if (operator === "after") {
-    return { date, afterMinutes: minutes };
+    return { date, rangeStart, rangeEnd, afterMinutes: minutes };
   }
-  return date ? { date } : {};
+  return date || rangeStart ? { date, rangeStart, rangeEnd } : {};
 }
 
 function applyTimeFilter(games: OrderedGame[], filter: TimeFilter) {
@@ -1069,6 +1169,16 @@ async function callGemini(
   prompt: string,
   responseMimeType?: string
 ) {
+  const thinkingMode = process.env.CHAT_THINKING_MODE;
+  const generationConfig: Record<string, unknown> = {
+    temperature: 0.2,
+    responseMimeType
+  };
+  const thinkingConfig = resolveThinkingConfig(thinkingMode);
+  if (thinkingConfig) {
+    generationConfig.thinkingConfig = thinkingConfig;
+  }
+
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     {
@@ -1076,10 +1186,7 @@ async function callGemini(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType
-        }
+        generationConfig
       })
     }
   );
@@ -1162,7 +1269,7 @@ shots(id uuid, frame_id uuid, shot_number int, pins int)`;
     index,
     schema,
     timezoneOffsetMinutes
-  )}\n\nTime Filters (UTC):\n${JSON.stringify(timeFilter, null, 2)}`;
+  )}`;
   if (debug) {
     console.log("SQL prompt:", sqlPrompt);
   }
@@ -1232,6 +1339,14 @@ export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
   const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
   const devUserId = process.env.DEV_USER_ID;
+  const chatModeRaw = process.env.CHAT_MODE || "mix";
+  const chatMode =
+    chatModeRaw === "sql" || chatModeRaw === "context" || chatModeRaw === "mix"
+      ? chatModeRaw
+      : "mix";
+  const showMethod = process.env.CHAT_SHOW_METHOD === "true";
+  const showTiming = process.env.CHAT_SHOW_TIMING === "true";
+  const startedAt = Date.now();
 
   if (!supabaseUrl || !supabaseServiceKey) {
     return NextResponse.json(
@@ -1332,20 +1447,24 @@ export async function POST(request: Request) {
       const bTime = b.created_at ? Date.parse(b.created_at) : 0;
       return aTime - bTime;
     })
-    .map((game, index) => ({
+    .map((game) => ({
       ...game,
       game_name:
         game.game_name && game.game_name.trim().length > 0
           ? game.game_name
-          : `Game ${index + 1}`,
-      game_number: index + 1
+          : "Untitled game"
     }));
 
   const selectedNumbers = extractGameNumbers(payload.question);
+  const selectedNames = mapNumbersToNames(selectedNumbers).map((name) =>
+    name.toLowerCase()
+  );
   const selectedFrames = extractFrameNumbers(payload.question);
   const selectedGames =
-    selectedNumbers.length > 0
-      ? orderedGames.filter((game) => selectedNumbers.includes(game.game_number))
+    selectedNames.length > 0
+      ? orderedGames.filter((game) =>
+          selectedNames.includes(game.game_name.toLowerCase())
+        )
       : orderedGames;
 
   const localTimeFilter = extractTimeFilter(payload.question);
@@ -1355,21 +1474,27 @@ export async function POST(request: Request) {
   );
   const hasTimeFilter =
     timeFilter.date !== undefined ||
+    timeFilter.rangeStart !== undefined ||
+    timeFilter.rangeEnd !== undefined ||
     timeFilter.beforeMinutes !== undefined ||
     timeFilter.afterMinutes !== undefined ||
     timeFilter.utcDateStart !== undefined ||
     timeFilter.utcDateEnd !== undefined;
 
-  const filteredGames = applyTimeFilter(selectedGames, timeFilter);
+  const onlineGames = selectedGames;
+  const offlineGames = applyTimeFilter(selectedGames, timeFilter);
 
-  const summary = summarizeGames(filteredGames);
-  const frameStats = summarizeFrames(filteredGames).filter((entry) =>
+  const summaryOnline = summarizeGames(onlineGames);
+  const frameStatsOnline = summarizeFrames(onlineGames).filter((entry) =>
+    selectedFrames.length > 0 ? selectedFrames.includes(entry.frame) : true
+  );
+  const summaryOffline = summarizeGames(offlineGames);
+  const frameStatsOffline = summarizeFrames(offlineGames).filter((entry) =>
     selectedFrames.length > 0 ? selectedFrames.includes(entry.frame) : true
   );
   const indexSource =
-    hasTimeFilter || selectedNumbers.length > 0 ? filteredGames : orderedGames;
+    selectedNames.length > 0 ? selectedGames : orderedGames;
   const index = indexSource.map((game) => ({
-    gameNumber: game.game_number,
     gameName: game.game_name,
     totalScore: game.total_score,
     playedAt: game.played_at,
@@ -1378,16 +1503,23 @@ export async function POST(request: Request) {
   const selection = {
     selectedGameNumbers: selectedNumbers,
     selectedGameNames: orderedGames
-      .filter((game) => selectedNumbers.includes(game.game_number))
+      .filter((game) =>
+        selectedNames.includes(game.game_name.toLowerCase())
+      )
       .map((game) => game.game_name),
     selectedFrameNumbers: selectedFrames,
     timeFilter,
     timezoneOffsetMinutes: payload.timezoneOffsetMinutes
   };
+  const selectionOnline = {
+    selectedGameNumbers: selectedNumbers,
+    selectedGameNames: selection.selectedGameNames,
+    selectedFrameNumbers: selectedFrames
+  };
 
-  const routed = classifyMethod(payload.question);
   const onlineErrors: string[] = [];
-  if (routed === "sql") {
+
+  const attemptSql = async () => {
     try {
       const sqlResult = await runSqlMethod(
         supabase,
@@ -1399,92 +1531,140 @@ export async function POST(request: Request) {
         payload.timezoneOffsetMinutes
       );
       if (sqlResult.ok && sqlResult.answer) {
-        const finalAnswer = ensureSentence(sqlResult.answer);
+        const finalAnswer = formatAnswer(sqlResult.answer, payload.question);
         void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
-        return NextResponse.json({
+        return {
           answer: finalAnswer,
-          scope
-        });
+          meta: buildAnswerMeta("sql", startedAt, showMethod, showTiming)
+        };
+      }
+      if (sqlResult.error) {
+        onlineErrors.push(sqlResult.error);
       }
     } catch (error) {
       onlineErrors.push(
         error instanceof Error ? error.message : "SQL mode failed."
       );
     }
-  }
-
-  const contextLimit = 15;
-  const contextGames = filteredGames.slice(0, contextLimit).map((game) => ({
-    gameNumber: game.game_number,
-    gameName: game.game_name,
-    playedAt: game.played_at,
-    totalScore: game.total_score,
-    frames: (game.frames || [])
-      .filter((frame) =>
-        selectedFrames.length > 0
-          ? selectedFrames.includes(frame.frame_number)
-          : true
-      )
-      .map((frame) => ({
-        frame: frame.frame_number,
-        shots: (frame.shots || []).map((shot) => shot.pins)
-      }))
-  }));
-
-  const contextPayload = {
-    truncated: filteredGames.length > contextLimit,
-    contextGames,
-    summary,
-    frameStats
+    return null;
   };
 
-  try {
-    // prompt for context-based answer
+  const attemptContext = async () => {
+    const contextLimit = 15;
+    const contextGames = onlineGames.slice(0, contextLimit).map((game) => ({
+      gameName: game.game_name,
+      playedAt: game.played_at,
+      totalScore: game.total_score,
+      frames: (game.frames || [])
+        .filter((frame) =>
+          selectedFrames.length > 0
+            ? selectedFrames.includes(frame.frame_number)
+            : true
+        )
+        .map((frame) => ({
+          frame: frame.frame_number,
+          shots: (frame.shots || []).map((shot) => shot.pins)
+        }))
+    }));
+
+    const contextPayload = {
+      truncated: onlineGames.length > contextLimit,
+      contextGames,
+      summary: summaryOnline,
+      frameStats: frameStatsOnline
+    };
+
+    try {
+      // prompt for context-based answer
     const contextPrompt = buildContextPrompt(
       payload.question,
       scope,
       contextPayload,
-      selection,
+      selectionOnline,
       payload.timezoneOffsetMinutes
     );
-    const contextAnswer = await callGemini(apiKey, model, contextPrompt);
-    const finalAnswer = ensureSentence(contextAnswer);
-    void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
-    return NextResponse.json({
-      answer: finalAnswer,
-      scope
-    });
-  } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : "Chat failed.";
-    onlineErrors.push(errorMessage);
-    const onlineError =
-      onlineErrors.length > 0 ? onlineErrors.join(" ") : errorMessage;
-    const selectionLabel = buildSelectionLabel(
-      selectedNumbers,
-      localTimeFilter
-    );
-    const shortcut = tryShortcut(
-      payload.question,
-      filteredGames,
-      summary,
-      frameStats,
-      selectedFrames,
-      hasTimeFilter,
-      selectionLabel
-    );
-    const offlineAnswer =
-      shortcut.handled && shortcut.answer
-        ? applyOfflineBold(ensureSentence(shortcut.answer))
-        : "Offline mode could not answer this question with basic stats.";
-    const finalOfflineAnswer = ensureSentence(offlineAnswer);
-    void logQuestionAnswer(supabase, normalizedQuestion, finalOfflineAnswer);
-    return NextResponse.json({
-      onlineError: summarizeOnlineError(onlineError),
-      offlineAnswer: finalOfflineAnswer,
-      offlineNote:
-        "This response was done offline so it can't handle complex questions and may be wrong.",
-      scope
-    });
+      const contextAnswer = await callGemini(apiKey, model, contextPrompt);
+      const finalAnswer = formatAnswer(contextAnswer, payload.question);
+      void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
+      return {
+        answer: finalAnswer,
+        meta: buildAnswerMeta("context", startedAt, showMethod, showTiming)
+      };
+    } catch (error) {
+      onlineErrors.push(
+        error instanceof Error ? error.message : "Context mode failed."
+      );
+      return null;
+    }
+  };
+
+  if (chatMode === "sql") {
+    const sqlAttempt = await attemptSql();
+    if (sqlAttempt) {
+      return NextResponse.json({
+        answer: sqlAttempt.answer,
+        meta: sqlAttempt.meta,
+        scope
+      });
+    }
+  } else if (chatMode === "context") {
+    const contextAttempt = await attemptContext();
+    if (contextAttempt) {
+      return NextResponse.json({
+        answer: contextAttempt.answer,
+        meta: contextAttempt.meta,
+        scope
+      });
+    }
+  } else {
+    const routed = classifyMethod(payload.question);
+    if (routed === "sql") {
+      const sqlAttempt = await attemptSql();
+      if (sqlAttempt) {
+        return NextResponse.json({
+          answer: sqlAttempt.answer,
+          meta: sqlAttempt.meta,
+          scope
+        });
+      }
+    }
+    const contextAttempt = await attemptContext();
+    if (contextAttempt) {
+      return NextResponse.json({
+        answer: contextAttempt.answer,
+        meta: contextAttempt.meta,
+        scope
+      });
+    }
   }
+
+  const onlineError =
+    onlineErrors.length > 0
+      ? onlineErrors.join(" ")
+      : "Chat failed.";
+  const debugError = process.env.CHAT_DEBUG === "true";
+  const selectionLabel = buildSelectionLabel(selectedNumbers, localTimeFilter);
+  const shortcut = tryShortcut(
+    payload.question,
+    offlineGames,
+    summaryOffline,
+    frameStatsOffline,
+    selectedFrames,
+    hasTimeFilter,
+    selectionLabel
+  );
+  const offlineAnswer =
+    shortcut.handled && shortcut.answer
+      ? applyOfflineBold(ensureSentence(shortcut.answer))
+      : "Offline mode could not answer this question with basic stats.";
+  const finalOfflineAnswer = formatOfflineAnswer(offlineAnswer);
+  void logQuestionAnswer(supabase, normalizedQuestion, finalOfflineAnswer);
+  return NextResponse.json({
+    onlineError: debugError ? onlineError : summarizeOnlineError(onlineError),
+    offlineAnswer: finalOfflineAnswer,
+    offlineMeta: buildAnswerMeta("offline", startedAt, showMethod, showTiming),
+    offlineNote:
+      "This response was done offline so it can't handle complex questions and may be wrong.",
+    scope
+  });
 }

@@ -416,6 +416,14 @@ button:hover:not(:disabled) {
   border-bottom-right-radius: 6px;
 }
 
+.message-meta {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(0, 0, 0, 0.45);
+  margin-bottom: 6px;
+}
+
 .message.group-end {
   margin-bottom: 8px;
 }
