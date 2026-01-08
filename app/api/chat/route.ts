@@ -243,8 +243,9 @@ function buildContextPrompt(
   // prompt for context-based answer
   // You are a bowling stats assistant. Use the JSON context to answer.
   // If the answer is not present, say so briefly.
-  // All timestamps are UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
+  // Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
   // If you mention times, convert them to the user's local time.
+  // local time + *timezone offset* = UTC.
   // Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
   // Answer with a direct response. Do not include "Answer:".
   // Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
@@ -263,8 +264,9 @@ function buildContextPrompt(
   // Answer:
   return `You are a bowling stats assistant. Use the JSON context to answer.
 If the answer is not present, say so briefly.
-All timestamps are UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
+Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 If you mention times, convert them to the user's local time.
+local time + ${timezoneOffsetMinutes ?? "unknown"} = UTC.
 Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
 Answer with a direct response. Do not include "Answer:".
 Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
@@ -298,7 +300,8 @@ function buildSqlPrompt(
   // - The game index already reflects any time filters; only use games listed below.
   // - The user's timezone offset (minutes from UTC) is *timezone offset*.
   // - Times mentioned in the question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
-  // - local time - *timezone offset* = UTC.
+  // - Times in Schema and Game Index are in UTC.
+  // - local time + *timezone offset* minutes = UTC.
   //
   // Schema:
   // *schema*
@@ -314,8 +317,9 @@ Return JSON only with this schema: {"sql": string|null, "explanation": string}.
 - If you cannot answer, set sql to null and explain.
 - The game index already reflects any time filters; only use games listed below.
 - The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
-- Times mentioned in the question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
-- local time - ${timezoneOffsetMinutes ?? "unknown"} = UTC.
+- Times mentioned in the user's question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
+- Times in Schema and Game Index are in UTC.
+- local time + ${timezoneOffsetMinutes ?? "unknown"} = UTC.
 
 Schema:
 ${schema}
@@ -1347,6 +1351,7 @@ export async function POST(request: Request) {
   const showMethod = process.env.CHAT_SHOW_METHOD === "true";
   const showTiming = process.env.CHAT_SHOW_TIMING === "true";
   const startedAt = Date.now();
+  const debug = process.env.CHAT_DEBUG === "true";
 
   if (!supabaseUrl || !supabaseServiceKey) {
     return NextResponse.json(
@@ -1576,14 +1581,20 @@ export async function POST(request: Request) {
 
     try {
       // prompt for context-based answer
-    const contextPrompt = buildContextPrompt(
-      payload.question,
-      scope,
-      contextPayload,
-      selectionOnline,
-      payload.timezoneOffsetMinutes
-    );
+      const contextPrompt = buildContextPrompt(
+        payload.question,
+        scope,
+        contextPayload,
+        selectionOnline,
+        payload.timezoneOffsetMinutes
+      );
+      if (debug) {
+        console.log("Context prompt:", contextPrompt);
+      }
       const contextAnswer = await callGemini(apiKey, model, contextPrompt);
+      if (debug) {
+        console.log("Context raw response:", contextAnswer);
+      }
       const finalAnswer = formatAnswer(contextAnswer, payload.question);
       void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
       return {
