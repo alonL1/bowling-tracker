@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
+const SQL_CONTEXT_FALLBACK_TOKEN = "__USE_CONTEXT__";
+
 type Shot = {
   shot_number: number;
   pins: number | null;
@@ -41,6 +43,7 @@ type ChatMethod = "shortcut" | "sql" | "context";
 
 type SqlResult = {
   ok: boolean;
+  fallback?: boolean;
   empty?: boolean;
   answer?: string;
   error?: string;
@@ -185,8 +188,10 @@ function buildPrompt(
   frameStats: unknown
 ) {
   // prompt for summary-based answer
-  // You are a bowling stats assistant. Answer the question using only the JSON data below.
+  // You are a bowling stats assistant that is familiar with bowling terminology. Answer the question using only the JSON data below.
+  // You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
   // If the data does not include the answer, say so briefly.
+  // When listing multiple items, format them as a bulleted or numbered list (one item per line).
   // Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
   // Answer with a direct response. Do not include "Answer:".
   // Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
@@ -208,12 +213,14 @@ function buildPrompt(
   //
   // Question: *question*
   // Answer:
-  return `You are a bowling stats assistant. Answer the question using only the JSON data below.
+  return `You are a bowling stats assistant that is familiar with bowling terminology. Answer the question using only the JSON data below.
+You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
 If the data does not include the answer, say so briefly.
+When listing multiple items, format them as a bulleted or numbered list (one item per line).
 Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
 Answer with a direct response. Do not include "Answer:".
 Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
-should be answered similarly to "Your average score across across games x to y is n.".
+should be answered similarly to "Your average score across across games x to y is n."
 If a response is null, instead of using the word "null" use language such as "You have no games x to y"
 
 Scope: ${scope}
@@ -241,11 +248,14 @@ function buildContextPrompt(
   timezoneOffsetMinutes?: number
 ) {
   // prompt for context-based answer
-  // You are a bowling stats assistant. Use the JSON context to answer.
+  // You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
+  // You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
   // If the answer is not present, say so briefly.
   // Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
   // If you mention times, convert them to the user's local time.
   // local time + *timezone offset* = UTC.
+  // Understand common bowling lingo.
+  // When listing multiple items, format them as a bulleted or numbered list (one item per line).
   // Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
   // Answer with a direct response. Do not include "Answer:".
   // Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
@@ -262,11 +272,13 @@ function buildContextPrompt(
   //
   // Question: *question*
   // Answer:
-  return `You are a bowling stats assistant. Use the JSON context to answer.
+  return `You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
+You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
 If the answer is not present, say so briefly.
 Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 If you mention times, convert them to the user's local time.
 local time + ${timezoneOffsetMinutes ?? "unknown"} = UTC.
+When listing multiple items, format them as a bulleted or numbered list (one item per line).
 Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
 Answer with a direct response. Do not include "Answer:".
 Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
@@ -291,12 +303,15 @@ function buildSqlPrompt(
   schema: string,
   timezoneOffsetMinutes?: number
 ) {
+
   // prompt for SQL generation
-  // You are writing a single SQL SELECT query to answer a bowling stats question.
+  // You are a bowling stats assistant that is familiar with bowling terminology.
+  // You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries to sql queries.
+  // Your task is to write a single SQL SELECT query to answer a bowling stats question.
   // Return JSON only with this schema: {"sql": string|null, "explanation": string}.
   // - Only SELECT statements.
   // - Use table and column names exactly as defined.
-  // - If you cannot answer, set sql to null and explain.
+  // - If you cannot answer with SQL, set sql to "__USE_CONTEXT__" and explain.
   // - The game index already reflects any time filters; only use games listed below.
   // - The user's timezone offset (minutes from UTC) is *timezone offset*.
   // - Times mentioned in the question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
@@ -310,11 +325,14 @@ function buildSqlPrompt(
   // *game index*
   //
   // Question: *question*
-  return `You are writing a single SQL SELECT query to answer a bowling stats question.
+  // JSON Output:
+  return `You are a bowling stats assistant that is familiar with bowling terminology.
+You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries to sql queries.
+Your task is to write a single SQL SELECT query to answer a bowling stats question.
 Return JSON only with this schema: {"sql": string|null, "explanation": string}.
 - Only SELECT statements.
 - Use table and column names exactly as defined.
-- If you cannot answer, set sql to null and explain.
+- If you cannot answer with SQL, set sql to "__USE_CONTEXT__" and explain.
 - The game index already reflects any time filters; only use games listed below.
 - The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 - Times mentioned in the user's question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
@@ -327,7 +345,8 @@ ${schema}
 Game Index:
 ${JSON.stringify(index, null, 2)}
 
-Question: ${question}`;
+Question: ${question}
+JSON Output:`;
 }
 
 function buildSqlAnswerPrompt(
@@ -336,10 +355,15 @@ function buildSqlAnswerPrompt(
   results: unknown,
   timezoneOffsetMinutes?: number
 ) {
+
   // prompt for SQL answer generation
-  // You are a bowling stats assistant. Use the SQL and results JSON to answer.
+  // You are a bowling stats assistant that is familiar with bowling terminology. Use the SQL and results JSON to answer.
+  // You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
   // All timestamps in the results are UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
   // If you mention times, convert them to the user's local time.
+  // UTC - *timezone offset* minutes = local time.
+  // Understand common bowling lingo.
+  // When listing multiple items, format them as a bulleted or numbered list (one item per line).
   // Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
   // Answer with a direct response. Do not include "Answer:".
   // Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
@@ -354,9 +378,12 @@ function buildSqlAnswerPrompt(
   //
   // Question: *question*
   // Answer:
-  return `You are a bowling stats assistant. Use the SQL and results JSON to answer.
+  return `You are a bowling stats assistant that is familiar with bowling terminology. Use the SQL and results JSON to answer.
+You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
 All timestamps in the results are UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 If you mention times, convert them to the user's local time.
+UTC - ${timezoneOffsetMinutes ?? "unknown"} minutes = local time.
+When listing multiple items, format them as a bulleted or numbered list (one item per line).
 Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
 Answer with a direct response. Do not include "Answer:".
 Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
@@ -432,10 +459,7 @@ function sanitizeAnswer(raw: string, question: string) {
   const normalizedQuestion = question.trim().toLowerCase();
   let text = raw.trim();
   text = text.replace(/^answer:\s*/i, "").replace(/^question:\s*/i, "");
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines = text.split(/\r?\n/);
   if (lines.length > 0 && lines[0].toLowerCase() === normalizedQuestion) {
     lines.shift();
   } else if (lines.length > 0 && normalizedQuestion.length > 0) {
@@ -450,7 +474,10 @@ function sanitizeAnswer(raw: string, question: string) {
       }
     }
   }
-  text = lines.join(" ").replace(/\s+/g, " ").trim();
+  text = lines
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
   return text;
 }
 
@@ -877,6 +904,7 @@ function applyTimeFilter(games: OrderedGame[], filter: TimeFilter) {
   });
 }
 
+// Legacy routing retained for reference (currently unused).
 function classifyMethod(question: string): ChatMethod {
   const lower = question.toLowerCase();
   const contextKeywords = [
@@ -1293,6 +1321,16 @@ shots(id uuid, frame_id uuid, shot_number int, pins int)`;
     return { ok: false, error: "SQL generation failed." };
   }
 
+  if (
+    typeof sqlPayload.sql === "string" &&
+    sqlPayload.sql.trim() === SQL_CONTEXT_FALLBACK_TOKEN
+  ) {
+    if (debug) {
+      console.log("SQL requested context fallback.");
+    }
+    return { ok: false, fallback: true };
+  }
+
   const validated = validateSql(sqlPayload.sql);
   if (!validated.ok || !validated.sql) {
     if (debug) {
@@ -1315,12 +1353,10 @@ shots(id uuid, frame_id uuid, shot_number int, pins int)`;
     return { ok: false, error: error.message || "SQL execution failed." };
   }
 
-  const rows = typeof data === "string" ? safeParseJson(data) : data;
+  const parsedRows = typeof data === "string" ? safeParseJson(data) : data;
+  const rows = Array.isArray(parsedRows) ? parsedRows : [];
   if (debug) {
     console.log("SQL result rows:", rows);
-  }
-  if (!rows || (Array.isArray(rows) && rows.length === 0)) {
-    return { ok: false, empty: true, error: "No SQL results." };
   }
 
   // prompt for SQL answer generation
@@ -1543,6 +1579,9 @@ export async function POST(request: Request) {
           meta: buildAnswerMeta("sql", startedAt, showMethod, showTiming)
         };
       }
+      if (sqlResult.fallback) {
+        return null;
+      }
       if (sqlResult.error) {
         onlineErrors.push(sqlResult.error);
       }
@@ -1628,16 +1667,13 @@ export async function POST(request: Request) {
       });
     }
   } else {
-    const routed = classifyMethod(payload.question);
-    if (routed === "sql") {
-      const sqlAttempt = await attemptSql();
-      if (sqlAttempt) {
-        return NextResponse.json({
-          answer: sqlAttempt.answer,
-          meta: sqlAttempt.meta,
-          scope
-        });
-      }
+    const sqlAttempt = await attemptSql();
+    if (sqlAttempt) {
+      return NextResponse.json({
+        answer: sqlAttempt.answer,
+        meta: sqlAttempt.meta,
+        scope
+      });
     }
     const contextAttempt = await attemptContext();
     if (contextAttempt) {

@@ -124,8 +124,53 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
     }
   };
 
+  const formatDatesInText = (text: string) => {
+    const dateTimeRegex =
+      /\b(\d{4}-\d{2}-\d{2})(?:\s+at\s+|\s+|T)(\d{2}:\d{2})(?::\d{2})?(?:\.\d+)?(Z|[+-]\d{2}:\d{2})?\b/g;
+    const dateOnlyRegex = /\b(\d{4}-\d{2}-\d{2})\b(?![T\s]\d{2}:\d{2})/g;
+    const timeOnlyRegex = /\b([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))\b/g;
+    const dateFormatter = new Intl.DateTimeFormat("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric"
+    });
+    const timeFormatter = new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true
+    });
+
+    const withDateTimes = text.replace(
+      dateTimeRegex,
+      (match, datePart, timePart, tzPart) => {
+        const iso = `${datePart}T${timePart}${tzPart || ""}`;
+        const parsed = new Date(iso);
+        if (Number.isNaN(parsed.getTime())) {
+          return match;
+        }
+        return `${dateFormatter.format(parsed)} ${timeFormatter.format(parsed)}`;
+      }
+    );
+
+    const withDates = withDateTimes.replace(dateOnlyRegex, (match, datePart) => {
+      const parsed = new Date(`${datePart}T00:00:00`);
+      if (Number.isNaN(parsed.getTime())) {
+        return match;
+      }
+      return dateFormatter.format(parsed);
+    });
+    return withDates.replace(timeOnlyRegex, (match, hour, minute, second) => {
+      const iso = `1970-01-01T${hour}:${minute}:${second || "00"}`;
+      const parsed = new Date(iso);
+      if (Number.isNaN(parsed.getTime())) {
+        return match;
+      }
+      return timeFormatter.format(parsed);
+    });
+  };
+
   const renderInlineBold = (text: string) => {
-    const lines = text.split("\n");
+    const lines = formatDatesInText(text).split("\n");
     const nodes: JSX.Element[] = [];
     let listBuffer: JSX.Element[] = [];
 
@@ -197,13 +242,20 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
           <div className="examples">
             <p className="helper">Examples:</p>
             <ul>
-              <li>What is my average score across games 1 to 3?</li>
-              <li>How often do I strike on frame 9?</li>
-              <li>List games with my highest score between Jan 7th and March 3rd?</li>
-              <li>What is my average on games played after 7pm?</li>
-              <li>How often do I strike or spare?</li>
-              <li>List all of the games where I scored above 130</li>
-              <li>On which frames do I strike most often?</li>
+              <li>What is my <b>average score</b> across <b>games 1 to 3</b>?</li>
+              <li>How often do I <b>strike</b> on <b>frame 9</b>?</li>
+              <li>List games with my <b>highest score</b> between <b>Jan 7th</b> and <b>March 3rd</b>?</li>
+              <li>What is my <b>average</b> on games played <b>after 7pm</b>?</li>
+              <li>How often do I <b>strike</b> or <b>spare</b>?</li>
+              <li>List all of the games where I <b>scored above 130</b>?</li>
+              <li>What <b>percent</b> of the time do I bowl a <b>7</b> in a frame?</li>
+              <li>Of the times that I bowl a <b>7</b> how often do I <b>convert the spare</b>?</li>
+              <li>On average, what are my <b>top 3</b> best <b>frames</b>?</li>
+              <li>On which <b>frames</b> do I <b>strike most often</b>?</li>
+              <li>How often do I <b>10 pin spare</b>?</li>
+              <li>Whats my <b>average</b> since the <b>new pope</b> was elected?</li>
+              <li>Am I <b>better after 5pm</b> or <b>before</b>?</li>
+              <li>Try anything you want! Feel free to get <b>creative</b> with it!</li>
             </ul>
           </div>
         ) : null}
@@ -238,6 +290,12 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
           placeholder="Ask: What's my strike rate on frame 9?"
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
           rows={3}
         />
         <button type="submit" disabled={chatStatus === "loading"}>
