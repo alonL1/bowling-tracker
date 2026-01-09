@@ -352,9 +352,9 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
-      <section className="panel">
+      <section className="panel anchor-section" id="submit">
         <div className="panel-header">
-          <h2>Submit a game</h2>
+          <h2>Log a game</h2>
           <p className="helper">
             Upload a scoreboard image, then wait for the worker to finish.
           </p>
@@ -377,7 +377,7 @@ export default function Dashboard() {
       </section>
 
       {showReview && gameData ? (
-        <section className="panel">
+        <section className="panel anchor-section" id="review">
           <div className="panel-header">
             <h2>{reviewMode === "edit" ? "Edit game" : "Review extracted frames"}</h2>
             <p className="helper">
@@ -395,7 +395,7 @@ export default function Dashboard() {
         </section>
       ) : null}
 
-      <section className="panel">
+      <section className="panel anchor-section" id="games">
         <div className="panel-header">
           <h2>Your games</h2>
           <p className="helper">
@@ -419,7 +419,7 @@ export default function Dashboard() {
               return (
                 <div key={game.id} className="game-card">
                   <div className="game-row">
-                    <div>
+                    <div className="game-meta">
                       <p className="game-title">{gameTitle}</p>
                       <p className="helper">
                         {game.player_name ? `${game.player_name} · ` : ""}
@@ -434,8 +434,32 @@ export default function Dashboard() {
                         type="button"
                         className="edit-toggle"
                         onClick={() => handleEdit(game.id)}
+                        aria-label={`Edit ${gameTitle}`}
+                        title={`Edit ${gameTitle}`}
                       >
-                        Edit
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                        >
+                          <path
+                            d="M4 20h4l11-11-4-4L4 16v4z"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M13 7l4 4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
                       </button>
                       <button
                         type="button"
@@ -471,8 +495,24 @@ export default function Dashboard() {
                         onClick={() => toggleExpand(game.id)}
                         aria-expanded={expanded}
                         aria-controls={`game-score-${game.id}`}
+                        aria-label={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
+                        title={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
                       >
-                        {expanded ? "v" : ">"}
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 24 24"
+                          width="16"
+                          height="16"
+                        >
+                          <path
+                            d="M9 6l6 6-6 6"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
                       </button>
                     </div>
                   </div>
@@ -527,7 +567,7 @@ export default function Dashboard() {
         {gameError ? <p className="helper error-text">{gameError}</p> : null}
       </section>
 
-      <section className="panel">
+      <section className="panel anchor-section" id="chat">
         <ChatPanel gameLabel={activeGameLabel} />
       </section>
     </div>

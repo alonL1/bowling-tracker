@@ -1,3 +1,7 @@
+html {
+  scroll-behavior: smooth;
+}
+
 :root {
   --bg-start: #f9f2e8;
   --bg-end: #eef5ff;
@@ -42,6 +46,74 @@ a {
   display: flex;
   flex-direction: column;
   gap: 32px;
+}
+
+.top-nav {
+  position: sticky;
+  top: 16px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 12px 30px rgba(22, 18, 14, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.nav-brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.nav-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 14px;
+  width: 100%;
+  justify-content: space-evenly;
+}
+
+.nav-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: var(--muted);
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.nav-link:hover {
+  border-color: rgba(15, 107, 95, 0.2);
+  color: var(--accent);
+  background: rgba(15, 107, 95, 0.08);
+}
+
+.nav-label {
+  display: none;
+}
+
+.anchor-section {
+  scroll-margin-top: 110px;
+}
+
+@media (min-width: 720px) {
+  .nav-label {
+    display: inline;
+  }
 }
 
 .hero {
@@ -302,8 +374,14 @@ button:hover:not(:disabled) {
 
 .game-row {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.game-meta {
+  flex: 1;
+  min-width: 0;
 }
 
 .game-title {
@@ -311,31 +389,47 @@ button:hover:not(:disabled) {
 }
 
 .expand-toggle {
-  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 36px;
   height: 36px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: white;
-  font-weight: 700;
   color: var(--muted);
   box-shadow: none;
+  padding: 0;
+}
+
+.expand-toggle svg {
+  transition: transform 0.2s ease;
+}
+
+.expand-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
 }
 
 .game-actions-inline {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .edit-toggle {
-  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 107, 95, 0.25);
   background: rgba(15, 107, 95, 0.08);
   color: var(--accent);
-  padding: 8px 12px;
-  border-radius: 999px;
-  font-size: 13px;
   box-shadow: none;
+  padding: 0;
 }
 
 .delete-toggle {
