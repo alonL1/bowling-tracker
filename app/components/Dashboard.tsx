@@ -22,7 +22,6 @@ type GameDetail = {
   total_score: number | null;
   played_at?: string | null;
   status: string;
-  extraction_confidence?: number | null;
   frames?: Array<{
     id: string;
     frame_number: number;
@@ -32,7 +31,6 @@ type GameDetail = {
       id: string;
       shot_number: number;
       pins: number | null;
-      confidence?: number | null;
     }>;
   }>;
 };
@@ -111,15 +109,14 @@ export default function Dashboard() {
   const [jobStatus, setJobStatus] = useState<JobStatus | "">("");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [jobError, setJobError] = useState<string>("");
-  const [gameData, setGameData] = useState<GameDetail | null>(null);
   const [gameError, setGameError] = useState<string>("");
   const [games, setGames] = useState<GameListItem[]>([]);
-  const [showReview, setShowReview] = useState<boolean>(false);
-  const [reviewMode, setReviewMode] = useState<"review" | "edit">("review");
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [expandedGames, setExpandedGames] = useState<Record<string, GameDetail>>(
     {}
   );
+  const [editingGameId, setEditingGameId] = useState<string | null>(null);
+  const [editingMode, setEditingMode] = useState<"review" | "edit">("edit");
   const [chatGameId, setChatGameId] = useState<string | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
   const pollCountRef = useRef(0);
@@ -172,9 +169,13 @@ export default function Dashboard() {
         throw new Error(payload.error || "Failed to load game.");
       }
       const payload = (await response.json()) as { game: GameDetail };
-      setGameData(payload.game);
-      setShowReview(true);
-      setReviewMode("review");
+      setExpandedGames((current) => ({
+        ...current,
+        [payload.game.id]: payload.game
+      }));
+      setExpandedGameId(payload.game.id);
+      setEditingGameId(payload.game.id);
+      setEditingMode("review");
       setChatGameId(payload.game.id);
     } catch (error) {
       setGameError(
@@ -268,20 +269,22 @@ export default function Dashboard() {
     setJobStatus("queued");
     setStatusMessage(message);
     setJobError("");
-    setGameData(null);
-    setShowReview(false);
-    setReviewMode("review");
+    setEditingGameId(null);
+    setEditingMode("edit");
   };
 
-  const handleConfirm = async () => {
-    setShowReview(false);
-    setReviewMode("review");
+  const handleConfirm = async (gameId: string) => {
+    setEditingGameId(null);
+    setEditingMode("edit");
+    setExpandedGameId(null);
+    await loadGame(gameId);
     await loadGames();
   };
 
   const handleCancelEdit = () => {
-    setShowReview(false);
-    setReviewMode("review");
+    setEditingGameId(null);
+    setEditingMode("edit");
+    setExpandedGameId(null);
   };
 
   const handleDelete = async (gameId: string) => {
@@ -316,10 +319,9 @@ export default function Dashboard() {
       if (expandedGameId === gameId) {
         setExpandedGameId(null);
       }
-      if (gameData?.id === gameId) {
-        setShowReview(false);
-        setReviewMode("review");
-        setGameData(null);
+      if (editingGameId === gameId) {
+        setEditingGameId(null);
+        setEditingMode("edit");
       }
       await loadGames();
     } catch (error) {
@@ -332,11 +334,11 @@ export default function Dashboard() {
   };
 
   const handleEdit = async (gameId: string) => {
-    const detail = await loadGame(gameId);
+    setExpandedGameId(gameId);
+    const detail = expandedGames[gameId] ?? (await loadGame(gameId));
     if (detail) {
-      setGameData(detail);
-      setShowReview(true);
-      setReviewMode("edit");
+      setEditingGameId(gameId);
+      setEditingMode("edit");
     }
   };
 
@@ -345,6 +347,10 @@ export default function Dashboard() {
     setExpandedGameId(nextId);
     if (nextId && !expandedGames[nextId]) {
       await loadGame(nextId);
+    }
+    if (nextId !== gameId || nextId === null) {
+      setEditingGameId(null);
+      setEditingMode("edit");
     }
   };
 
@@ -375,25 +381,6 @@ export default function Dashboard() {
         ) : null}
         {jobError ? <p className="helper error-text">{jobError}</p> : null}
       </section>
-
-      {showReview && gameData ? (
-        <section className="panel anchor-section" id="review">
-          <div className="panel-header">
-            <h2>{reviewMode === "edit" ? "Edit game" : "Review extracted frames"}</h2>
-            <p className="helper">
-              {reviewMode === "edit"
-                ? "Update the game details and confirm your changes."
-                : "Confirm the extracted scores before they become your stats."}
-            </p>
-          </div>
-          <GameReview
-            game={gameData}
-            mode={reviewMode}
-            onConfirmed={handleConfirm}
-            onCancel={reviewMode === "edit" ? handleCancelEdit : undefined}
-          />
-        </section>
-      ) : null}
 
       <section className="panel anchor-section" id="games">
         <div className="panel-header">
@@ -519,38 +506,47 @@ export default function Dashboard() {
                   {expanded ? (
                     <div className="game-score" id={`game-score-${game.id}`}>
                       {detail && rows ? (
-                        <div className="score-grid">
-                          <div className="score-row score-header">
-                            {Array.from({ length: 10 }, (_, index) => (
-                              <div key={`h-${game.id}-${index}`} className="score-cell">
-                                {index + 1}
-                              </div>
-                            ))}
-                          </div>
-                          <div className="score-row">
-                            {rows.row1.map((cell, index) => (
-                              <div key={`r1-${game.id}-${index}`} className="score-cell">
-                                {cell}
-                              </div>
-                            ))}
-                          </div>
-                          <div className="score-row">
-                            {rows.row2.map((cell, index) => (
-                              <div key={`r2-${game.id}-${index}`} className="score-cell">
-                                {cell}
-                              </div>
-                            ))}
-                          </div>
-                          {rows.showRow3 ? (
+                        editingGameId === game.id ? (
+                          <GameReview
+                            game={detail}
+                            mode={editingMode}
+                            onConfirmed={() => handleConfirm(game.id)}
+                            onCancel={handleCancelEdit}
+                          />
+                        ) : (
+                          <div className="score-grid">
+                            <div className="score-row score-header">
+                              {Array.from({ length: 10 }, (_, index) => (
+                                <div key={`h-${game.id}-${index}`} className="score-cell">
+                                  {index + 1}
+                                </div>
+                              ))}
+                            </div>
                             <div className="score-row">
-                              {rows.row3.map((cell, index) => (
-                                <div key={`r3-${game.id}-${index}`} className="score-cell">
+                              {rows.row1.map((cell, index) => (
+                                <div key={`r1-${game.id}-${index}`} className="score-cell">
                                   {cell}
                                 </div>
                               ))}
                             </div>
-                          ) : null}
-                        </div>
+                            <div className="score-row">
+                              {rows.row2.map((cell, index) => (
+                                <div key={`r2-${game.id}-${index}`} className="score-cell">
+                                  {cell}
+                                </div>
+                              ))}
+                            </div>
+                            {rows.showRow3 ? (
+                              <div className="score-row">
+                                {rows.row3.map((cell, index) => (
+                                  <div key={`r3-${game.id}-${index}`} className="score-cell">
+                                    {cell}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
                       ) : (
                         <div className="loading-row">
                           <span className="spinner spinner-muted" aria-hidden="true" />

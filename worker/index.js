@@ -48,25 +48,44 @@ function buildPrompt(playerName) {
   // {
   //   "playerName": string,
   //   "totalScore": number | null,
-  //   "confidence": number,
   //   "frames": [
-  //     { "frame": number, "shots": [number|null, number|null, number|null], "confidence": number }
+  //     { "frame": number, "shots": [number|null, number|null, number|null] }
   //   ]
   // }
   // Rules:
   // - Frames 1-9 have up to 2 shots; frame 10 can have up to 3.
+  // - If a shot is unclear, keep a short list of likely candidates, then use totalScore math (bowling scoring) to resolve.
+  // - Use the per-frame score column if visible to validate shots (e.g., frame shows 18 so shots are likely 9 and 9).
   // - Use null for any unreadable shot.
-  // - Confidence values should be between 0 and 1.
-  return `You are analyzing a bowling scoreboard photo.
-Focus only on the row for the player named "${playerName}".
-Return strict JSON with this schema and no extra text:
+  return `// SYSTEM INSTRUCTIONS
+You are a precision OCR agent specializing in sports data.
+Your goal is to extract bowling frame data for the player "${playerName}" with 100% mathematical accuracy.
+
+// CONTEXT & SCHEMA
+<schema>
 {
   "playerName": string,
-  "totalScore": number | null,
-  "confidence": number,
+  "totalScore": number,
   "frames": [
-    { "frame": number, "shots": [number|null, number|null, number|null], "confidence": number }
+    { "frame": number, "shots": [number|null, number|null, number|null] }
   ]
+}
+</schema>
+
+// EXTRACTION RULES
+<rules>
+1. FOCUS: Only extract data for the row belonging to "${playerName}".
+2. SYMBOLS: Convert "/" to the number of pins needed for a spare, "X" to 10, and "-" or "G" to 0.
+3. MATH VALIDATION: Use the "Cumulative Score" or "Total Score" columns as ground truth.
+   - Before outputting, calculate the sum of the frames using standard bowling rules.
+   - If your calculated total does not match the board's total, re-read the individual shots.
+4. FRAME 10: Ensure you capture all 3 potential shots.
+</rules>
+
+// TASK
+Analyze the image. Perform a internal "Chain of Thought" math check.
+Return ONLY the JSON object. Do not include conversational text or markdown code blocks.
+`;
 }
 
 function resolveThinkingConfig(mode) {
@@ -94,11 +113,6 @@ function resolveThinkingConfig(mode) {
     return { thinkingBudget: parsed };
   }
   return null;
-}
-Rules:
-- Frames 1-9 have up to 2 shots; frame 10 can have up to 3.
-- Use null for any unreadable shot.
-- Confidence values should be between 0 and 1.`;
 }
 
 async function setJobError(supabase, jobId, gameId, message) {
@@ -213,7 +227,6 @@ async function processJob() {
 
   const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
   const totalScore = toNullableNumber(extraction?.totalScore);
-  const confidence = toNullableNumber(extraction?.confidence);
 
   await supabase.from("frames").delete().eq("game_id", game.id);
 
@@ -256,13 +269,11 @@ async function processJob() {
       continue;
     }
     const shots = Array.isArray(frame.shots) ? frame.shots : [];
-    const frameConfidence = toNullableNumber(frame.confidence);
     shots.forEach((shot, index) => {
       shotRows.push({
         frame_id: frameId,
         shot_number: index + 1,
-        pins: toNullableNumber(shot),
-        confidence: frameConfidence
+        pins: toNullableNumber(shot)
       });
     });
   }
@@ -281,7 +292,6 @@ async function processJob() {
     .update({
       total_score: totalScore,
       raw_extraction: extraction,
-      extraction_confidence: confidence,
       status: "ready"
     })
     .eq("id", game.id);

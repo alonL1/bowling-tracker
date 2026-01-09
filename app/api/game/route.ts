@@ -27,6 +27,107 @@ function computeSpare(shot1: number | null, shot2: number | null) {
   return shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10;
 }
 
+function getShotPins(frame: FrameUpdate, shotNumber: number) {
+  return frame.shots.find((shot) => shot.shotNumber === shotNumber)?.pins ?? null;
+}
+
+function computeTotalScore(frames: FrameUpdate[]) {
+  const frameMap = new Map<number, FrameUpdate>();
+  for (const frame of frames) {
+    frameMap.set(frame.frameNumber, frame);
+  }
+
+  const orderedFrames = Array.from({ length: 10 }, (_, index) =>
+    frameMap.get(index + 1)
+  );
+  if (orderedFrames.some((frame) => !frame)) {
+    return null;
+  }
+
+  const rolls: Array<number | null> = [];
+  const frameRollIndex: number[] = [];
+
+  orderedFrames.forEach((frame, index) => {
+    if (!frame) {
+      return;
+    }
+    frameRollIndex[index] = rolls.length;
+    const shot1 = getShotPins(frame, 1);
+    const shot2 = getShotPins(frame, 2);
+    const shot3 = getShotPins(frame, 3);
+
+    rolls.push(shot1);
+    if (frame.frameNumber < 10) {
+      if (shot1 !== 10) {
+        rolls.push(shot2);
+      }
+    } else {
+      rolls.push(shot2);
+      if (shot3 !== null && shot3 !== undefined) {
+        rolls.push(shot3);
+      }
+    }
+  });
+
+  let total = 0;
+
+  for (let frameIndex = 0; frameIndex < 9; frameIndex += 1) {
+    const rollIndex = frameRollIndex[frameIndex];
+    const shot1 = rolls[rollIndex];
+    if (shot1 === null || shot1 === undefined) {
+      return null;
+    }
+
+    if (shot1 === 10) {
+      const bonus1 = rolls[rollIndex + 1];
+      const bonus2 = rolls[rollIndex + 2];
+      if (
+        bonus1 === null ||
+        bonus1 === undefined ||
+        bonus2 === null ||
+        bonus2 === undefined
+      ) {
+        return null;
+      }
+      total += 10 + bonus1 + bonus2;
+    } else {
+      const shot2 = rolls[rollIndex + 1];
+      if (shot2 === null || shot2 === undefined) {
+        return null;
+      }
+      if (shot1 + shot2 === 10) {
+        const bonus = rolls[rollIndex + 2];
+        if (bonus === null || bonus === undefined) {
+          return null;
+        }
+        total += 10 + bonus;
+      } else {
+        total += shot1 + shot2;
+      }
+    }
+  }
+
+  const tenth = orderedFrames[9];
+  if (!tenth) {
+    return null;
+  }
+  const tenthShot1 = getShotPins(tenth, 1);
+  const tenthShot2 = getShotPins(tenth, 2);
+  if (tenthShot1 === null || tenthShot2 === null) {
+    return null;
+  }
+  total += tenthShot1 + tenthShot2;
+  if (tenthShot1 === 10 || tenthShot1 + tenthShot2 === 10) {
+    const tenthShot3 = getShotPins(tenth, 3);
+    if (tenthShot3 === null || tenthShot3 === undefined) {
+      return null;
+    }
+    total += tenthShot3;
+  }
+
+  return total;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get("jobId");
@@ -74,7 +175,7 @@ export async function GET(request: Request) {
   const { data: game, error: gameError } = await supabase
     .from("games")
     .select(
-      "id,game_name,player_name,total_score,status,played_at,extraction_confidence,created_at,frames:frames(id,frame_number,is_strike,is_spare,frame_score,shots:shots(id,shot_number,pins,confidence))"
+      "id,game_name,player_name,total_score,status,played_at,created_at,frames:frames(id,frame_number,is_strike,is_spare,frame_score,shots:shots(id,shot_number,pins))"
     )
     .eq("id", gameId)
     .single();
@@ -102,7 +203,6 @@ export async function PATCH(request: Request) {
 
   const payload = (await request.json()) as {
     gameId?: string;
-    totalScore?: number | null;
     playedAt?: string | null;
     frames?: FrameUpdate[];
   };
@@ -183,9 +283,6 @@ export async function PATCH(request: Request) {
     status?: string;
     played_at?: string;
   } = {};
-  if (payload.totalScore !== undefined) {
-    updates.total_score = payload.totalScore;
-  }
   if (payload.playedAt) {
     const parsed = new Date(payload.playedAt);
     if (Number.isNaN(parsed.getTime())) {
@@ -196,6 +293,7 @@ export async function PATCH(request: Request) {
     }
     updates.played_at = parsed.toISOString();
   }
+  updates.total_score = computeTotalScore(payload.frames);
   updates.status = "reviewed";
 
   const { error: gameError } = await supabase

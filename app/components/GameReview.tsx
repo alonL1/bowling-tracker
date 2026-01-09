@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
 type Shot = {
   id?: string;
   shot_number: number;
   pins: number | null;
-  confidence?: number | null;
 };
 
 type Frame = {
@@ -23,7 +22,6 @@ type Game = {
   total_score: number | null;
   played_at?: string | null;
   status: string;
-  extraction_confidence?: number | null;
   frames?: Frame[];
 };
 
@@ -40,6 +38,11 @@ type FrameDraft = {
   shots: Shot[];
 };
 
+type ActiveCell = {
+  frameIndex: number;
+  shotNumber: number;
+};
+
 function normalizeFrames(frames: Frame[]) {
   return frames
     .slice()
@@ -52,8 +55,7 @@ function normalizeFrames(frames: Frame[]) {
         return {
           id: existing?.id,
           shot_number: shotNumber,
-          pins: existing?.pins ?? null,
-          confidence: existing?.confidence ?? null
+          pins: existing?.pins ?? null
         };
       });
       return {
@@ -62,6 +64,19 @@ function normalizeFrames(frames: Frame[]) {
         shots
       };
     });
+}
+
+function toSymbol(pins: number | null) {
+  if (pins === null || pins === undefined) {
+    return "";
+  }
+  if (pins === 10) {
+    return "X";
+  }
+  if (pins === 0) {
+    return "-";
+  }
+  return String(pins);
 }
 
 function toLocalInputValue(value?: string | null) {
@@ -88,12 +103,11 @@ export default function GameReview({
     [game.frames]
   );
   const [frames, setFrames] = useState<FrameDraft[]>(initialFrames);
-  const [totalScore, setTotalScore] = useState<string>(
-    game.total_score?.toString() ?? ""
-  );
   const [playedAt, setPlayedAt] = useState<string>(
     toLocalInputValue(game.played_at)
   );
+  const [hasChanges, setHasChanges] = useState<boolean>(false);
+  const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
   const [saveStatus, setSaveStatus] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
@@ -101,17 +115,22 @@ export default function GameReview({
 
   useEffect(() => {
     setFrames(initialFrames);
-    setTotalScore(game.total_score?.toString() ?? "");
     setPlayedAt(toLocalInputValue(game.played_at));
     setSaveStatus("idle");
     setSaveMessage("");
+    setActiveCell(null);
+    setHasChanges(false);
   }, [game.id, game.total_score, game.played_at, initialFrames]);
 
-  const extractionConfidence =
-    game.extraction_confidence !== null && game.extraction_confidence !== undefined
-      ? `${Math.round(game.extraction_confidence * 100)}%`
-      : "n/a";
-  const showCancel = mode === "edit" && !!onCancel;
+  useEffect(() => {
+    const initialPlayedAt = toLocalInputValue(game.played_at);
+    const playedAtChanged = playedAt !== initialPlayedAt;
+    const framesChanged =
+      JSON.stringify(frames) !== JSON.stringify(initialFrames);
+    setHasChanges(playedAtChanged || framesChanged);
+  }, [frames, playedAt, initialFrames, game.played_at]);
+
+  const showCancel = !!onCancel;
 
   const handleShotChange = (
     frameIndex: number,
@@ -129,17 +148,72 @@ export default function GameReview({
     });
   };
 
+  const handleCellChange = (frameIndex: number, shotNumber: number, value: string) => {
+    handleShotChange(frameIndex, shotNumber - 1, value);
+  };
+
+  const getShotValue = (frame: FrameDraft, shotNumber: number) => {
+    return frame.shots[shotNumber - 1]?.pins ?? null;
+  };
+
+  const isEditableCell = (frame: FrameDraft, shotNumber: number) => {
+    if (shotNumber === 3) {
+      return frame.frame_number === 10;
+    }
+    if (shotNumber === 2 && frame.frame_number < 10) {
+      const shot1 = getShotValue(frame, 1);
+      return shot1 !== 10;
+    }
+    return true;
+  };
+
+  const getDisplayValue = (frame: FrameDraft, shotNumber: number) => {
+    const shot1 = getShotValue(frame, 1);
+    const shot2 = getShotValue(frame, 2);
+    const shot3 = getShotValue(frame, 3);
+
+    if (shotNumber === 1) {
+      return toSymbol(shot1);
+    }
+
+    if (shotNumber === 2) {
+      if (frame.frame_number < 10) {
+        if (shot1 === 10) {
+          return "";
+        }
+        if (shot1 !== null && shot2 !== null && shot1 + shot2 === 10) {
+          return "/";
+        }
+        return toSymbol(shot2);
+      }
+      if (shot1 !== null && shot1 !== 10 && shot2 !== null && shot1 + shot2 === 10) {
+        return "/";
+      }
+      return toSymbol(shot2 === 10 ? 10 : shot2);
+    }
+
+    if (shotNumber === 3) {
+      return toSymbol(shot3);
+    }
+
+    return "";
+  };
+
+  const handleCellKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter" || event.key === "Escape") {
+      event.preventDefault();
+      setActiveCell(null);
+    }
+  };
+
   const handleConfirm = async () => {
     setSaveStatus("saving");
     setSaveMessage("");
 
-    const parsedTotalScore =
-      totalScore === "" ? null : Number.parseInt(totalScore, 10);
     const parsedPlayedAt = playedAt ? new Date(playedAt) : null;
 
     const payload = {
       gameId: game.id,
-      totalScore: Number.isNaN(parsedTotalScore) ? null : parsedTotalScore,
       playedAt:
         parsedPlayedAt && !Number.isNaN(parsedPlayedAt.getTime())
           ? parsedPlayedAt.toISOString()
@@ -183,27 +257,18 @@ export default function GameReview({
   return (
     <div className="review-grid">
       <div className="review-header">
-        <div>
-          <p className="helper">
-            Player: {game.player_name} · Extraction confidence: {extractionConfidence}
-          </p>
-        </div>
+        <p className="helper">Player: {game.player_name}</p>
         <div className="review-meta">
           <div className="total-row">
-            <label htmlFor="totalScore">Total score</label>
-            <input
-              id="totalScore"
-              type="number"
-              min={0}
-              max={300}
-              value={totalScore}
-              onChange={(event) => setTotalScore(event.target.value)}
-            />
+            <label>Total score</label>
+            <p className="helper">
+              {game.total_score !== null ? game.total_score : "n/a"}
+            </p>
           </div>
           <div className="total-row">
-            <label htmlFor="playedAt">Played at</label>
+            <label htmlFor={`playedAt-${game.id}`}>Played at</label>
             <input
-              id="playedAt"
+              id={`playedAt-${game.id}`}
               type="datetime-local"
               value={playedAt}
               onChange={(event) => setPlayedAt(event.target.value)}
@@ -212,30 +277,67 @@ export default function GameReview({
         </div>
       </div>
 
-      <div className="frame-header">
-        <div>Frame</div>
-        <div>Shot 1</div>
-        <div>Shot 2</div>
-        <div>Shot 3</div>
-      </div>
-      {frames.map((frame, frameIndex) => (
-        <div key={frame.id} className="frame-row">
-          <div className="frame-number">{frame.frame_number}</div>
-          {frame.shots.map((shot, shotIndex) => (
-            <input
-              key={`${frame.id}-${shot.shot_number}`}
-              type="number"
-              min={0}
-              max={10}
-              disabled={frame.frame_number < 10 && shot.shot_number === 3}
-              value={shot.pins ?? ""}
-              onChange={(event) =>
-                handleShotChange(frameIndex, shotIndex, event.target.value)
-              }
-            />
+      <div className="score-grid edit-score-grid">
+        <div className="score-row score-header">
+          {frames.map((frame) => (
+            <div key={`h-${frame.id}`} className="score-cell">
+              {frame.frame_number}
+            </div>
           ))}
         </div>
-      ))}
+        {[1, 2, 3].map((shotNumber) => (
+          <div key={`row-${shotNumber}`} className="score-row">
+            {frames.map((frame, frameIndex) => {
+              const isEditable = isEditableCell(frame, shotNumber);
+              const isActive =
+                activeCell?.frameIndex === frameIndex &&
+                activeCell?.shotNumber === shotNumber;
+              const display = getDisplayValue(frame, shotNumber);
+
+              if (!isEditable) {
+                return (
+                  <div
+                    key={`c-${frame.id}-${shotNumber}`}
+                    className="score-cell score-cell-empty"
+                    aria-hidden="true"
+                  />
+                );
+              }
+
+              if (isActive) {
+                return (
+                  <input
+                    key={`i-${frame.id}-${shotNumber}`}
+                    type="number"
+                    min={0}
+                    max={10}
+                    className="score-cell-input"
+                    value={getShotValue(frame, shotNumber) ?? ""}
+                    onChange={(event) =>
+                      handleCellChange(frameIndex, shotNumber, event.target.value)
+                    }
+                    onBlur={() => setActiveCell(null)}
+                    onKeyDown={handleCellKeyDown}
+                    autoFocus
+                  />
+                );
+              }
+
+              return (
+                <button
+                  key={`b-${frame.id}-${shotNumber}`}
+                  type="button"
+                  className="score-cell score-cell-button"
+                  onClick={() => setActiveCell({ frameIndex, shotNumber })}
+                  aria-label={`Frame ${frame.frame_number} shot ${shotNumber}`}
+                >
+                  {display}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
 
       <div className="review-actions">
         {showCancel ? (
@@ -248,18 +350,20 @@ export default function GameReview({
             Cancel
           </button>
         ) : null}
-        <button
-          type="button"
-          onClick={handleConfirm}
-          disabled={saveStatus === "saving"}
-        >
-          <span className="button-content">
-            {saveStatus === "saving" ? (
-              <span className="spinner" aria-hidden="true" />
-            ) : null}
-            {saveStatus === "saving" ? "Confirming..." : "Confirm"}
-          </span>
-        </button>
+        {hasChanges ? (
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={saveStatus === "saving"}
+          >
+            <span className="button-content">
+              {saveStatus === "saving" ? (
+                <span className="spinner" aria-hidden="true" />
+              ) : null}
+              {saveStatus === "saving" ? "Confirming..." : "Confirm"}
+            </span>
+          </button>
+        ) : null}
         {saveMessage ? (
           <p className={`helper ${saveStatus === "error" ? "error-text" : ""}`}>
             {saveMessage}
