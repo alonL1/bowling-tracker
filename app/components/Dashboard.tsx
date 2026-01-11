@@ -5,7 +5,7 @@ import UploadForm from "./UploadForm";
 import GameReview from "./GameReview";
 import ChatPanel from "./ChatPanel";
 
-type JobStatus = "queued" | "processing" | "ready" | "error";
+type JobStatus = "queued" | "processing" | "logged" | "error";
 
 type StatusResponse = {
   jobId: string;
@@ -219,8 +219,8 @@ export default function Dashboard() {
           setStatusMessage("Queued. Waiting for the worker to pick it up.");
         } else if (payload.status === "processing") {
           setStatusMessage("Processing with Gemini...");
-        } else if (payload.status === "ready") {
-          setStatusMessage("Extraction complete. Ready for review.");
+        } else if (payload.status === "logged" || payload.status === "ready") {
+          setStatusMessage("Extraction complete. Logged.");
           await loadGameFromJob(jobId);
           await loadGames();
         } else if (payload.status === "error") {
@@ -231,7 +231,7 @@ export default function Dashboard() {
           );
         }
 
-        if (payload.status === "ready" || payload.status === "error") {
+        if (payload.status === "logged" || payload.status === "ready" || payload.status === "error") {
           if (intervalId) {
             clearInterval(intervalId);
           }
@@ -410,7 +410,7 @@ export default function Dashboard() {
                       <p className="game-title">{gameTitle}</p>
                       <p className="helper">
                         {game.player_name ? `${game.player_name} · ` : ""}
-                        {new Date(game.played_at || game.created_at).toLocaleString()} · Status: {game.status}
+                        {new Date(game.played_at || game.created_at).toLocaleString()}
                         {game.total_score !== null
                           ? ` · Score: ${game.total_score}`
                           : ""}

@@ -10,7 +10,7 @@ type ShotUpdate = {
 };
 
 type FrameUpdate = {
-  frameId: string;
+  frameId?: string | null;
   frameNumber: number;
   shots: ShotUpdate[];
 };
@@ -40,15 +40,15 @@ function computeTotalScore(frames: FrameUpdate[]) {
   const orderedFrames = Array.from({ length: 10 }, (_, index) =>
     frameMap.get(index + 1)
   );
-  if (orderedFrames.some((frame) => !frame)) {
-    return null;
-  }
 
   const rolls: Array<number | null> = [];
   const frameRollIndex: number[] = [];
 
   orderedFrames.forEach((frame, index) => {
     if (!frame) {
+      const rollIndex = rolls.length;
+      frameRollIndex[index] = rollIndex;
+      rolls.push(0, 0);
       return;
     }
     frameRollIndex[index] = rolls.length;
@@ -56,15 +56,15 @@ function computeTotalScore(frames: FrameUpdate[]) {
     const shot2 = getShotPins(frame, 2);
     const shot3 = getShotPins(frame, 3);
 
-    rolls.push(shot1);
+    rolls.push(shot1 ?? 0);
     if (frame.frameNumber < 10) {
-      if (shot1 !== 10) {
-        rolls.push(shot2);
+      if ((shot1 ?? 0) !== 10) {
+        rolls.push(shot2 ?? 0);
       }
     } else {
-      rolls.push(shot2);
+      rolls.push(shot2 ?? 0);
       if (shot3 !== null && shot3 !== undefined) {
-        rolls.push(shot3);
+        rolls.push(shot3 ?? 0);
       }
     }
   });
@@ -73,33 +73,16 @@ function computeTotalScore(frames: FrameUpdate[]) {
 
   for (let frameIndex = 0; frameIndex < 9; frameIndex += 1) {
     const rollIndex = frameRollIndex[frameIndex];
-    const shot1 = rolls[rollIndex];
-    if (shot1 === null || shot1 === undefined) {
-      return null;
-    }
+    const shot1 = rolls[rollIndex] ?? 0;
 
     if (shot1 === 10) {
-      const bonus1 = rolls[rollIndex + 1];
-      const bonus2 = rolls[rollIndex + 2];
-      if (
-        bonus1 === null ||
-        bonus1 === undefined ||
-        bonus2 === null ||
-        bonus2 === undefined
-      ) {
-        return null;
-      }
+      const bonus1 = rolls[rollIndex + 1] ?? 0;
+      const bonus2 = rolls[rollIndex + 2] ?? 0;
       total += 10 + bonus1 + bonus2;
     } else {
-      const shot2 = rolls[rollIndex + 1];
-      if (shot2 === null || shot2 === undefined) {
-        return null;
-      }
+      const shot2 = rolls[rollIndex + 1] ?? 0;
       if (shot1 + shot2 === 10) {
-        const bonus = rolls[rollIndex + 2];
-        if (bonus === null || bonus === undefined) {
-          return null;
-        }
+        const bonus = rolls[rollIndex + 2] ?? 0;
         total += 10 + bonus;
       } else {
         total += shot1 + shot2;
@@ -109,19 +92,13 @@ function computeTotalScore(frames: FrameUpdate[]) {
 
   const tenth = orderedFrames[9];
   if (!tenth) {
-    return null;
+    return total;
   }
-  const tenthShot1 = getShotPins(tenth, 1);
-  const tenthShot2 = getShotPins(tenth, 2);
-  if (tenthShot1 === null || tenthShot2 === null) {
-    return null;
-  }
+  const tenthShot1 = getShotPins(tenth, 1) ?? 0;
+  const tenthShot2 = getShotPins(tenth, 2) ?? 0;
   total += tenthShot1 + tenthShot2;
   if (tenthShot1 === 10 || tenthShot1 + tenthShot2 === 10) {
-    const tenthShot3 = getShotPins(tenth, 3);
-    if (tenthShot3 === null || tenthShot3 === undefined) {
-      return null;
-    }
+    const tenthShot3 = getShotPins(tenth, 3) ?? 0;
     total += tenthShot3;
   }
 
@@ -236,16 +213,55 @@ export async function PATCH(request: Request) {
     const isStrike = computeStrike(shot1);
     const isSpare = computeSpare(shot1, shot2);
 
-    const { error: frameError } = await supabase
-      .from("frames")
-      .update({ is_strike: isStrike, is_spare: isSpare })
-      .eq("id", frame.frameId);
+    let frameId = frame.frameId ?? null;
+    if (!frameId) {
+      const { data: existingFrame, error: existingError } = await supabase
+        .from("frames")
+        .select("id")
+        .eq("game_id", payload.gameId)
+        .eq("frame_number", frame.frameNumber)
+        .maybeSingle();
 
-    if (frameError) {
-      return NextResponse.json(
-        { error: frameError.message || "Failed to update frame." },
-        { status: 500 }
-      );
+      if (existingError) {
+        return NextResponse.json(
+          { error: existingError.message || "Failed to locate frame." },
+          { status: 500 }
+        );
+      }
+      frameId = existingFrame?.id ?? null;
+    }
+
+    if (!frameId) {
+      const { data: createdFrame, error: createError } = await supabase
+        .from("frames")
+        .insert({
+          game_id: payload.gameId,
+          frame_number: frame.frameNumber,
+          is_strike: isStrike,
+          is_spare: isSpare
+        })
+        .select("id")
+        .single();
+
+      if (createError || !createdFrame) {
+        return NextResponse.json(
+          { error: createError?.message || "Failed to create frame." },
+          { status: 500 }
+        );
+      }
+      frameId = createdFrame.id;
+    } else {
+      const { error: frameError } = await supabase
+        .from("frames")
+        .update({ is_strike: isStrike, is_spare: isSpare })
+        .eq("id", frameId);
+
+      if (frameError) {
+        return NextResponse.json(
+          { error: frameError.message || "Failed to update frame." },
+          { status: 500 }
+        );
+      }
     }
 
     for (const shot of frame.shots) {
@@ -263,7 +279,7 @@ export async function PATCH(request: Request) {
         }
       } else {
         const { error: insertError } = await supabase.from("shots").insert({
-          frame_id: frame.frameId,
+          frame_id: frameId,
           shot_number: shot.shotNumber,
           pins: shot.pins
         });
@@ -294,7 +310,7 @@ export async function PATCH(request: Request) {
     updates.played_at = parsed.toISOString();
   }
   updates.total_score = computeTotalScore(payload.frames);
-  updates.status = "reviewed";
+  updates.status = "logged";
 
   const { error: gameError } = await supabase
     .from("games")

@@ -292,7 +292,7 @@ async function processJob() {
     .update({
       total_score: totalScore,
       raw_extraction: extraction,
-      status: "ready"
+      status: "logged"
     })
     .eq("id", game.id);
 
@@ -304,13 +304,13 @@ async function processJob() {
 
   await supabase
     .from("analysis_jobs")
-    .update({ status: "ready", updated_at: new Date().toISOString() })
+    .update({ status: "logged", updated_at: new Date().toISOString() })
     .eq("id", job.id);
 
   await supabase.storage.from(BUCKET).remove([job.storage_key]);
 
   console.log(`Job ${job.id} complete for game ${game.id}.`);
-  return { status: "ready", jobId: job.id, gameId: game.id };
+  return { status: "logged", jobId: job.id, gameId: game.id };
 }
 
 app.all("/run", async (req, res) => {

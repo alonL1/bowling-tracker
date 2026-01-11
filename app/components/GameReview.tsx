@@ -33,7 +33,7 @@ type GameReviewProps = {
 };
 
 type FrameDraft = {
-  id: string;
+  id: string | null;
   frame_number: number;
   shots: Shot[];
 };
@@ -44,26 +44,30 @@ type ActiveCell = {
 };
 
 function normalizeFrames(frames: Frame[]) {
-  return frames
-    .slice()
-    .sort((a, b) => a.frame_number - b.frame_number)
-    .map((frame) => {
-      const shots = [1, 2, 3].map((shotNumber) => {
-        const existing = frame.shots?.find(
-          (shot) => shot.shot_number === shotNumber
-        );
-        return {
-          id: existing?.id,
-          shot_number: shotNumber,
-          pins: existing?.pins ?? null
-        };
-      });
+  const frameMap = new Map<number, Frame>();
+  frames.forEach((frame) => {
+    frameMap.set(frame.frame_number, frame);
+  });
+
+  return Array.from({ length: 10 }, (_, index) => {
+    const frameNumber = index + 1;
+    const frame = frameMap.get(frameNumber);
+    const shots = [1, 2, 3].map((shotNumber) => {
+      const existing = frame?.shots?.find(
+        (shot) => shot.shot_number === shotNumber
+      );
       return {
-        id: frame.id,
-        frame_number: frame.frame_number,
-        shots
+        id: existing?.id,
+        shot_number: shotNumber,
+        pins: existing?.pins ?? null
       };
     });
+    return {
+      id: frame?.id ?? null,
+      frame_number: frameNumber,
+      shots
+    };
+  });
 }
 
 function toSymbol(pins: number | null) {
@@ -127,7 +131,8 @@ export default function GameReview({
     const playedAtChanged = playedAt !== initialPlayedAt;
     const framesChanged =
       JSON.stringify(frames) !== JSON.stringify(initialFrames);
-    setHasChanges(playedAtChanged || framesChanged);
+    const totalMissing = game.total_score === null;
+    setHasChanges(playedAtChanged || framesChanged || totalMissing);
   }, [frames, playedAt, initialFrames, game.played_at]);
 
   const showCancel = !!onCancel;
@@ -205,7 +210,6 @@ export default function GameReview({
       setActiveCell(null);
     }
   };
-
   const handleConfirm = async () => {
     setSaveStatus("saving");
     setSaveMessage("");
@@ -219,7 +223,7 @@ export default function GameReview({
           ? parsedPlayedAt.toISOString()
           : null,
       frames: frames.map((frame) => ({
-        frameId: frame.id,
+        frameId: frame.id ?? null,
         frameNumber: frame.frame_number,
         shots: frame.shots.map((shot) => ({
           id: shot.id,
@@ -242,7 +246,7 @@ export default function GameReview({
       }
 
       setSaveStatus("saved");
-      setSaveMessage("Confirmed. Status updated to reviewed.");
+      setSaveMessage("Saved. Status updated to logged.");
       if (onConfirmed) {
         onConfirmed();
       }
@@ -261,9 +265,17 @@ export default function GameReview({
         <div className="review-meta">
           <div className="total-row">
             <label>Total score</label>
-            <p className="helper">
-              {game.total_score !== null ? game.total_score : "n/a"}
-            </p>
+            <div>
+              <p className="helper">
+                {game.total_score !== null ? game.total_score : "n/a"}
+              </p>
+              {game.total_score === null ? (
+                <p className="helper">
+                  Couldn&apos;t find total score. Clicking confirm will
+                  calculate it.
+                </p>
+              ) : null}
+            </div>
           </div>
           <div className="total-row">
             <label htmlFor={`playedAt-${game.id}`}>Played at</label>
@@ -279,15 +291,19 @@ export default function GameReview({
 
       <div className="score-grid edit-score-grid">
         <div className="score-row score-header">
-          {frames.map((frame) => (
-            <div key={`h-${frame.id}`} className="score-cell">
+          {frames.map((frame) => {
+            const frameKey = frame.id ?? `frame-${frame.frame_number}`;
+            return (
+            <div key={`h-${frameKey}`} className="score-cell">
               {frame.frame_number}
             </div>
-          ))}
+            );
+          })}
         </div>
         {[1, 2, 3].map((shotNumber) => (
           <div key={`row-${shotNumber}`} className="score-row">
             {frames.map((frame, frameIndex) => {
+              const frameKey = frame.id ?? `frame-${frame.frame_number}`;
               const isEditable = isEditableCell(frame, shotNumber);
               const isActive =
                 activeCell?.frameIndex === frameIndex &&
@@ -297,7 +313,7 @@ export default function GameReview({
               if (!isEditable) {
                 return (
                   <div
-                    key={`c-${frame.id}-${shotNumber}`}
+                    key={`c-${frameKey}-${shotNumber}`}
                     className="score-cell score-cell-empty"
                     aria-hidden="true"
                   />
@@ -307,7 +323,7 @@ export default function GameReview({
               if (isActive) {
                 return (
                   <input
-                    key={`i-${frame.id}-${shotNumber}`}
+                    key={`i-${frameKey}-${shotNumber}`}
                     type="number"
                     min={0}
                     max={10}
@@ -325,7 +341,7 @@ export default function GameReview({
 
               return (
                 <button
-                  key={`b-${frame.id}-${shotNumber}`}
+                  key={`b-${frameKey}-${shotNumber}`}
                   type="button"
                   className="score-cell score-cell-button"
                   onClick={() => setActiveCell({ frameIndex, shotNumber })}
