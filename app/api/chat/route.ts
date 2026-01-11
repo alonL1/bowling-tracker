@@ -189,7 +189,7 @@ function buildPrompt(
 ) {
   // prompt for summary-based answer
   // You are a bowling stats assistant that is familiar with bowling terminology. Answer the question using only the JSON data below.
-  // You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
+  // You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
   // If the data does not include the answer, say so briefly.
   // When listing multiple items, format them as a bulleted or numbered list (one item per line).
   // Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
@@ -214,7 +214,7 @@ function buildPrompt(
   // Question: *question*
   // Answer:
   return `You are a bowling stats assistant that is familiar with bowling terminology. Answer the question using only the JSON data below.
-You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
+You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
 If the data does not include the answer, say so briefly.
 When listing multiple items, format them as a bulleted or numbered list (one item per line).
 Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
@@ -249,7 +249,7 @@ function buildContextPrompt(
 ) {
   // prompt for context-based answer
   // You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
-  // You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
+  // You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
   // If the answer is not present, say so briefly.
   // Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
   // If you mention times, convert them to the user's local time.
@@ -273,7 +273,7 @@ function buildContextPrompt(
   // Question: *question*
   // Answer:
   return `You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
-You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
+You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
 If the answer is not present, say so briefly.
 Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 If you mention times, convert them to the user's local time.
@@ -306,7 +306,7 @@ function buildSqlPrompt(
 
   // prompt for SQL generation
   // You are a bowling stats assistant that is familiar with bowling terminology.
-  // You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries to sql queries.
+  // You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in SQL but feel free to use.
   // Your task is to write a single SQL SELECT query to answer a bowling stats question.
   // Return JSON only with this schema: {"sql": string|null, "explanation": string}.
   // - Only SELECT statements.
@@ -327,7 +327,7 @@ function buildSqlPrompt(
   // Question: *question*
   // JSON Output:
   return `You are a bowling stats assistant that is familiar with bowling terminology.
-You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries to sql queries.
+You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in SQL but feel free to use.
 Your task is to write a single SQL SELECT query to answer a bowling stats question.
 Return JSON only with this schema: {"sql": string|null, "explanation": string}.
 - Only SELECT statements.
@@ -358,7 +358,7 @@ function buildSqlAnswerPrompt(
 
   // prompt for SQL answer generation
   // You are a bowling stats assistant that is familiar with bowling terminology. Use the SQL and results JSON to answer.
-  // You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
+  // You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
   // All timestamps in the results are UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
   // If you mention times, convert them to the user's local time.
   // UTC - *timezone offset* minutes = local time.
@@ -379,7 +379,7 @@ function buildSqlAnswerPrompt(
   // Question: *question*
   // Answer:
   return `You are a bowling stats assistant that is familiar with bowling terminology. Use the SQL and results JSON to answer.
-You recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame) when translating user queries.
+You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
 All timestamps in the results are UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 If you mention times, convert them to the user's local time.
 UTC - ${timezoneOffsetMinutes ?? "unknown"} minutes = local time.
@@ -481,15 +481,21 @@ function sanitizeAnswer(raw: string, question: string) {
   return text;
 }
 
+function stripNonAscii(text: string) {
+  return text.replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "");
+}
+
 function formatAnswer(raw: string, question: string) {
   const sanitized = sanitizeAnswer(raw, question);
   const withoutNulls = sanitized.replace(/\bnull\b/gi, "n/a");
-  return ensureSentence(withoutNulls);
+  const withoutUnicode = stripNonAscii(withoutNulls);
+  return ensureSentence(withoutUnicode);
 }
 
 function formatOfflineAnswer(text: string) {
   const withoutNulls = text.replace(/\bnull\b/gi, "n/a");
-  return ensureSentence(withoutNulls);
+  const withoutUnicode = stripNonAscii(withoutNulls);
+  return ensureSentence(withoutUnicode);
 }
 
 function formatTiming(ms: number) {

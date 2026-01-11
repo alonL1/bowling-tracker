@@ -255,6 +255,8 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
               <li>How often do I <b>10 pin spare</b>?</li>
               <li>Whats my <b>average</b> since the <b>new pope</b> was elected?</li>
               <li>Am I <b>better after 5pm</b> or <b>before</b>?</li>
+              <li>Give me <b>coaching tips</b> based on my <b>last 5 games</b>.</li>
+              <li>What should I focus on to <b>improve my spare conversion</b>?</li>
               <li>Try anything you want! Feel free to get <b>creative</b> with it!</li>
             </ul>
           </div>
