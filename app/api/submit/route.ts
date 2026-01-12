@@ -6,7 +6,7 @@ const DEFAULT_BUCKET = "scoreboards-temp";
 
 export const runtime = "nodejs";
 
-function normalizeOptionalUuid(value?: string) {
+function normalizeOptionalUuid(value?: string | null) {
   if (!value) {
     return null;
   }
