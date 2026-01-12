@@ -82,27 +82,27 @@ export default function Home() {
       <header className="hero anchor-section" id="overview">
         <div>
           <p className="eyebrow">Bowling Tracker</p>
-          <h1>Turn scoreboard photos into clean stats.</h1>
+          <h1>Log your bowling and learn about your game.</h1>
           <p className="lede">
-            Upload a single game photo, pick the player name on the sheet, and
-            let Gemini extract the frames. Your image is deleted right after
+            Upload a scoreboard photo and let our AI extract the frames.
+            Your image is deleted right after
             extraction.
           </p>
         </div>
         <div className="hero-card">
-          <h2>Simple flow</h2>
+          <h2>The flow</h2>
           <ul className="steps">
             <li>
               <span>1</span>
-              Upload a scoreboard photo and confirm the player name.
+              Upload a scoreboard photo and enter your name the way it appears.
             </li>
             <li>
               <span>2</span>
-              We queue a background job and extract frames with AI.
+              Confirm the results, then ask questions about your stats.
             </li>
             <li>
               <span>3</span>
-              Confirm the results, then ask questions about your stats.
+              Add more games to your log at any time.
             </li>
           </ul>
         </div>

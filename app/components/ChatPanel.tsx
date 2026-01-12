@@ -234,7 +234,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
       <div className="panel-header">
         <h2>Ask about your stats</h2>
         <p className="helper">
-          Ask anything about your bowling stats.
+          Ask anything about your bowling stats. Chats can be about anything, get creative or checkout our examples.
         </p>
         <button
           type="button"
@@ -251,13 +251,15 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
               <li>How often do I <b>strike</b> on <b>frame 9</b>?</li>
               <li>List games with my <b>highest score</b> between <b>Jan 7th</b> and <b>March 3rd</b>?</li>
               <li>What is my <b>average</b> on games played <b>after 7pm</b>?</li>
+              {/* <li>How close am I to <b>Pete Weber</b>?</li> */}
               <li>How often do I <b>strike</b> or <b>spare</b>?</li>
               <li>List all of the games where I <b>scored above 130</b>?</li>
               <li>What <b>percent</b> of the time do I bowl a <b>7</b> in a frame?</li>
               <li>Of the times that I bowl a <b>7</b> how often do I <b>convert the spare</b>?</li>
+              <li>How much <b>better</b> have I gotten <b>since day 1?</b></li>
               <li>On average, what are my <b>top 3</b> best <b>frames</b>?</li>
               <li>On which <b>frames</b> do I <b>strike most often</b>?</li>
-              <li>How often do I <b>10 pin spare</b>?</li>
+              <li>How often do I <b>wombat</b>?</li>
               <li>Whats my <b>average</b> since the <b>new pope</b> was elected?</li>
               <li>Am I <b>better after 5pm</b> or <b>before</b>?</li>
               <li>Give me <b>coaching tips</b> based on my <b>last 5 games</b>.</li>
@@ -294,7 +296,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
       <form className="chat-form" onSubmit={handleAsk}>
         <textarea
           className="chat-input"
-          placeholder="Ask: What's my strike rate on frame 9?"
+          placeholder="Ask me anything about your games... Try asking: What's my strike rate on frame 9?"
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
           onKeyDown={(event) => {
