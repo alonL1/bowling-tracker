@@ -9,7 +9,6 @@ create table if not exists games (
   played_at timestamptz not null default now(),
   status text not null default 'queued',
   raw_extraction jsonb,
-  extraction_confidence numeric(4, 3),
   created_at timestamptz not null default now()
 );
 
@@ -26,8 +25,7 @@ create table if not exists shots (
   id uuid primary key default gen_random_uuid(),
   frame_id uuid not null references frames(id) on delete cascade,
   shot_number integer not null,
-  pins integer,
-  confidence numeric(4, 3)
+  pins integer
 );
 
 create table if not exists analysis_jobs (

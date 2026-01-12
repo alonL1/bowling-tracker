@@ -111,6 +111,8 @@ export default function Dashboard() {
   const [jobError, setJobError] = useState<string>("");
   const [gameError, setGameError] = useState<string>("");
   const [games, setGames] = useState<GameListItem[]>([]);
+  const [gamesTotal, setGamesTotal] = useState<number | null>(null);
+  const [gamesLimit, setGamesLimit] = useState<number>(10);
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [expandedGames, setExpandedGames] = useState<Record<string, GameDetail>>(
     {}
@@ -123,14 +125,20 @@ export default function Dashboard() {
 
   const loadGames = useCallback(async () => {
     try {
-      const response = await fetch("/api/games?limit=25");
+      const response = await fetch(`/api/games?limit=${gamesLimit}`);
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error || "Failed to load games list.");
       }
-      const payload = (await response.json()) as { games: GameListItem[] };
+      const payload = (await response.json()) as {
+        games: GameListItem[];
+        count?: number | null;
+      };
       const nextGames = payload.games || [];
       setGames(nextGames);
+      setGamesTotal(
+        typeof payload.count === "number" ? payload.count : null
+      );
       if (!chatGameId && nextGames.length > 0) {
         setChatGameId(nextGames[0].id);
       }
@@ -138,8 +146,9 @@ export default function Dashboard() {
       const message =
         error instanceof Error ? error.message : "Failed to load games list.";
       setGameError(message);
+      setGamesTotal(null);
     }
-  }, [chatGameId]);
+  }, [chatGameId, gamesLimit]);
 
   const loadGame = useCallback(async (lookup: string) => {
     setGameError("");
@@ -355,6 +364,10 @@ export default function Dashboard() {
   };
 
   const activeGameLabel = "all games";
+  const showLoadMore = gamesTotal !== null && games.length < gamesTotal;
+  const handleLoadMore = () => {
+    setGamesLimit((prev) => prev + 10);
+  };
 
   return (
     <div className="dashboard">
@@ -387,6 +400,11 @@ export default function Dashboard() {
           <h2>Your games</h2>
           <p className="helper">
             Expand a game to view the frames in a compact score format.
+          </p>
+          <p className="helper">
+            {gamesTotal !== null
+              ? `Showing last ${games.length} of ${gamesTotal} games.`
+              : `Showing ${games.length} games.`}
           </p>
         </div>
         <div className="games-list">
@@ -560,6 +578,17 @@ export default function Dashboard() {
             })
           )}
         </div>
+        {showLoadMore ? (
+          <div className="games-footer">
+            <button
+              type="button"
+              className="button-secondary load-more-button"
+              onClick={handleLoadMore}
+            >
+              Load more
+            </button>
+          </div>
+        ) : null}
         {gameError ? <p className="helper error-text">{gameError}</p> : null}
       </section>
 
