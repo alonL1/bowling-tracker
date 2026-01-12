@@ -126,11 +126,7 @@ export default function Dashboard() {
 
   const loadGames = useCallback(async () => {
     try {
-<<<<<<< HEAD
-      const response = await fetch(`/api/games?limit=${gamesLimit}`);
-=======
       const response = await authFetch(`/api/games?limit=${gamesLimit}`);
->>>>>>> test-preview-mode
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error || "Failed to load games list.");

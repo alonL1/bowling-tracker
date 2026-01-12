@@ -100,11 +100,7 @@ export async function POST(request: Request) {
     storage_key: storageKey,
     status: "queued",
     player_name: trimmedName,
-<<<<<<< HEAD
-    user_id: devUserId
-=======
     user_id: userId
->>>>>>> test-preview-mode
   });
 
   if (jobError) {
