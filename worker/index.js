@@ -47,6 +47,30 @@ function normalizeOptionalUuid(value) {
   return trimmed;
 }
 
+function escapeLiteral(text) {
+  return text.replace(/'/g, "''");
+}
+
+async function getNextGameName(supabase, userId) {
+  const condition = userId
+    ? `user_id = '${escapeLiteral(userId)}'`
+    : "user_id is null";
+  const sql = `
+    select coalesce(max((substring(lower(game_name) from '^game\\s+([0-9]+)$'))::int), 0) as max_suffix
+    from games
+    where ${condition}
+  `;
+  const { data, error } = await supabase.rpc("execute_sql", { query: sql });
+  if (error) {
+    throw new Error(error.message || "Failed to generate game name.");
+  }
+  const rows = typeof data === "string" ? JSON.parse(data) : data;
+  const maxSuffix = Number.isFinite(rows?.[0]?.max_suffix)
+    ? rows[0].max_suffix
+    : 0;
+  return `Game ${maxSuffix + 1}`;
+}
+
 function computeStrike(shot1) {
   return shot1 === 10;
 }
@@ -240,23 +264,16 @@ async function processJob() {
   const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
   const totalScore = toNullableNumber(extraction?.totalScore);
 
-  const { count: existingCount, error: countError } = await supabase
-    .from("games")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId);
-
-  if (countError) {
-    await setJobError(
-      supabase,
-      job.id,
-      null,
-      countError.message || "Failed to count games."
-    );
+  let gameName = "Game 1";
+  try {
+    gameName = await getNextGameName(supabase, userId);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to generate game name.";
+    await setJobError(supabase, job.id, null, message);
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
     return { status: "error", jobId: job.id };
   }
-
-  const gameName = `Game ${(existingCount || 0) + 1}`;
 
   const { data: createdGame, error: createError } = await supabase
     .from("games")
