@@ -6,6 +6,9 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const limit = Number.parseInt(searchParams.get("limit") || "20", 10);
+  const offset = Number.parseInt(searchParams.get("offset") || "0", 10);
+  const safeLimit = Number.isFinite(limit) ? limit : 20;
+  const safeOffset = Number.isFinite(offset) ? offset : 0;
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -24,15 +27,18 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from("games")
-    .select("id,game_name,player_name,total_score,status,played_at,created_at")
+    .select("id,game_name,player_name,total_score,status,played_at,created_at", {
+      count: "exact"
+    })
+    .order("played_at", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(Number.isFinite(limit) ? limit : 20);
+    .range(safeOffset, safeOffset + safeLimit - 1);
 
   if (devUserId) {
     query = query.eq("user_id", devUserId);
   }
 
-  const { data, error } = await query;
+  const { data, error, count } = await query;
 
   if (error) {
     return NextResponse.json(
@@ -41,5 +47,5 @@ export async function GET(request: Request) {
     );
   }
 
-  return NextResponse.json({ games: data || [] });
+  return NextResponse.json({ games: data || [], count: count ?? 0 });
 }

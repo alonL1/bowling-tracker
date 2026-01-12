@@ -240,7 +240,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
           className="text-button"
           onClick={() => setShowExamples((prev) => !prev)}
         >
-          {showExamples ? "Hide examples" : "View more examples"}
+          {showExamples ? "Hide examples" : "View examples"}
         </button>
         {showExamples ? (
           <div className="examples">

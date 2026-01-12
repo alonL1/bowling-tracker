@@ -99,7 +99,7 @@ export default function UploadForm({ onQueued, onError }: UploadFormProps) {
             {status === "submitting" ? (
               <span className="spinner" aria-hidden="true" />
             ) : null}
-            {status === "submitting" ? "Queueing..." : "Queue for extraction"}
+            {status === "submitting" ? "Adding..." : "Add to Log"}
           </span>
         </button>
       </div>

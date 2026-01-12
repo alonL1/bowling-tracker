@@ -421,6 +421,25 @@ button:hover:not(:disabled) {
   gap: 12px;
 }
 
+.games-footer {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.load-more-button {
+  border: 1px dashed rgba(15, 107, 95, 0.45);
+  background: rgba(15, 107, 95, 0.08);
+  color: var(--accent);
+  box-shadow: none;
+  padding: 10px 24px;
+}
+
+.load-more-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(15, 107, 95, 0.12);
+}
+
 .game-card {
   display: grid;
   gap: 12px;
