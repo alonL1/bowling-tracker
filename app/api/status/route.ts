@@ -41,9 +41,11 @@ export async function GET(request: Request) {
     );
   }
 
+  const normalizedStatus = job.status === "ready" ? "logged" : job.status;
+
   return NextResponse.json({
     jobId: job.id,
-    status: job.status,
+    status: normalizedStatus,
     lastError: job.last_error,
     updatedAt: job.updated_at,
     gameId: job.game_id

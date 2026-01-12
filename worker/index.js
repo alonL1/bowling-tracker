@@ -130,6 +130,13 @@ async function setJobError(supabase, jobId, gameId, message) {
   }
 }
 
+async function removeGame(supabase, gameId) {
+  if (!gameId) {
+    return;
+  }
+  await supabase.from("games").delete().eq("id", gameId);
+}
+
 async function processJob() {
   requireEnv(process.env.SUPABASE_URL, "SUPABASE_URL");
   requireEnv(process.env.SUPABASE_SERVICE_ROLE_KEY, "SUPABASE_SERVICE_ROLE_KEY");
@@ -153,23 +160,13 @@ async function processJob() {
   }
 
   const job = jobs[0];
-  console.log(`Claimed job ${job.id} for game ${job.game_id}.`);
-
-  const { data: game, error: gameError } = await supabase
-    .from("games")
-    .select("id,player_name")
-    .eq("id", job.game_id)
-    .single();
-
-  if (gameError || !game) {
-    await setJobError(
-      supabase,
-      job.id,
-      job.game_id,
-      gameError?.message || "Game not found."
-    );
+  const playerName = job.player_name;
+  const userId = job.user_id || null;
+  if (!playerName) {
+    await setJobError(supabase, job.id, null, "Job missing player name.");
     return { status: "error", jobId: job.id };
   }
+  console.log(`Claimed job ${job.id} for ${playerName}.`);
 
   const { data: imageData, error: downloadError } = await supabase.storage
     .from(BUCKET)
@@ -179,7 +176,7 @@ async function processJob() {
     await setJobError(
       supabase,
       job.id,
-      game.id,
+      null,
       downloadError?.message || "Failed to download image."
     );
     return { status: "error", jobId: job.id };
@@ -203,7 +200,7 @@ async function processJob() {
   try {
     // prompt for scoreboard extraction
     const result = await model.generateContent([
-      { text: buildPrompt(game.player_name) },
+      { text: buildPrompt(playerName) },
       {
         inlineData: {
           mimeType: imageData.type || "image/jpeg",
@@ -218,7 +215,7 @@ async function processJob() {
     await setJobError(
       supabase,
       job.id,
-      game.id,
+      null,
       error instanceof Error ? error.message : "Gemini extraction failed."
     );
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
@@ -228,13 +225,55 @@ async function processJob() {
   const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
   const totalScore = toNullableNumber(extraction?.totalScore);
 
-  await supabase.from("frames").delete().eq("game_id", game.id);
+  const { count: existingCount, error: countError } = await supabase
+    .from("games")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
+  if (countError) {
+    await setJobError(
+      supabase,
+      job.id,
+      null,
+      countError.message || "Failed to count games."
+    );
+    await supabase.storage.from(BUCKET).remove([job.storage_key]);
+    return { status: "error", jobId: job.id };
+  }
+
+  const gameName = `Game ${(existingCount || 0) + 1}`;
+
+  const { data: createdGame, error: createError } = await supabase
+    .from("games")
+    .insert({
+      game_name: gameName,
+      player_name: playerName,
+      total_score: totalScore,
+      raw_extraction: extraction,
+      status: "processing",
+      user_id: userId
+    })
+    .select("id")
+    .single();
+
+  if (createError || !createdGame) {
+    await setJobError(
+      supabase,
+      job.id,
+      null,
+      createError?.message || "Failed to create game."
+    );
+    await supabase.storage.from(BUCKET).remove([job.storage_key]);
+    return { status: "error", jobId: job.id };
+  }
+
+  const gameId = createdGame.id;
 
   const frameRows = frames.map((frame) => {
     const shot1 = toNullableNumber(frame?.shots?.[0]);
     const shot2 = toNullableNumber(frame?.shots?.[1]);
     return {
-      game_id: game.id,
+      game_id: gameId,
       frame_number: toNullableNumber(frame.frame),
       is_strike: computeStrike(shot1),
       is_spare: shot1 !== null && shot2 !== null ? computeSpare(shot1, shot2) : false,
@@ -250,7 +289,8 @@ async function processJob() {
       .select("id,frame_number");
 
     if (frameError) {
-      await setJobError(supabase, job.id, game.id, frameError.message);
+      await removeGame(supabase, gameId);
+      await setJobError(supabase, job.id, null, frameError.message);
       await supabase.storage.from(BUCKET).remove([job.storage_key]);
       return { status: "error", jobId: job.id };
     }
@@ -281,7 +321,8 @@ async function processJob() {
   if (shotRows.length > 0) {
     const { error: shotError } = await supabase.from("shots").insert(shotRows);
     if (shotError) {
-      await setJobError(supabase, job.id, game.id, shotError.message);
+      await removeGame(supabase, gameId);
+      await setJobError(supabase, job.id, null, shotError.message);
       await supabase.storage.from(BUCKET).remove([job.storage_key]);
       return { status: "error", jobId: job.id };
     }
@@ -294,23 +335,28 @@ async function processJob() {
       raw_extraction: extraction,
       status: "logged"
     })
-    .eq("id", game.id);
+    .eq("id", gameId);
 
   if (gameUpdateError) {
-    await setJobError(supabase, job.id, game.id, gameUpdateError.message);
+    await removeGame(supabase, gameId);
+    await setJobError(supabase, job.id, null, gameUpdateError.message);
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
     return { status: "error", jobId: job.id };
   }
 
   await supabase
     .from("analysis_jobs")
-    .update({ status: "logged", updated_at: new Date().toISOString() })
+    .update({
+      status: "logged",
+      updated_at: new Date().toISOString(),
+      game_id: gameId
+    })
     .eq("id", job.id);
 
   await supabase.storage.from(BUCKET).remove([job.storage_key]);
 
-  console.log(`Job ${job.id} complete for game ${game.id}.`);
-  return { status: "logged", jobId: job.id, gameId: game.id };
+  console.log(`Job ${job.id} complete for game ${gameId}.`);
+  return { status: "logged", jobId: job.id, gameId };
 }
 
 app.all("/run", async (req, res) => {

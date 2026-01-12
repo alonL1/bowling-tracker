@@ -30,7 +30,9 @@ create table if not exists shots (
 
 create table if not exists analysis_jobs (
   id uuid primary key default gen_random_uuid(),
-  game_id uuid not null references games(id) on delete cascade,
+  game_id uuid references games(id) on delete set null,
+  user_id uuid,
+  player_name text not null,
   storage_key text not null,
   status text not null default 'queued',
   attempts integer not null default 0,
@@ -48,7 +50,7 @@ create table if not exists chat_questions (
 );
 
 create or replace function claim_next_job()
-returns table (id uuid, game_id uuid, storage_key text)
+returns table (id uuid, storage_key text, player_name text, user_id uuid)
 language sql
 as $$
   with next_job as (
@@ -64,7 +66,7 @@ as $$
       attempts = attempts + 1,
       updated_at = now()
   where id in (select id from next_job)
-  returning analysis_jobs.id, analysis_jobs.game_id, analysis_jobs.storage_key;
+  returning analysis_jobs.id, analysis_jobs.storage_key, analysis_jobs.player_name, analysis_jobs.user_id;
 $$;
 
 create or replace function execute_sql(query text)
