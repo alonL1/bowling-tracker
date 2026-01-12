@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getUserIdFromRequest } from "../utils/auth";
 
 export const runtime = "nodejs";
 
@@ -21,6 +22,12 @@ export async function GET(request: Request) {
     );
   }
 
+  const userId =
+    (await getUserIdFromRequest(request)) || (devUserId ?? null);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
   const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false }
   });
@@ -30,14 +37,21 @@ export async function GET(request: Request) {
     .select("id,game_name,player_name,total_score,status,played_at,created_at", {
       count: "exact"
     })
+<<<<<<< HEAD
+=======
+    .eq("user_id", userId)
+>>>>>>> test-preview-mode
     .order("played_at", { ascending: false })
     .order("created_at", { ascending: false })
     .range(safeOffset, safeOffset + safeLimit - 1);
 
+<<<<<<< HEAD
   if (devUserId) {
     query = query.eq("user_id", devUserId);
   }
 
+=======
+>>>>>>> test-preview-mode
   const { data, error, count } = await query;
 
   if (error) {

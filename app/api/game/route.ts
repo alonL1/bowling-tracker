@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getUserIdFromRequest } from "../utils/auth";
 
 export const runtime = "nodejs";
 
@@ -120,6 +121,11 @@ export async function GET(request: Request) {
     );
   }
 
+  const userId = await getUserIdFromRequest(request);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
   if (!jobId && !gameIdParam) {
     return NextResponse.json(
       { error: "jobId or gameId is required." },
@@ -155,6 +161,7 @@ export async function GET(request: Request) {
       "id,game_name,player_name,total_score,status,played_at,created_at,frames:frames(id,frame_number,is_strike,is_spare,frame_score,shots:shots(id,shot_number,pins))"
     )
     .eq("id", gameId)
+    .eq("user_id", userId)
     .single();
 
   if (gameError || !game) {
@@ -176,6 +183,11 @@ export async function PATCH(request: Request) {
       { error: "Missing Supabase configuration." },
       { status: 500 }
     );
+  }
+
+  const userId = await getUserIdFromRequest(request);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   const payload = (await request.json()) as {
@@ -315,7 +327,8 @@ export async function PATCH(request: Request) {
   const { error: gameError } = await supabase
     .from("games")
     .update(updates)
-    .eq("id", payload.gameId);
+    .eq("id", payload.gameId)
+    .eq("user_id", userId);
 
   if (gameError) {
     return NextResponse.json(
@@ -336,6 +349,11 @@ export async function DELETE(request: Request) {
       { error: "Missing Supabase configuration." },
       { status: 500 }
     );
+  }
+
+  const userId = await getUserIdFromRequest(request);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   let payload: { gameId?: string } = {};
@@ -359,7 +377,8 @@ export async function DELETE(request: Request) {
   const { error: deleteError } = await supabase
     .from("games")
     .delete()
-    .eq("id", payload.gameId);
+    .eq("id", payload.gameId)
+    .eq("user_id", userId);
 
   if (deleteError) {
     return NextResponse.json(

@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getUserIdFromRequest } from "../utils/auth";
 
 const DEFAULT_BUCKET = "scoreboards-temp";
 
 export const runtime = "nodejs";
 
+<<<<<<< HEAD
 function normalizeOptionalUuid(value?: string) {
+=======
+function normalizeOptionalUuid(value?: string | null) {
+>>>>>>> test-preview-mode
   if (!value) {
     return null;
   }
@@ -40,6 +45,13 @@ export async function POST(request: Request) {
       },
       { status: 500 }
     );
+  }
+
+  const userId =
+    (await getUserIdFromRequest(request)) || normalizeOptionalUuid(devUserId);
+
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   if (typeof playerName !== "string" || playerName.trim().length === 0) {
@@ -92,7 +104,11 @@ export async function POST(request: Request) {
     storage_key: storageKey,
     status: "queued",
     player_name: trimmedName,
+<<<<<<< HEAD
     user_id: devUserId
+=======
+    user_id: userId
+>>>>>>> test-preview-mode
   });
 
   if (jobError) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { authFetch } from "../lib/authClient";
 
 type SubmitState = "idle" | "submitting" | "queued" | "error";
 
@@ -52,7 +53,7 @@ export default function UploadForm({ onQueued, onError }: UploadFormProps) {
     }
 
     try {
-      const response = await fetch("/api/submit", {
+      const response = await authFetch("/api/submit", {
         method: "POST",
         body: formData
       });
