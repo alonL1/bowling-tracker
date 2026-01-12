@@ -75,30 +75,34 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
         offlineNote?: string;
       };
       if (payload.onlineError && payload.offlineAnswer) {
+        const onlineError = payload.onlineError ?? "Chat request failed.";
+        const offlineAnswer = payload.offlineAnswer ?? "Offline answer unavailable.";
+        const offlineNote =
+          payload.offlineNote ||
+          "This response was done offline so it can't handle complex questions and may be wrong.";
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: payload.onlineError,
+            content: onlineError,
             variant: "error"
           },
           {
             role: "assistant",
-            content: payload.offlineAnswer,
+            content: offlineAnswer,
             variant: "offline",
             meta: payload.offlineMeta,
-            note:
-              payload.offlineNote ||
-              "This response was done offline so it can't handle complex questions and may be wrong."
+            note: offlineNote
           }
         ]);
         setChatStatus("idle");
         return;
       }
       if (payload.answer) {
+        const answer = payload.answer ?? "No response returned.";
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: payload.answer, meta: payload.meta }
+          { role: "assistant", content: answer, meta: payload.meta }
         ]);
       } else {
         setMessages((prev) => [

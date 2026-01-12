@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
 const SQL_CONTEXT_FALLBACK_TOKEN = "__USE_CONTEXT__";
+
+type SupabaseAnyClient = SupabaseClient<any, "public", any>;
 
 type Shot = {
   shot_number: number;
@@ -564,7 +566,7 @@ function summarizeOnlineError(raw: string) {
 }
 
 async function logQuestionAnswer(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseAnyClient,
   normalizedQuestion: string,
   answer: string
 ) {
@@ -1288,7 +1290,7 @@ function validateSql(sql: string) {
 }
 
 async function runSqlMethod(
-  supabase: ReturnType<typeof createClient>,
+  supabase: SupabaseAnyClient,
   apiKey: string,
   model: string,
   question: string,
@@ -1421,11 +1423,12 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  const question = payload.question;
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false }
   });
-  const normalizedQuestion = normalizeQuestion(payload.question);
+  const normalizedQuestion = normalizeQuestion(question);
 
   let games: Game[] = [];
   let scope = "all games";
@@ -1502,11 +1505,11 @@ export async function POST(request: Request) {
           : "Untitled game"
     }));
 
-  const selectedNumbers = extractGameNumbers(payload.question);
+  const selectedNumbers = extractGameNumbers(question);
   const selectedNames = mapNumbersToNames(selectedNumbers).map((name) =>
     name.toLowerCase()
   );
-  const selectedFrames = extractFrameNumbers(payload.question);
+  const selectedFrames = extractFrameNumbers(question);
   const selectedGames =
     selectedNames.length > 0
       ? orderedGames.filter((game) =>
@@ -1514,7 +1517,7 @@ export async function POST(request: Request) {
         )
       : orderedGames;
 
-  const localTimeFilter = extractTimeFilter(payload.question);
+  const localTimeFilter = extractTimeFilter(question);
   const timeFilter = normalizeTimeFilterToUtc(
     localTimeFilter,
     payload.timezoneOffsetMinutes
@@ -1572,13 +1575,13 @@ export async function POST(request: Request) {
         supabase,
         apiKey,
         model,
-        payload.question,
+        question,
         index,
         timeFilter,
         payload.timezoneOffsetMinutes
       );
       if (sqlResult.ok && sqlResult.answer) {
-        const finalAnswer = formatAnswer(sqlResult.answer, payload.question);
+        const finalAnswer = formatAnswer(sqlResult.answer, question);
         void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
         return {
           answer: finalAnswer,
@@ -1627,7 +1630,7 @@ export async function POST(request: Request) {
     try {
       // prompt for context-based answer
       const contextPrompt = buildContextPrompt(
-        payload.question,
+        question,
         scope,
         contextPayload,
         selectionOnline,
@@ -1640,7 +1643,7 @@ export async function POST(request: Request) {
       if (debug) {
         console.log("Context raw response:", contextAnswer);
       }
-      const finalAnswer = formatAnswer(contextAnswer, payload.question);
+      const finalAnswer = formatAnswer(contextAnswer, question);
       void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
       return {
         answer: finalAnswer,
@@ -1698,7 +1701,7 @@ export async function POST(request: Request) {
   const debugError = process.env.CHAT_DEBUG === "true";
   const selectionLabel = buildSelectionLabel(selectedNumbers, localTimeFilter);
   const shortcut = tryShortcut(
-    payload.question,
+    question,
     offlineGames,
     summaryOffline,
     frameStatsOffline,

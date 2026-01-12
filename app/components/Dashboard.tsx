@@ -139,7 +139,7 @@ export default function Dashboard() {
         error instanceof Error ? error.message : "Failed to load games list.";
       setGameError(message);
     }
-  }, []);
+  }, [chatGameId]);
 
   const loadGame = useCallback(async (lookup: string) => {
     setGameError("");
@@ -219,7 +219,7 @@ export default function Dashboard() {
           setStatusMessage("Queued. Waiting for the worker to pick it up.");
         } else if (payload.status === "processing") {
           setStatusMessage("Processing with Gemini...");
-        } else if (payload.status === "logged" || payload.status === "ready") {
+        } else if (payload.status === "logged") {
           setStatusMessage("Extraction complete. Logged.");
           await loadGameFromJob(jobId);
           await loadGames();
@@ -231,7 +231,7 @@ export default function Dashboard() {
           );
         }
 
-        if (payload.status === "logged" || payload.status === "ready" || payload.status === "error") {
+        if (payload.status === "logged" || payload.status === "error") {
           if (intervalId) {
             clearInterval(intervalId);
           }

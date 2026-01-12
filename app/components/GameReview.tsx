@@ -133,7 +133,7 @@ export default function GameReview({
       JSON.stringify(frames) !== JSON.stringify(initialFrames);
     const totalMissing = game.total_score === null;
     setHasChanges(playedAtChanged || framesChanged || totalMissing);
-  }, [frames, playedAt, initialFrames, game.played_at]);
+  }, [frames, playedAt, initialFrames, game.played_at, game.total_score]);
 
   const showCancel = !!onCancel;
 
