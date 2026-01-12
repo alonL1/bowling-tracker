@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { getUserIdFromRequest } from "../utils/auth";
+import { getUserFromRequest } from "../utils/auth";
 
 export const runtime = "nodejs";
 
@@ -1292,12 +1292,15 @@ function validateSql(sql: string) {
 
 async function runSqlMethod(
   supabase: SupabaseAnyClient,
+  supabaseUrl: string,
+  supabaseAnonKey: string | undefined,
   apiKey: string,
   model: string,
   question: string,
   index: unknown,
   timeFilter: TimeFilter,
-  timezoneOffsetMinutes?: number
+  timezoneOffsetMinutes?: number,
+  userAccessToken?: string | null
 ): Promise<SqlResult> {
   const debug = process.env.CHAT_DEBUG === "true";
   const schema = `games(id uuid, game_name text, player_name text, total_score int, played_at timestamptz, created_at timestamptz, user_id uuid)
@@ -1351,7 +1354,15 @@ shots(id uuid, frame_id uuid, shot_number int, pins int)`;
     console.log("SQL validated:", validated.sql);
   }
 
-  const { data, error } = await supabase.rpc("execute_sql", {
+  const rpcClient =
+    supabaseAnonKey && userAccessToken
+      ? createClient(supabaseUrl, supabaseAnonKey, {
+          global: { headers: { Authorization: `Bearer ${userAccessToken}` } },
+          auth: { persistSession: false }
+        })
+      : supabase;
+
+  const { data, error } = await rpcClient.rpc("execute_sql", {
     query: validated.sql
   });
 
@@ -1425,9 +1436,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const userId =
-    (await getUserIdFromRequest(request)) || (devUserId ?? null);
-  if (!userId) {
+  const { userId, accessToken: userAccessToken } =
+    (await getUserFromRequest(request)) || { userId: null, accessToken: null };
+  const effectiveUserId = userId || devUserId || null;
+  if (!effectiveUserId) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
   const question = payload.question;
@@ -1447,7 +1459,7 @@ export async function POST(request: Request) {
         "id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
       .eq("id", payload.gameId)
-      .eq("user_id", userId)
+      .eq("user_id", effectiveUserId)
       .single();
 
     if (error || !data) {
@@ -1465,7 +1477,7 @@ export async function POST(request: Request) {
       .select(
         "id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
-      .eq("user_id", userId)
+      .eq("user_id", effectiveUserId)
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -1563,12 +1575,15 @@ export async function POST(request: Request) {
     try {
       const sqlResult = await runSqlMethod(
         supabase,
+        supabaseUrl,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
         apiKey,
         model,
         question,
         index,
         timeFilter,
-        payload.timezoneOffsetMinutes
+        payload.timezoneOffsetMinutes,
+        userAccessToken
       );
       if (sqlResult.ok && sqlResult.answer) {
         const finalAnswer = formatAnswer(sqlResult.answer, question);
