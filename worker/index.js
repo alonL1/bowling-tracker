@@ -32,6 +32,21 @@ function toNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeOptionalUuid(value) {
+  if (!value) {
+    return null;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return null;
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower === "undefined" || lower === "null") {
+    return null;
+  }
+  return trimmed;
+}
+
 function computeStrike(shot1) {
   return shot1 === 10;
 }
@@ -161,7 +176,7 @@ async function processJob() {
 
   const job = jobs[0];
   const playerName = job.player_name;
-  const userId = job.user_id || null;
+  const userId = normalizeOptionalUuid(job.user_id);
   if (!playerName) {
     await setJobError(supabase, job.id, null, "Job missing player name.");
     return { status: "error", jobId: job.id };

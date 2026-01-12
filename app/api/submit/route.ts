@@ -5,6 +5,21 @@ const DEFAULT_BUCKET = "scoreboards-temp";
 
 export const runtime = "nodejs";
 
+function normalizeOptionalUuid(value?: string) {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower === "undefined" || lower === "null") {
+    return null;
+  }
+  return trimmed;
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const playerName = formData.get("playerName");
@@ -13,7 +28,7 @@ export async function POST(request: Request) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const bucket = process.env.SUPABASE_STORAGE_BUCKET || DEFAULT_BUCKET;
-  const devUserId = process.env.DEV_USER_ID;
+  const devUserId = normalizeOptionalUuid(process.env.DEV_USER_ID);
   const workerUrl = process.env.WORKER_URL;
   const workerToken = process.env.WORKER_AUTH_TOKEN;
 
@@ -77,7 +92,7 @@ export async function POST(request: Request) {
     storage_key: storageKey,
     status: "queued",
     player_name: trimmedName,
-    user_id: devUserId || null
+    user_id: devUserId
   });
 
   if (jobError) {
