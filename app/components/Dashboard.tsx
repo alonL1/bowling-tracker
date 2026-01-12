@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import UploadForm from "./UploadForm";
 import GameReview from "./GameReview";
 import ChatPanel from "./ChatPanel";
+import { authFetch } from "../lib/authClient";
 
 type JobStatus = "queued" | "processing" | "logged" | "error";
 
@@ -125,7 +126,7 @@ export default function Dashboard() {
 
   const loadGames = useCallback(async () => {
     try {
-      const response = await fetch(`/api/games?limit=${gamesLimit}`);
+      const response = await authFetch(`/api/games?limit=${gamesLimit}`);
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error || "Failed to load games list.");
@@ -153,7 +154,7 @@ export default function Dashboard() {
   const loadGame = useCallback(async (lookup: string) => {
     setGameError("");
     try {
-      const response = await fetch(`/api/game?gameId=${lookup}`);
+      const response = await authFetch(`/api/game?gameId=${lookup}`);
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error || "Failed to load game.");
@@ -172,7 +173,7 @@ export default function Dashboard() {
   const loadGameFromJob = useCallback(async (lookupJobId: string) => {
     setGameError("");
     try {
-      const response = await fetch(`/api/game?jobId=${lookupJobId}`);
+      const response = await authFetch(`/api/game?jobId=${lookupJobId}`);
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error || "Failed to load game.");
@@ -214,7 +215,7 @@ export default function Dashboard() {
       pollCountRef.current += 1;
 
       try {
-        const response = await fetch(`/api/status?jobId=${jobId}`);
+        const response = await authFetch(`/api/status?jobId=${jobId}`);
 
         if (!response.ok) {
           const payload = (await response.json()) as { error?: string };
@@ -309,7 +310,7 @@ export default function Dashboard() {
     setDeletingGameId(gameId);
     setGameError("");
     try {
-      const response = await fetch("/api/game", {
+      const response = await authFetch("/api/game", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ gameId })

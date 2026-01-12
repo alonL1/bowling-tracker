@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getUserIdFromRequest } from "../utils/auth";
 
 export const runtime = "nodejs";
 
@@ -20,6 +21,11 @@ export async function GET(request: Request) {
     );
   }
 
+  const userId = await getUserIdFromRequest(request);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
   if (!jobId) {
     return NextResponse.json({ error: "jobId is required." }, { status: 400 });
   }
@@ -32,6 +38,7 @@ export async function GET(request: Request) {
     .from("analysis_jobs")
     .select("id,status,last_error,updated_at,game_id")
     .eq("id", jobId)
+    .eq("user_id", userId)
     .single();
 
   if (error || !job) {

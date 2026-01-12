@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getUserIdFromRequest } from "../utils/auth";
 
 export const runtime = "nodejs";
 
@@ -1423,6 +1424,12 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  const userId =
+    (await getUserIdFromRequest(request)) || (devUserId ?? null);
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
   const question = payload.question;
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey, {
@@ -1433,32 +1440,14 @@ export async function POST(request: Request) {
   let games: Game[] = [];
   let scope = "all games";
 
-  if (devUserId) {
-    const { data, error } = await supabase
-      .from("games")
-      .select(
-        "id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
-      )
-      .eq("user_id", devUserId)
-      .order("created_at", { ascending: false })
-      .limit(100);
-
-    if (error) {
-      return NextResponse.json(
-        { error: error.message || "Failed to load games." },
-        { status: 500 }
-      );
-    }
-
-    games = (data as Game[]) || [];
-    scope = "all games for the signed-in user";
-  } else if (payload.gameId) {
+  if (payload.gameId) {
     const { data, error } = await supabase
       .from("games")
       .select(
         "id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
       .eq("id", payload.gameId)
+      .eq("user_id", userId)
       .single();
 
     if (error || !data) {
@@ -1476,6 +1465,7 @@ export async function POST(request: Request) {
       .select(
         "id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(100);
 
@@ -1487,7 +1477,7 @@ export async function POST(request: Request) {
     }
 
     games = (data as Game[]) || [];
-    scope = "all games in the system";
+    scope = "all games for the signed-in user";
   }
 
   const orderedGames: OrderedGame[] = games

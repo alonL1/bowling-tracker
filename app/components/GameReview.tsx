@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { authFetch } from "../lib/authClient";
 
 type Shot = {
   id?: string;
@@ -234,11 +235,11 @@ export default function GameReview({
     };
 
     try {
-      const response = await fetch("/api/game", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+    const response = await authFetch("/api/game", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
 
       if (!response.ok) {
         const errorPayload = (await response.json()) as { error?: string };

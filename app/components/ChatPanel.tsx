@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { authFetch } from "../lib/authClient";
 
 type Message = {
   role: "user" | "assistant";
@@ -51,7 +52,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
     setChatStatus("loading");
 
     try {
-      const response = await fetch("/api/chat", {
+      const response = await authFetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
