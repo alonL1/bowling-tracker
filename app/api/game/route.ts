@@ -327,7 +327,7 @@ export async function PATCH(request: Request) {
   const { error: gameError } = await supabase
     .from("games")
     .update(updates)
-    .eq("id", payload.gameId);
+    .eq("id", payload.gameId)
     .eq("user_id", userId);
 
   if (gameError) {
