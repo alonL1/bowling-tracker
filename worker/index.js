@@ -33,7 +33,35 @@ function toNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function toUtcIsoFromLocal(value) {
+function parseOffsetMinutes(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    const hours = Number(value[0]);
+    const minutes = Number(value[1] ?? 0);
+    if (!Number.isFinite(hours)) {
+      return null;
+    }
+    return hours * 60 + (Number.isFinite(minutes) ? minutes : 0);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value * 60 : null;
+  }
+  const match = String(value).trim().match(/^([+-])(\d{2}):?(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const sign = match[1] === "-" ? -1 : 1;
+  const hours = Number.parseInt(match[2], 10);
+  const minutes = Number.parseInt(match[3], 10);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+  return sign * (hours * 60 + minutes);
+}
+
+function getLocalParts(value) {
   if (!value) {
     return null;
   }
@@ -41,31 +69,14 @@ function toUtcIsoFromLocal(value) {
     if (Number.isNaN(value.getTime())) {
       return null;
     }
-    return new Date(
-      value.getFullYear(),
-      value.getMonth(),
-      value.getDate(),
-      value.getHours(),
-      value.getMinutes(),
-      value.getSeconds(),
-      value.getMilliseconds()
-    ).toISOString();
-  }
-  if (typeof value === "number") {
-    const ms = value > 1e12 ? value : value * 1000;
-    const parsed = new Date(ms);
-    if (Number.isNaN(parsed.getTime())) {
-      return null;
-    }
-    return new Date(
-      parsed.getFullYear(),
-      parsed.getMonth(),
-      parsed.getDate(),
-      parsed.getHours(),
-      parsed.getMinutes(),
-      parsed.getSeconds(),
-      parsed.getMilliseconds()
-    ).toISOString();
+    return {
+      year: value.getFullYear(),
+      month: value.getMonth(),
+      day: value.getDate(),
+      hour: value.getHours(),
+      minute: value.getMinutes(),
+      second: value.getSeconds()
+    };
   }
   const normalized = String(value)
     .trim()
@@ -76,23 +87,33 @@ function toUtcIsoFromLocal(value) {
   if (!match) {
     return null;
   }
-  const year = Number.parseInt(match[1], 10);
-  const month = Number.parseInt(match[2], 10) - 1;
-  const day = Number.parseInt(match[3], 10);
-  const hour = match[4] ? Number.parseInt(match[4], 10) : 0;
-  const minute = match[5] ? Number.parseInt(match[5], 10) : 0;
-  const second = match[6] ? Number.parseInt(match[6], 10) : 0;
-  if (
-    !Number.isFinite(year) ||
-    !Number.isFinite(month) ||
-    !Number.isFinite(day) ||
-    !Number.isFinite(hour) ||
-    !Number.isFinite(minute) ||
-    !Number.isFinite(second)
-  ) {
+  return {
+    year: Number.parseInt(match[1], 10),
+    month: Number.parseInt(match[2], 10) - 1,
+    day: Number.parseInt(match[3], 10),
+    hour: match[4] ? Number.parseInt(match[4], 10) : 0,
+    minute: match[5] ? Number.parseInt(match[5], 10) : 0,
+    second: match[6] ? Number.parseInt(match[6], 10) : 0
+  };
+}
+
+function toUtcIsoFromExif(value, offsetMinutes) {
+  if (offsetMinutes === null || offsetMinutes === undefined) {
     return null;
   }
-  return new Date(year, month, day, hour, minute, second).toISOString();
+  const parts = getLocalParts(value);
+  if (!parts) {
+    return null;
+  }
+  const baseUtc = Date.UTC(
+    parts.year,
+    parts.month,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+  return new Date(baseUtc - offsetMinutes * 60000).toISOString();
 }
 
 function normalizeOptionalUuid(value) {
@@ -110,19 +131,30 @@ function normalizeOptionalUuid(value) {
   return trimmed;
 }
 
-async function extractCapturedAtFromExif(buffer) {
+async function extractCapturedAtFromExif(buffer, fallbackOffsetMinutes) {
   try {
     const data = await exifr.parse(buffer, {
       pick: [
         "DateTimeOriginal",
         "CreateDate",
         "DateTimeDigitized",
-        "ModifyDate"
+        "ModifyDate",
+        "OffsetTimeOriginal",
+        "OffsetTime",
+        "OffsetTimeDigitized",
+        "TimeZoneOffset"
       ]
     });
     if (!data) {
       return null;
     }
+    const offsetMinutes =
+      parseOffsetMinutes(
+        data.OffsetTimeOriginal ||
+          data.OffsetTime ||
+          data.OffsetTimeDigitized ||
+          data.TimeZoneOffset
+      ) ?? fallbackOffsetMinutes;
     const candidates = [
       data.DateTimeOriginal,
       data.CreateDate,
@@ -130,7 +162,7 @@ async function extractCapturedAtFromExif(buffer) {
       data.ModifyDate
     ];
     for (const candidate of candidates) {
-      const parsed = toUtcIsoFromLocal(candidate);
+      const parsed = toUtcIsoFromExif(candidate, offsetMinutes);
       if (parsed) {
         return parsed;
       }
@@ -357,7 +389,16 @@ async function processJob() {
   }
 
   const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
-  const capturedAt = await extractCapturedAtFromExif(buffer);
+  const rawOffset = job.timezone_offset_minutes;
+  const parsedOffset =
+    typeof rawOffset === "string" ? Number.parseInt(rawOffset, 10) : rawOffset;
+  const jobOffset = Number.isFinite(parsedOffset) ? parsedOffset : null;
+  const fallbackOffsetMinutes =
+    jobOffset !== null ? -jobOffset : null;
+  const capturedAt = await extractCapturedAtFromExif(
+    buffer,
+    fallbackOffsetMinutes
+  );
   const totalScore = toNullableNumber(extraction?.totalScore);
 
   let gameName = "Game 1";

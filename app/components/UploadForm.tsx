@@ -35,6 +35,10 @@ export default function UploadForm({ onQueued, onError }: UploadFormProps) {
     const formData = new FormData(form);
     const playerName = formData.get("playerName");
     const image = formData.get("image");
+    formData.set(
+      "timezoneOffsetMinutes",
+      String(new Date().getTimezoneOffset())
+    );
 
     if (typeof playerName !== "string" || playerName.trim().length === 0) {
       const errorMessage = "Please enter the player name on the scoreboard.";
