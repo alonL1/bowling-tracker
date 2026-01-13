@@ -6,6 +6,7 @@ create table if not exists games (
   game_name text,
   player_name text not null,
   total_score integer,
+  captured_at timestamptz,
   played_at timestamptz not null default now(),
   status text not null default 'queued',
   raw_extraction jsonb,
