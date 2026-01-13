@@ -33,27 +33,66 @@ function toNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function toNullableTimestamp(value) {
+function toUtcIsoFromLocal(value) {
   if (!value) {
     return null;
   }
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    if (Number.isNaN(value.getTime())) {
+      return null;
+    }
+    return new Date(
+      value.getFullYear(),
+      value.getMonth(),
+      value.getDate(),
+      value.getHours(),
+      value.getMinutes(),
+      value.getSeconds(),
+      value.getMilliseconds()
+    ).toISOString();
   }
   if (typeof value === "number") {
     const ms = value > 1e12 ? value : value * 1000;
     const parsed = new Date(ms);
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return new Date(
+      parsed.getFullYear(),
+      parsed.getMonth(),
+      parsed.getDate(),
+      parsed.getHours(),
+      parsed.getMinutes(),
+      parsed.getSeconds(),
+      parsed.getMilliseconds()
+    ).toISOString();
   }
-  const normalized = String(value).replace(
-    /^(\d{4}):(\d{2}):(\d{2})/,
-    "$1-$2-$3"
+  const normalized = String(value)
+    .trim()
+    .replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+  const match = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/
   );
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) {
+  if (!match) {
     return null;
   }
-  return parsed.toISOString();
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10) - 1;
+  const day = Number.parseInt(match[3], 10);
+  const hour = match[4] ? Number.parseInt(match[4], 10) : 0;
+  const minute = match[5] ? Number.parseInt(match[5], 10) : 0;
+  const second = match[6] ? Number.parseInt(match[6], 10) : 0;
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hour) ||
+    !Number.isFinite(minute) ||
+    !Number.isFinite(second)
+  ) {
+    return null;
+  }
+  return new Date(year, month, day, hour, minute, second).toISOString();
 }
 
 function normalizeOptionalUuid(value) {
@@ -91,7 +130,7 @@ async function extractCapturedAtFromExif(buffer) {
       data.ModifyDate
     ];
     for (const candidate of candidates) {
-      const parsed = toNullableTimestamp(candidate);
+      const parsed = toUtcIsoFromLocal(candidate);
       if (parsed) {
         return parsed;
       }
