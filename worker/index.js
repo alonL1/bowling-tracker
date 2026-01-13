@@ -1,6 +1,7 @@
 const express = require("express");
 const { createClient } = require("@supabase/supabase-js");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const exifr = require("exifr");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -32,6 +33,29 @@ function toNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function toNullableTimestamp(value) {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  if (typeof value === "number") {
+    const ms = value > 1e12 ? value : value * 1000;
+    const parsed = new Date(ms);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  const normalized = String(value).replace(
+    /^(\d{4}):(\d{2}):(\d{2})/,
+    "$1-$2-$3"
+  );
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
 function normalizeOptionalUuid(value) {
   if (!value) {
     return null;
@@ -45,6 +69,37 @@ function normalizeOptionalUuid(value) {
     return null;
   }
   return trimmed;
+}
+
+async function extractCapturedAtFromExif(buffer) {
+  try {
+    const data = await exifr.parse(buffer, {
+      pick: [
+        "DateTimeOriginal",
+        "CreateDate",
+        "DateTimeDigitized",
+        "ModifyDate"
+      ]
+    });
+    if (!data) {
+      return null;
+    }
+    const candidates = [
+      data.DateTimeOriginal,
+      data.CreateDate,
+      data.DateTimeDigitized,
+      data.ModifyDate
+    ];
+    for (const candidate of candidates) {
+      const parsed = toNullableTimestamp(candidate);
+      if (parsed) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.warn("EXIF parse failed:", error);
+  }
+  return null;
 }
 
 function escapeLiteral(text) {
@@ -222,7 +277,8 @@ async function processJob() {
   }
 
   const arrayBuffer = await imageData.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  const buffer = Buffer.from(arrayBuffer);
+  const base64 = buffer.toString("base64");
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const thinkingConfig = resolveThinkingConfig(process.env.WORKER_THINKING_MODE);
@@ -262,6 +318,7 @@ async function processJob() {
   }
 
   const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
+  const capturedAt = await extractCapturedAtFromExif(buffer);
   const totalScore = toNullableNumber(extraction?.totalScore);
 
   let gameName = "Game 1";
@@ -281,6 +338,8 @@ async function processJob() {
       game_name: gameName,
       player_name: playerName,
       total_score: totalScore,
+      captured_at: capturedAt,
+      played_at: capturedAt || new Date().toISOString(),
       raw_extraction: extraction,
       status: "processing",
       user_id: userId
