@@ -20,6 +20,70 @@ function isValidPins(value: number | null) {
   return value === null || (Number.isFinite(value) && value >= 0 && value <= 10);
 }
 
+function clampPins(value: number | null, maxPins: number) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  const upper = Math.max(0, Math.min(10, maxPins));
+  return Math.min(Math.max(value, 0), upper);
+}
+
+function normalizeFrameShots(frame: FrameUpdate) {
+  const shotsByNumber = new Map<number, ShotUpdate>();
+  frame.shots.forEach((shot) => {
+    shotsByNumber.set(shot.shotNumber, shot);
+  });
+
+  const shot1 = shotsByNumber.get(1)?.pins ?? null;
+  const shot2 = shotsByNumber.get(2)?.pins ?? null;
+  const shot3 = shotsByNumber.get(3)?.pins ?? null;
+
+  const normalized: Array<number | null> = [];
+
+  if (frame.frameNumber < 10) {
+    const normalizedShot1 = clampPins(shot1, 10);
+    if (normalizedShot1 === 10) {
+      normalized.push(normalizedShot1, null, null);
+    } else {
+      const maxShot2 = normalizedShot1 === null ? 10 : 10 - normalizedShot1;
+      const normalizedShot2 = clampPins(shot2, maxShot2);
+      normalized.push(normalizedShot1, normalizedShot2, null);
+    }
+  } else {
+    const normalizedShot1 = clampPins(shot1, 10);
+    if (normalizedShot1 === 10) {
+      const normalizedShot2 = clampPins(shot2, 10);
+      const maxShot3 =
+        normalizedShot2 !== null && normalizedShot2 < 10
+          ? 10 - normalizedShot2
+          : 10;
+      const normalizedShot3 = clampPins(shot3, maxShot3);
+      normalized.push(normalizedShot1, normalizedShot2, normalizedShot3);
+    } else {
+      const maxShot2 = normalizedShot1 === null ? 10 : 10 - normalizedShot1;
+      const normalizedShot2 = clampPins(shot2, maxShot2);
+      const canHaveThird =
+        normalizedShot1 !== null &&
+        normalizedShot2 !== null &&
+        normalizedShot1 + normalizedShot2 === 10;
+      const normalizedShot3 = canHaveThird ? clampPins(shot3, 10) : null;
+      normalized.push(normalizedShot1, normalizedShot2, normalizedShot3);
+    }
+  }
+
+  return [1, 2, 3].map((shotNumber, index) => {
+    const existing = shotsByNumber.get(shotNumber);
+    return {
+      id: existing?.id,
+      shotNumber,
+      pins: normalized[index] ?? null
+    };
+  });
+}
+
 function computeStrike(shot1: number | null) {
   return shot1 === 10;
 }
@@ -207,7 +271,12 @@ export async function PATCH(request: Request) {
     auth: { persistSession: false }
   });
 
-  for (const frame of payload.frames) {
+  const normalizedFrames = payload.frames.map((frame) => ({
+    ...frame,
+    shots: normalizeFrameShots(frame)
+  }));
+
+  for (const frame of normalizedFrames) {
     const shotMap = new Map<number, ShotUpdate>();
     for (const shot of frame.shots) {
       if (!isValidPins(shot.pins)) {
@@ -321,7 +390,7 @@ export async function PATCH(request: Request) {
     }
     updates.played_at = parsed.toISOString();
   }
-  updates.total_score = computeTotalScore(payload.frames);
+  updates.total_score = computeTotalScore(normalizedFrames);
   updates.status = "logged";
 
   const { error: gameError } = await supabase

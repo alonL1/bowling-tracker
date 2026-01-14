@@ -1,6 +1,7 @@
 const express = require("express");
 const { createClient } = require("@supabase/supabase-js");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const exifr = require("exifr");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -32,6 +33,89 @@ function toNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseOffsetMinutes(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    const hours = Number(value[0]);
+    const minutes = Number(value[1] ?? 0);
+    if (!Number.isFinite(hours)) {
+      return null;
+    }
+    return hours * 60 + (Number.isFinite(minutes) ? minutes : 0);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value * 60 : null;
+  }
+  const match = String(value).trim().match(/^([+-])(\d{2}):?(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const sign = match[1] === "-" ? -1 : 1;
+  const hours = Number.parseInt(match[2], 10);
+  const minutes = Number.parseInt(match[3], 10);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+  return sign * (hours * 60 + minutes);
+}
+
+function getLocalParts(value) {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      return null;
+    }
+    return {
+      year: value.getFullYear(),
+      month: value.getMonth(),
+      day: value.getDate(),
+      hour: value.getHours(),
+      minute: value.getMinutes(),
+      second: value.getSeconds()
+    };
+  }
+  const normalized = String(value)
+    .trim()
+    .replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+  const match = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/
+  );
+  if (!match) {
+    return null;
+  }
+  return {
+    year: Number.parseInt(match[1], 10),
+    month: Number.parseInt(match[2], 10) - 1,
+    day: Number.parseInt(match[3], 10),
+    hour: match[4] ? Number.parseInt(match[4], 10) : 0,
+    minute: match[5] ? Number.parseInt(match[5], 10) : 0,
+    second: match[6] ? Number.parseInt(match[6], 10) : 0
+  };
+}
+
+function toUtcIsoFromExif(value, offsetMinutes) {
+  if (offsetMinutes === null || offsetMinutes === undefined) {
+    return null;
+  }
+  const parts = getLocalParts(value);
+  if (!parts) {
+    return null;
+  }
+  const baseUtc = Date.UTC(
+    parts.year,
+    parts.month,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+  return new Date(baseUtc - offsetMinutes * 60000).toISOString();
+}
+
 function normalizeOptionalUuid(value) {
   if (!value) {
     return null;
@@ -45,6 +129,48 @@ function normalizeOptionalUuid(value) {
     return null;
   }
   return trimmed;
+}
+
+async function extractCapturedAtFromExif(buffer, fallbackOffsetMinutes) {
+  try {
+    const data = await exifr.parse(buffer, {
+      pick: [
+        "DateTimeOriginal",
+        "CreateDate",
+        "DateTimeDigitized",
+        "ModifyDate",
+        "OffsetTimeOriginal",
+        "OffsetTime",
+        "OffsetTimeDigitized",
+        "TimeZoneOffset"
+      ]
+    });
+    if (!data) {
+      return null;
+    }
+    const offsetMinutes =
+      parseOffsetMinutes(
+        data.OffsetTimeOriginal ||
+          data.OffsetTime ||
+          data.OffsetTimeDigitized ||
+          data.TimeZoneOffset
+      ) ?? fallbackOffsetMinutes;
+    const candidates = [
+      data.DateTimeOriginal,
+      data.CreateDate,
+      data.DateTimeDigitized,
+      data.ModifyDate
+    ];
+    for (const candidate of candidates) {
+      const parsed = toUtcIsoFromExif(candidate, offsetMinutes);
+      if (parsed) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.warn("EXIF parse failed:", error);
+  }
+  return null;
 }
 
 function escapeLiteral(text) {
@@ -222,7 +348,8 @@ async function processJob() {
   }
 
   const arrayBuffer = await imageData.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  const buffer = Buffer.from(arrayBuffer);
+  const base64 = buffer.toString("base64");
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const thinkingConfig = resolveThinkingConfig(process.env.WORKER_THINKING_MODE);
@@ -262,6 +389,16 @@ async function processJob() {
   }
 
   const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
+  const rawOffset = job.timezone_offset_minutes;
+  const parsedOffset =
+    typeof rawOffset === "string" ? Number.parseInt(rawOffset, 10) : rawOffset;
+  const jobOffset = Number.isFinite(parsedOffset) ? parsedOffset : null;
+  const fallbackOffsetMinutes =
+    jobOffset !== null ? -jobOffset : null;
+  const capturedAt = await extractCapturedAtFromExif(
+    buffer,
+    fallbackOffsetMinutes
+  );
   const totalScore = toNullableNumber(extraction?.totalScore);
 
   let gameName = "Game 1";
@@ -281,6 +418,8 @@ async function processJob() {
       game_name: gameName,
       player_name: playerName,
       total_score: totalScore,
+      captured_at: capturedAt,
+      played_at: capturedAt || new Date().toISOString(),
       raw_extraction: extraction,
       status: "processing",
       user_id: userId

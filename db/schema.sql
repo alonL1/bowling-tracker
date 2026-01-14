@@ -6,6 +6,7 @@ create table if not exists games (
   game_name text,
   player_name text not null,
   total_score integer,
+  captured_at timestamptz,
   played_at timestamptz not null default now(),
   status text not null default 'queued',
   raw_extraction jsonb,
@@ -34,6 +35,7 @@ create table if not exists analysis_jobs (
   user_id uuid,
   player_name text not null,
   storage_key text not null,
+  timezone_offset_minutes integer,
   status text not null default 'queued',
   attempts integer not null default 0,
   last_error text,
@@ -50,7 +52,7 @@ create table if not exists chat_questions (
 );
 
 create or replace function claim_next_job()
-returns table (id uuid, storage_key text, player_name text, user_id uuid)
+returns table (id uuid, storage_key text, player_name text, user_id uuid, timezone_offset_minutes integer)
 language sql
 as $$
   with next_job as (
@@ -66,7 +68,11 @@ as $$
       attempts = attempts + 1,
       updated_at = now()
   where id in (select id from next_job)
-  returning analysis_jobs.id, analysis_jobs.storage_key, analysis_jobs.player_name, analysis_jobs.user_id;
+  returning analysis_jobs.id,
+    analysis_jobs.storage_key,
+    analysis_jobs.player_name,
+    analysis_jobs.user_id,
+    analysis_jobs.timezone_offset_minutes;
 $$;
 
 create or replace function execute_sql(query text)

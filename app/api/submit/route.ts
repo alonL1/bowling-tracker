@@ -25,6 +25,7 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const playerName = formData.get("playerName");
   const image = formData.get("image");
+  const timezoneOffsetMinutes = formData.get("timezoneOffsetMinutes");
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -79,6 +80,14 @@ export async function POST(request: Request) {
   const jobId = crypto.randomUUID();
   const extension = image.type?.split("/")[1] || "jpg";
   const storageKey = `${jobId}.${extension}`;
+  const parsedOffset =
+    typeof timezoneOffsetMinutes === "string"
+      ? Number.parseInt(timezoneOffsetMinutes, 10)
+      : null;
+  const safeOffset =
+    parsedOffset !== null && Number.isFinite(parsedOffset)
+      ? parsedOffset
+      : null;
 
   const buffer = Buffer.from(await image.arrayBuffer());
   const { error: uploadError } = await supabase.storage
@@ -100,7 +109,8 @@ export async function POST(request: Request) {
     storage_key: storageKey,
     status: "queued",
     player_name: trimmedName,
-    user_id: userId
+    user_id: userId,
+    timezone_offset_minutes: safeOffset
   });
 
   if (jobError) {
