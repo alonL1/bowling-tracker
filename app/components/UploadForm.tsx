@@ -15,40 +15,53 @@ type SubmitResponse = {
   };
 };
 
+type QueuedJob = {
+  jobId: string;
+  message: string;
+};
+
 type UploadFormProps = {
-  onQueued?: (jobId: string, message: string) => void;
+  onQueued?: (jobs: QueuedJob[]) => void;
   onError?: (message: string) => void;
 };
 
 export default function UploadForm({ onQueued, onError }: UploadFormProps) {
   const [status, setStatus] = useState<SubmitState>("idle");
   const [message, setMessage] = useState<string>("");
-  const [jobId, setJobId] = useState<string>("");
+  const [jobIds, setJobIds] = useState<string[]>([]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setStatus("submitting");
     setMessage("");
-    setJobId("");
+    setJobIds([]);
 
     const form = event.currentTarget;
     const formData = new FormData(form);
     const playerName = formData.get("playerName");
-    const image = formData.get("image");
-    formData.set(
-      "timezoneOffsetMinutes",
-      String(new Date().getTimezoneOffset())
-    );
+    const images = formData
+      .getAll("image")
+      .filter((item) => item instanceof File && item.size > 0) as File[];
+    const timezoneOffsetMinutes = String(new Date().getTimezoneOffset());
 
-    if (typeof playerName !== "string" || playerName.trim().length === 0) {
-      const errorMessage = "Please enter the player name on the scoreboard.";
+    const nameList =
+      typeof playerName === "string"
+        ? playerName
+            .split(",")
+            .map((name) => name.trim())
+            .filter(Boolean)
+        : [];
+
+    if (nameList.length === 0) {
+      const errorMessage =
+        "Please enter at least one player name on the scoreboard.";
       setStatus("error");
       setMessage(errorMessage);
       onError?.(errorMessage);
       return;
     }
 
-    if (!(image instanceof File) || image.size === 0) {
+    if (images.length === 0) {
       const errorMessage = "Please select a scoreboard image to upload.";
       setStatus("error");
       setMessage(errorMessage);
@@ -57,21 +70,58 @@ export default function UploadForm({ onQueued, onError }: UploadFormProps) {
     }
 
     try {
-      const response = await authFetch("/api/submit", {
-        method: "POST",
-        body: formData
-      });
+      const queuedJobs: QueuedJob[] = [];
+      const errors: string[] = [];
+      const normalizedNames = nameList.join(", ");
 
-      if (!response.ok) {
-        const payload = (await response.json()) as { error?: string };
-        throw new Error(payload.error || "Submission failed.");
+      for (const image of images) {
+        const requestData = new FormData();
+        requestData.append("playerName", normalizedNames);
+        requestData.append("timezoneOffsetMinutes", timezoneOffsetMinutes);
+        requestData.append("image", image);
+
+        try {
+          const response = await authFetch("/api/submit", {
+            method: "POST",
+            body: requestData
+          });
+
+          if (!response.ok) {
+            const payload = (await response.json()) as { error?: string };
+            throw new Error(payload.error || "Submission failed.");
+          }
+
+          const payload = (await response.json()) as SubmitResponse;
+          queuedJobs.push({ jobId: payload.jobId, message: payload.message });
+        } catch (error) {
+          const messageText =
+            error instanceof Error ? error.message : "Submission failed.";
+          errors.push(messageText);
+        }
       }
 
-      const payload = (await response.json()) as SubmitResponse;
-      setStatus("queued");
-      setMessage(payload.message);
-      setJobId(payload.jobId);
-      onQueued?.(payload.jobId, payload.message);
+      if (queuedJobs.length === 0) {
+        const messageText = errors[0] || "Submission failed.";
+        setStatus("error");
+        setMessage(messageText);
+        onError?.(messageText);
+        return;
+      }
+
+      const queuedMessage = `Queued ${queuedJobs.length} job${
+        queuedJobs.length === 1 ? "" : "s"
+      } for extraction.`;
+      const errorSuffix = errors.length
+        ? ` ${errors.length} upload${errors.length === 1 ? "" : "s"} failed.`
+        : "";
+
+      setStatus(errors.length ? "error" : "queued");
+      setMessage(`${queuedMessage}${errorSuffix}`);
+      setJobIds(queuedJobs.map((job) => job.jobId));
+      onQueued?.(queuedJobs);
+      if (errors.length > 0) {
+        onError?.(errors[0]);
+      }
       form.reset();
     } catch (error) {
       const messageText =
@@ -85,18 +135,25 @@ export default function UploadForm({ onQueued, onError }: UploadFormProps) {
   return (
     <form className="form-grid" onSubmit={handleSubmit}>
       <div>
-        <label htmlFor="playerName">Player name on the sheet</label>
+        <label htmlFor="playerName">Your name(s) on the sheet</label>
         <input
           id="playerName"
           name="playerName"
           type="text"
-          placeholder="Jordan, Alex, etc"
+          placeholder="Alexander, Alex, Xander"
           required
         />
       </div>
       <div>
-        <label htmlFor="image">Scoreboard image</label>
-        <input id="image" name="image" type="file" accept="image/*" required />
+        <label htmlFor="image">Scoreboard image(s)</label>
+        <input
+          id="image"
+          name="image"
+          type="file"
+          accept="image/*"
+          multiple
+          required
+        />
       </div>
       <div className="full">
         <button type="submit" disabled={status === "submitting"}>
@@ -111,7 +168,7 @@ export default function UploadForm({ onQueued, onError }: UploadFormProps) {
       {status !== "idle" && message ? (
         <div className={`status ${status === "error" ? "error" : ""}`}>
           {message}
-          {jobId ? ` Job ID: ${jobId}.` : ""}
+          {jobIds.length > 0 ? ` Job IDs: ${jobIds.join(", ")}.` : ""}
         </div>
       ) : null}
     </form>

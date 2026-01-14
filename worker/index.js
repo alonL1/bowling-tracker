@@ -173,30 +173,6 @@ async function extractCapturedAtFromExif(buffer, fallbackOffsetMinutes) {
   return null;
 }
 
-function escapeLiteral(text) {
-  return text.replace(/'/g, "''");
-}
-
-async function getNextGameName(supabase, userId) {
-  const condition = userId
-    ? `user_id = '${escapeLiteral(userId)}'`
-    : "user_id is null";
-  const sql = `
-    select coalesce(max((substring(lower(game_name) from '^game\\s+([0-9]+)$'))::int), 0) as max_suffix
-    from games
-    where ${condition}
-  `;
-  const { data, error } = await supabase.rpc("execute_sql", { query: sql });
-  if (error) {
-    throw new Error(error.message || "Failed to generate game name.");
-  }
-  const rows = typeof data === "string" ? JSON.parse(data) : data;
-  const maxSuffix = Number.isFinite(rows?.[0]?.max_suffix)
-    ? rows[0].max_suffix
-    : 0;
-  return `Game ${maxSuffix + 1}`;
-}
-
 function computeStrike(shot1) {
   return shot1 === 10;
 }
@@ -205,7 +181,23 @@ function computeSpare(shot1, shot2) {
   return shot1 !== 10 && shot1 + shot2 === 10;
 }
 
-function buildPrompt(playerName) {
+function parsePlayerNames(value) {
+  if (!value) {
+    return [];
+  }
+  return String(value)
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+}
+
+function buildPrompt(playerNames) {
+  const nameList = Array.isArray(playerNames)
+    ? playerNames.filter(Boolean)
+    : parsePlayerNames(playerNames);
+  const fallback = nameList.length === 0 ? ["the player"] : nameList;
+  const namesLabel = fallback.join(", ");
+  const quotedNames = fallback.map((name) => `"${name}"`).join(", ");
   // prompt for scoreboard extraction
   // You are analyzing a bowling scoreboard photo.
   // Focus only on the row for the player named "*player name*".
@@ -224,7 +216,9 @@ function buildPrompt(playerName) {
   // - Use null for any unreadable shot.
   return `// SYSTEM INSTRUCTIONS
 You are a precision OCR agent specializing in sports data.
-Your goal is to extract bowling frame data for the player "${playerName}" with 100% mathematical accuracy.
+Your goal is to extract bowling frame data for the player matching one of these names: ${quotedNames}.
+Choose the closest matching row and return the selected name in "playerName".
+If no exact match exists, pick the closest match to ${namesLabel}.
 
 // CONTEXT & SCHEMA
 <schema>
@@ -239,7 +233,7 @@ Your goal is to extract bowling frame data for the player "${playerName}" with 1
 
 // EXTRACTION RULES
 <rules>
-1. FOCUS: Only extract data for the row belonging to "${playerName}".
+1. FOCUS: Only extract data for the row belonging to the best match in ${quotedNames}.
 2. SYMBOLS: Convert "/" to the number of pins needed for a spare, "X" to 10, and "-" or "G" to 0.
 3. MATH VALIDATION: Use the "Cumulative Score" or "Total Score" columns as ground truth.
    - Before outputting, calculate the sum of the frames using standard bowling rules.
@@ -326,12 +320,15 @@ async function processJob() {
 
   const job = jobs[0];
   const playerName = job.player_name;
+  const playerNames = parsePlayerNames(playerName);
+  const playerLabel =
+    playerNames.length > 0 ? playerNames.join(", ") : String(playerName || "");
   const userId = normalizeOptionalUuid(job.user_id);
   if (!playerName) {
     await setJobError(supabase, job.id, null, "Job missing player name.");
     return { status: "error", jobId: job.id };
   }
-  console.log(`Claimed job ${job.id} for ${playerName}.`);
+  console.log(`Claimed job ${job.id} for ${playerLabel}.`);
 
   const { data: imageData, error: downloadError } = await supabase.storage
     .from(BUCKET)
@@ -366,7 +363,7 @@ async function processJob() {
   try {
     // prompt for scoreboard extraction
     const result = await model.generateContent([
-      { text: buildPrompt(playerName) },
+      { text: buildPrompt(playerNames.length > 0 ? playerNames : playerName) },
       {
         inlineData: {
           mimeType: imageData.type || "image/jpeg",
@@ -399,24 +396,18 @@ async function processJob() {
     buffer,
     fallbackOffsetMinutes
   );
+  const extractedName =
+    typeof extraction?.playerName === "string"
+      ? extraction.playerName.trim()
+      : "";
+  const resolvedPlayerName =
+    extractedName || playerNames[0] || String(playerName || "");
   const totalScore = toNullableNumber(extraction?.totalScore);
-
-  let gameName = "Game 1";
-  try {
-    gameName = await getNextGameName(supabase, userId);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to generate game name.";
-    await setJobError(supabase, job.id, null, message);
-    await supabase.storage.from(BUCKET).remove([job.storage_key]);
-    return { status: "error", jobId: job.id };
-  }
 
   const { data: createdGame, error: createError } = await supabase
     .from("games")
     .insert({
-      game_name: gameName,
-      player_name: playerName,
+      player_name: resolvedPlayerName,
       total_score: totalScore,
       captured_at: capturedAt,
       played_at: capturedAt || new Date().toISOString(),
