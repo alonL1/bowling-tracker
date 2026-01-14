@@ -22,6 +22,7 @@ type GameDetail = {
   player_name: string;
   total_score: number | null;
   played_at?: string | null;
+  created_at?: string | null;
   status: string;
   frames?: Array<{
     id: string;
@@ -114,6 +115,7 @@ export default function Dashboard() {
   const [games, setGames] = useState<GameListItem[]>([]);
   const [gamesTotal, setGamesTotal] = useState<number | null>(null);
   const [gamesLimit, setGamesLimit] = useState<number>(10);
+  const [pinnedGame, setPinnedGame] = useState<GameListItem | null>(null);
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [expandedGames, setExpandedGames] = useState<Record<string, GameDetail>>(
     {}
@@ -187,6 +189,15 @@ export default function Dashboard() {
       setEditingGameId(payload.game.id);
       setEditingMode("review");
       setChatGameId(payload.game.id);
+      setPinnedGame({
+        id: payload.game.id,
+        game_name: payload.game.game_name ?? null,
+        player_name: payload.game.player_name,
+        total_score: payload.game.total_score ?? null,
+        status: payload.game.status,
+        played_at: payload.game.played_at ?? null,
+        created_at: payload.game.created_at ?? new Date().toISOString()
+      });
     } catch (error) {
       setGameError(
         error instanceof Error ? error.message : "Failed to load game."
@@ -197,6 +208,15 @@ export default function Dashboard() {
   useEffect(() => {
     loadGames();
   }, [loadGames]);
+
+  useEffect(() => {
+    if (!pinnedGame) {
+      return;
+    }
+    if (editingGameId !== pinnedGame.id) {
+      setPinnedGame(null);
+    }
+  }, [editingGameId, pinnedGame]);
 
   useEffect(() => {
     if (!jobId) {
@@ -369,6 +389,13 @@ export default function Dashboard() {
   const handleLoadMore = () => {
     setGamesLimit((prev) => prev + 10);
   };
+  const pinnedInList = pinnedGame
+    ? games.some((game) => game.id === pinnedGame.id)
+    : false;
+  const displayGames = pinnedGame
+    ? [pinnedGame, ...games.filter((game) => game.id !== pinnedGame.id)]
+    : games;
+  const displayCount = games.length + (pinnedGame && !pinnedInList ? 1 : 0);
 
   return (
     <div className="dashboard">
@@ -404,19 +431,19 @@ export default function Dashboard() {
           </p>
           <p className="helper">
             {gamesTotal !== null
-              ? `Showing last ${games.length} of ${gamesTotal} games.`
-              : `Showing ${games.length} games.`}
+              ? `Showing ${displayCount} of ${gamesTotal} games.`
+              : `Showing ${displayCount} games.`}
           </p>
         </div>
         <div className="games-list">
-          {games.length === 0 ? (
+          {displayGames.length === 0 ? (
             <p className="helper">No games yet.</p>
           ) : (
-            games.map((game, index) => {
+            displayGames.map((game, index) => {
               const expanded = expandedGameId === game.id;
               const detail = expandedGames[game.id];
               const rows = detail ? buildScoreRows(detail) : null;
-              const gameNumber = games.length - index;
+              const gameNumber = displayGames.length - index;
               const gameTitle =
                 game.game_name && game.game_name.trim().length > 0
                   ? game.game_name
