@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import UploadForm from "./UploadForm";
 import GameReview from "./GameReview";
 import ChatPanel from "./ChatPanel";
@@ -120,8 +120,11 @@ export default function Dashboard() {
   const [games, setGames] = useState<GameListItem[]>([]);
   const [gamesTotal, setGamesTotal] = useState<number | null>(null);
   const [gamesLimit, setGamesLimit] = useState<number>(20);
-  const [loggedPopupGames, setLoggedPopupGames] = useState<GameListItem[]>([]);
-  const [showLoggedPopup, setShowLoggedPopup] = useState<boolean>(false);
+  const [newLoggedIds, setNewLoggedIds] = useState<string[]>([]);
+  const [dismissedLoggedIds, setDismissedLoggedIds] = useState<string[]>([]);
+  const [loggedGameCache, setLoggedGameCache] = useState<Record<string, GameListItem>>(
+    {}
+  );
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [expandedGames, setExpandedGames] = useState<Record<string, GameDetail>>(
     {}
@@ -132,6 +135,10 @@ export default function Dashboard() {
   const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
   const pendingJobsRef = useRef<PendingJob[]>([]);
   const pollCountsRef = useRef<Record<string, number>>({});
+  const dismissTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>(
+    {}
+  );
+  const isDebug = process.env.CHAT_DEBUG === "true";
 
   const loadGames = useCallback(async () => {
     try {
@@ -223,6 +230,25 @@ export default function Dashboard() {
   }, [pendingJobs]);
 
   useEffect(() => {
+    const activeIds = new Set(pendingJobs.map((job) => job.jobId));
+    Object.entries(dismissTimersRef.current).forEach(([jobId, timer]) => {
+      if (!activeIds.has(jobId)) {
+        clearTimeout(timer);
+        delete dismissTimersRef.current[jobId];
+      }
+    });
+  }, [pendingJobs]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(dismissTimersRef.current).forEach((timer) => {
+        clearTimeout(timer);
+      });
+      dismissTimersRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
     const hasActiveJobs = pendingJobs.some(
       (job) =>
         !job.isStale &&
@@ -243,6 +269,18 @@ export default function Dashboard() {
       );
     };
 
+    const scheduleDismiss = (jobId: string, delayMs = 4000) => {
+      if (dismissTimersRef.current[jobId]) {
+        return;
+      }
+      dismissTimersRef.current[jobId] = setTimeout(() => {
+        setPendingJobs((current) =>
+          current.filter((job) => job.jobId !== jobId)
+        );
+        delete dismissTimersRef.current[jobId];
+      }, delayMs);
+    };
+
     const checkStatus = async () => {
       if (!isActive) {
         return;
@@ -261,6 +299,7 @@ export default function Dashboard() {
         pollCountsRef.current[job.jobId] =
           (pollCountsRef.current[job.jobId] ?? 0) + 1;
 
+        let nextStatus: JobStatus | null = null;
         try {
           const response = await authFetch(`/api/status?jobId=${job.jobId}`);
 
@@ -270,6 +309,7 @@ export default function Dashboard() {
           }
 
           const payload = (await response.json()) as StatusResponse;
+          nextStatus = payload.status;
           let nextMessage = job.message;
 
           if (payload.status === "queued") {
@@ -281,15 +321,22 @@ export default function Dashboard() {
             const loggedGame = await loadGameFromJob(job.jobId);
             if (loggedGame) {
               const listItem = toGameListItem(loggedGame);
-              setLoggedPopupGames((current) => {
-                if (current.some((item) => item.id === listItem.id)) {
+              setLoggedGameCache((current) => ({
+                ...current,
+                [listItem.id]: listItem
+              }));
+              setNewLoggedIds((current) => {
+                if (current.includes(listItem.id)) {
                   return current;
                 }
-                return [listItem, ...current];
+                if (dismissedLoggedIds.includes(listItem.id)) {
+                  return current;
+                }
+                return [listItem.id, ...current];
               });
-              setShowLoggedPopup(true);
             }
             await loadGames();
+            scheduleDismiss(job.jobId);
           } else if (payload.status === "error") {
             nextMessage = payload.lastError
               ? `Job failed: ${payload.lastError}`
@@ -299,19 +346,31 @@ export default function Dashboard() {
           updateJob(job.jobId, {
             status: payload.status,
             message: nextMessage,
-            lastError: payload.lastError ?? undefined
+            lastError: payload.lastError ?? undefined,
+            isStale:
+              payload.status === "queued" || payload.status === "processing"
+                ? job.isStale
+                : false
           });
         } catch (error) {
           const messageText =
             error instanceof Error ? error.message : "Status check failed.";
-          updateJob(job.jobId, { status: "error", message: messageText });
+          nextStatus = "error";
+          updateJob(job.jobId, {
+            status: "error",
+            message: messageText,
+            isStale: false
+          });
         }
 
         if (pollCountsRef.current[job.jobId] >= MAX_POLLS) {
-          updateJob(job.jobId, {
-            isStale: true,
-            message: "Still queued. Refresh later to check again."
-          });
+          const statusForStale = nextStatus ?? job.status;
+          if (statusForStale === "queued" || statusForStale === "processing") {
+            updateJob(job.jobId, {
+              isStale: true,
+              message: "Still queued. Refresh later to check again."
+            });
+          }
         }
       }
     };
@@ -325,7 +384,7 @@ export default function Dashboard() {
         clearInterval(intervalId);
       }
     };
-  }, [pendingJobs, loadGameFromJob, loadGames, toGameListItem]);
+  }, [pendingJobs, loadGameFromJob, loadGames, toGameListItem, dismissedLoggedIds]);
 
   const handleQueued = (jobs: Array<{ jobId: string; message: string }>) => {
     setPendingJobs((current) => {
@@ -393,9 +452,15 @@ export default function Dashboard() {
         setEditingGameId(null);
         setEditingMode("edit");
       }
-      setLoggedPopupGames((current) =>
-        current.filter((game) => game.id !== gameId)
+      setNewLoggedIds((current) => current.filter((id) => id !== gameId));
+      setDismissedLoggedIds((current) =>
+        current.filter((id) => id !== gameId)
       );
+      setLoggedGameCache((current) => {
+        const next = { ...current };
+        delete next[gameId];
+        return next;
+      });
       await loadGames();
     } catch (error) {
       const message =
@@ -432,26 +497,70 @@ export default function Dashboard() {
   const handleLoadMore = () => {
     setGamesLimit((prev) => prev + 20);
   };
-  const popupGames = loggedPopupGames.map(
-    (logged) => games.find((game) => game.id === logged.id) || logged
-  );
-  const popupIds = new Set(popupGames.map((game) => game.id));
-  const displayGames = showLoggedPopup
-    ? games.filter((game) => !popupIds.has(game.id))
-    : games;
+  const displayGames = games;
   const displayCount = games.length;
   const handleCloseLoggedPopup = () => {
-    setShowLoggedPopup(false);
-    setLoggedPopupGames([]);
+    setDismissedLoggedIds((current) => {
+      const next = new Set(current);
+      newLoggedIds.forEach((id) => next.add(id));
+      return Array.from(next);
+    });
+    setNewLoggedIds([]);
   };
-  const getGameNumber = (gameId: string) => {
-    const index = games.findIndex((game) => game.id === gameId);
-    if (index === -1) {
-      return null;
+  const popupGames = newLoggedIds
+    .map((id) => games.find((game) => game.id === id) || loggedGameCache[id])
+    .filter((game): game is GameListItem => Boolean(game));
+  const showLoggedPopup = popupGames.length > 0;
+  const gameNumberMap = useMemo(() => {
+    const combined = [...games];
+    const existingIds = new Set(combined.map((game) => game.id));
+    Object.values(loggedGameCache).forEach((game) => {
+      if (!existingIds.has(game.id)) {
+        combined.push(game);
+        existingIds.add(game.id);
+      }
+    });
+    combined.sort((a, b) => {
+      const aTime = a.played_at
+        ? Date.parse(a.played_at)
+        : Date.parse(a.created_at);
+      const bTime = b.played_at
+        ? Date.parse(b.played_at)
+        : Date.parse(b.created_at);
+      return bTime - aTime;
+    });
+    const total = gamesTotal ?? combined.length;
+    const map = new Map<string, number>();
+    combined.forEach((game, index) => {
+      map.set(game.id, total - index);
+    });
+    return map;
+  }, [games, gamesTotal, loggedGameCache]);
+  const formatJobMessage = (job: PendingJob) => {
+    if (isDebug) {
+      const statusLabel = job.status ? ` Status: ${job.status}.` : "";
+      return `${job.message}${statusLabel} Job ID: ${job.jobId}.`;
     }
-    const total = gamesTotal ?? games.length;
-    return total - index;
+    if (job.isStale) {
+      return "Still queued. Check back later.";
+    }
+    if (job.status === "queued") {
+      return "Queued for extraction.";
+    }
+    if (job.status === "processing") {
+      return "Processing the image...";
+    }
+    if (job.status === "logged") {
+      return "Logged. Ready to review.";
+    }
+    if (job.status === "error") {
+      return job.lastError
+        ? `Job failed: ${job.lastError}`
+        : "Job failed during processing.";
+    }
+    return job.message;
   };
+  const getGameNumber = (gameId: string) => gameNumberMap.get(gameId) ?? null;
   const renderGameCard = (game: GameListItem) => {
     const expanded = expandedGameId === game.id;
     const detail = expandedGames[game.id];
@@ -631,7 +740,7 @@ export default function Dashboard() {
             If have different names throughout the scoresheets, write them out comma seperated
           </p>
         </div>
-        <UploadForm onQueued={handleQueued} />
+        <UploadForm onQueued={handleQueued} pendingJobsCount={pendingJobs.length} />
         {pendingJobs.length > 0 ? (
           <div className="status-stack">
             {pendingJobs.map((job) => (
@@ -643,9 +752,7 @@ export default function Dashboard() {
                   {job.status === "queued" || job.status === "processing" ? (
                     <span className="spinner spinner-muted" aria-hidden="true" />
                   ) : null}
-                  <span>
-                    {job.message} Status: {job.status}. Job ID: {job.jobId}.
-                  </span>
+                  <span>{formatJobMessage(job)}</span>
                 </span>
               </div>
             ))}
@@ -689,9 +796,7 @@ export default function Dashboard() {
         ) : null}
         <div className="games-list">
           {displayGames.length === 0 ? (
-            <p className="helper">
-              {games.length === 0 ? "No games yet." : "No other games yet."}
-            </p>
+            <p className="helper">No games yet.</p>
           ) : (
             displayGames.map((game) => renderGameCard(game))
           )}

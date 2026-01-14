@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true
+  reactStrictMode: true,
+  env: {
+    CHAT_DEBUG: process.env.CHAT_DEBUG
+  }
 };
 
 module.exports = nextConfig;

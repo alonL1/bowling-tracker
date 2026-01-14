@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { authFetch } from "../lib/authClient";
 
 type SubmitState = "idle" | "submitting" | "queued" | "error";
@@ -23,12 +23,26 @@ type QueuedJob = {
 type UploadFormProps = {
   onQueued?: (jobs: QueuedJob[]) => void;
   onError?: (message: string) => void;
+  pendingJobsCount?: number;
 };
 
-export default function UploadForm({ onQueued, onError }: UploadFormProps) {
+export default function UploadForm({
+  onQueued,
+  onError,
+  pendingJobsCount = 0
+}: UploadFormProps) {
   const [status, setStatus] = useState<SubmitState>("idle");
   const [message, setMessage] = useState<string>("");
   const [jobIds, setJobIds] = useState<string[]>([]);
+  const isDebug = process.env.CHAT_DEBUG === "true";
+
+  useEffect(() => {
+    if (pendingJobsCount === 0 && jobIds.length > 0) {
+      setStatus("idle");
+      setMessage("");
+      setJobIds([]);
+    }
+  }, [jobIds.length, pendingJobsCount]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -108,11 +122,17 @@ export default function UploadForm({ onQueued, onError }: UploadFormProps) {
         return;
       }
 
-      const queuedMessage = `Queued ${queuedJobs.length} job${
-        queuedJobs.length === 1 ? "" : "s"
-      } for extraction.`;
+      const queuedMessage = isDebug
+        ? `Queued ${queuedJobs.length} job${
+            queuedJobs.length === 1 ? "" : "s"
+          } for extraction.`
+        : `Queued ${queuedJobs.length} game${
+            queuedJobs.length === 1 ? "" : "s"
+          } for review.`;
       const errorSuffix = errors.length
-        ? ` ${errors.length} upload${errors.length === 1 ? "" : "s"} failed.`
+        ? isDebug
+          ? ` ${errors.length} upload${errors.length === 1 ? "" : "s"} failed.`
+          : " Some uploads failed."
         : "";
 
       setStatus(errors.length ? "error" : "queued");
@@ -168,7 +188,7 @@ export default function UploadForm({ onQueued, onError }: UploadFormProps) {
       {status !== "idle" && message ? (
         <div className={`status ${status === "error" ? "error" : ""}`}>
           {message}
-          {jobIds.length > 0 ? ` Job IDs: ${jobIds.join(", ")}.` : ""}
+          {isDebug && jobIds.length > 0 ? ` Job IDs: ${jobIds.join(", ")}.` : ""}
         </div>
       ) : null}
     </form>
