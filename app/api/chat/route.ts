@@ -337,6 +337,7 @@ Return JSON only with this schema: {"sql": string|null, "explanation": string}.
 - Use table and column names exactly as defined.
 - If you cannot answer with SQL, set sql to "__USE_CONTEXT__" and explain.
 - The game index already reflects any time filters; only use games listed below.
+- Labels like "Game 3" come from the Game Index ordering; do not filter by games.game_name for "Game N" labels unless the user explicitly mentions a custom name.
 - The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 - Times mentioned in the user's question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
 - Times in Schema and Game Index are in UTC.
@@ -1478,7 +1479,7 @@ export async function POST(request: Request) {
         "id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
       .eq("user_id", effectiveUserId)
-      .order("created_at", { ascending: false })
+      .order("played_at", { ascending: false })
       .limit(100);
 
     if (error) {
@@ -1495,17 +1496,27 @@ export async function POST(request: Request) {
   const orderedGames: OrderedGame[] = games
     .slice()
     .sort((a, b) => {
-      const aTime = a.created_at ? Date.parse(a.created_at) : 0;
-      const bTime = b.created_at ? Date.parse(b.created_at) : 0;
+      const aTime = a.played_at
+        ? Date.parse(a.played_at)
+        : a.created_at
+          ? Date.parse(a.created_at)
+          : 0;
+      const bTime = b.played_at
+        ? Date.parse(b.played_at)
+        : b.created_at
+          ? Date.parse(b.created_at)
+          : 0;
       return aTime - bTime;
     })
-    .map((game) => ({
-      ...game,
-      game_name:
-        game.game_name && game.game_name.trim().length > 0
-          ? game.game_name
-          : "Untitled game"
-    }));
+    .map((game, index) => {
+      const trimmedName = game.game_name?.trim();
+      return {
+        ...game,
+        game_name: trimmedName && trimmedName.length > 0
+          ? trimmedName
+          : `Game ${index + 1}`
+      };
+    });
 
   const selectedNumbers = extractGameNumbers(question);
   const selectedNames = mapNumbersToNames(selectedNumbers).map((name) =>

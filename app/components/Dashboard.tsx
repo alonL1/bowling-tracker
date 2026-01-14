@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import UploadForm from "./UploadForm";
 import GameReview from "./GameReview";
 import ChatPanel from "./ChatPanel";
@@ -14,6 +14,14 @@ type StatusResponse = {
   lastError?: string | null;
   updatedAt?: string;
   gameId?: string;
+};
+
+type PendingJob = {
+  jobId: string;
+  status: JobStatus;
+  message: string;
+  lastError?: string;
+  isStale?: boolean;
 };
 
 type GameDetail = {
@@ -107,15 +115,16 @@ function buildScoreRows(game: GameDetail) {
 }
 
 export default function Dashboard() {
-  const [jobId, setJobId] = useState<string>("");
-  const [jobStatus, setJobStatus] = useState<JobStatus | "">("");
-  const [statusMessage, setStatusMessage] = useState<string>("");
-  const [jobError, setJobError] = useState<string>("");
+  const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
   const [gameError, setGameError] = useState<string>("");
   const [games, setGames] = useState<GameListItem[]>([]);
   const [gamesTotal, setGamesTotal] = useState<number | null>(null);
-  const [gamesLimit, setGamesLimit] = useState<number>(10);
-  const [pinnedGame, setPinnedGame] = useState<GameListItem | null>(null);
+  const [gamesLimit, setGamesLimit] = useState<number>(20);
+  const [newLoggedIds, setNewLoggedIds] = useState<string[]>([]);
+  const [dismissedLoggedIds, setDismissedLoggedIds] = useState<string[]>([]);
+  const [loggedGameCache, setLoggedGameCache] = useState<Record<string, GameListItem>>(
+    {}
+  );
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [expandedGames, setExpandedGames] = useState<Record<string, GameDetail>>(
     {}
@@ -124,7 +133,12 @@ export default function Dashboard() {
   const [editingMode, setEditingMode] = useState<"review" | "edit">("edit");
   const [chatGameId, setChatGameId] = useState<string | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
-  const pollCountRef = useRef(0);
+  const pendingJobsRef = useRef<PendingJob[]>([]);
+  const pollCountsRef = useRef<Record<string, number>>({});
+  const dismissTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>(
+    {}
+  );
+  const isDebug = process.env.CHAT_DEBUG === "true";
 
   const loadGames = useCallback(async () => {
     try {
@@ -172,6 +186,19 @@ export default function Dashboard() {
     }
   }, []);
 
+  const toGameListItem = useCallback(
+    (game: GameDetail): GameListItem => ({
+      id: game.id,
+      game_name: game.game_name ?? null,
+      player_name: game.player_name,
+      total_score: game.total_score ?? null,
+      status: game.status,
+      played_at: game.played_at ?? null,
+      created_at: game.created_at ?? new Date().toISOString()
+    }),
+    []
+  );
+
   const loadGameFromJob = useCallback(async (lookupJobId: string) => {
     setGameError("");
     try {
@@ -185,23 +212,12 @@ export default function Dashboard() {
         ...current,
         [payload.game.id]: payload.game
       }));
-      setExpandedGameId(payload.game.id);
-      setEditingGameId(payload.game.id);
-      setEditingMode("review");
-      setChatGameId(payload.game.id);
-      setPinnedGame({
-        id: payload.game.id,
-        game_name: payload.game.game_name ?? null,
-        player_name: payload.game.player_name,
-        total_score: payload.game.total_score ?? null,
-        status: payload.game.status,
-        played_at: payload.game.played_at ?? null,
-        created_at: payload.game.created_at ?? new Date().toISOString()
-      });
+      return payload.game;
     } catch (error) {
       setGameError(
         error instanceof Error ? error.message : "Failed to load game."
       );
+      return null;
     }
   }, []);
 
@@ -210,75 +226,151 @@ export default function Dashboard() {
   }, [loadGames]);
 
   useEffect(() => {
-    if (!pinnedGame) {
-      return;
-    }
-    if (editingGameId !== pinnedGame.id) {
-      setPinnedGame(null);
-    }
-  }, [editingGameId, pinnedGame]);
+    pendingJobsRef.current = pendingJobs;
+  }, [pendingJobs]);
 
   useEffect(() => {
-    if (!jobId) {
+    const activeIds = new Set(pendingJobs.map((job) => job.jobId));
+    Object.entries(dismissTimersRef.current).forEach(([jobId, timer]) => {
+      if (!activeIds.has(jobId)) {
+        clearTimeout(timer);
+        delete dismissTimersRef.current[jobId];
+      }
+    });
+  }, [pendingJobs]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(dismissTimersRef.current).forEach((timer) => {
+        clearTimeout(timer);
+      });
+      dismissTimersRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
+    const hasActiveJobs = pendingJobs.some(
+      (job) =>
+        !job.isStale &&
+        (job.status === "queued" || job.status === "processing")
+    );
+    if (!hasActiveJobs) {
       return;
     }
 
     let isActive = true;
-    pollCountRef.current = 0;
     let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const updateJob = (jobId: string, updates: Partial<PendingJob>) => {
+      setPendingJobs((current) =>
+        current.map((job) =>
+          job.jobId === jobId ? { ...job, ...updates } : job
+        )
+      );
+    };
+
+    const scheduleDismiss = (jobId: string, delayMs = 4000) => {
+      if (dismissTimersRef.current[jobId]) {
+        return;
+      }
+      dismissTimersRef.current[jobId] = setTimeout(() => {
+        setPendingJobs((current) =>
+          current.filter((job) => job.jobId !== jobId)
+        );
+        delete dismissTimersRef.current[jobId];
+      }, delayMs);
+    };
 
     const checkStatus = async () => {
       if (!isActive) {
         return;
       }
 
-      pollCountRef.current += 1;
-
-      try {
-        const response = await authFetch(`/api/status?jobId=${jobId}`);
-
-        if (!response.ok) {
-          const payload = (await response.json()) as { error?: string };
-          throw new Error(payload.error || "Status check failed.");
+      const jobs = pendingJobsRef.current;
+      for (const job of jobs) {
+        if (
+          job.isStale ||
+          job.status === "logged" ||
+          job.status === "error"
+        ) {
+          continue;
         }
 
-        const payload = (await response.json()) as StatusResponse;
-        setJobStatus(payload.status);
+        pollCountsRef.current[job.jobId] =
+          (pollCountsRef.current[job.jobId] ?? 0) + 1;
 
-        if (payload.status === "queued") {
-          setStatusMessage("Queued. Waiting for the worker to pick it up.");
-        } else if (payload.status === "processing") {
-          setStatusMessage("Processing with Gemini...");
-        } else if (payload.status === "logged") {
-          setStatusMessage("Extraction complete. Logged.");
-          await loadGameFromJob(jobId);
-          await loadGames();
-        } else if (payload.status === "error") {
-          setJobError(
-            payload.lastError
-              ? `Job failed: ${payload.lastError}`
-              : "Job failed during processing."
-          );
-        }
+        let nextStatus: JobStatus | null = null;
+        try {
+          const response = await authFetch(`/api/status?jobId=${job.jobId}`);
 
-        if (payload.status === "logged" || payload.status === "error") {
-          if (intervalId) {
-            clearInterval(intervalId);
+          if (!response.ok) {
+            const payload = (await response.json()) as { error?: string };
+            throw new Error(payload.error || "Status check failed.");
           }
-        }
-      } catch (error) {
-        const messageText =
-          error instanceof Error ? error.message : "Status check failed.";
-        setJobError(messageText);
-        if (intervalId) {
-          clearInterval(intervalId);
-        }
-      }
 
-      if (pollCountRef.current >= MAX_POLLS) {
-        setStatusMessage("Still queued. Refresh later to check again.");
-        if (intervalId) {
-          clearInterval(intervalId);
+          const payload = (await response.json()) as StatusResponse;
+          nextStatus = payload.status;
+          let nextMessage = job.message;
+
+          if (payload.status === "queued") {
+            nextMessage = "Queued. Waiting for the worker to pick it up.";
+          } else if (payload.status === "processing") {
+            nextMessage = "Processing with Gemini...";
+          } else if (payload.status === "logged") {
+            nextMessage = "Extraction complete. Logged.";
+            const loggedGame = await loadGameFromJob(job.jobId);
+            if (loggedGame) {
+              const listItem = toGameListItem(loggedGame);
+              setLoggedGameCache((current) => ({
+                ...current,
+                [listItem.id]: listItem
+              }));
+              setNewLoggedIds((current) => {
+                if (current.includes(listItem.id)) {
+                  return current;
+                }
+                if (dismissedLoggedIds.includes(listItem.id)) {
+                  return current;
+                }
+                return [listItem.id, ...current];
+              });
+            }
+            await loadGames();
+            scheduleDismiss(job.jobId);
+          } else if (payload.status === "error") {
+            nextMessage = payload.lastError
+              ? `Job failed: ${payload.lastError}`
+              : "Job failed during processing.";
+          }
+
+          updateJob(job.jobId, {
+            status: payload.status,
+            message: nextMessage,
+            lastError: payload.lastError ?? undefined,
+            isStale:
+              payload.status === "queued" || payload.status === "processing"
+                ? job.isStale
+                : false
+          });
+        } catch (error) {
+          const messageText =
+            error instanceof Error ? error.message : "Status check failed.";
+          nextStatus = "error";
+          updateJob(job.jobId, {
+            status: "error",
+            message: messageText,
+            isStale: false
+          });
+        }
+
+        if (pollCountsRef.current[job.jobId] >= MAX_POLLS) {
+          const statusForStale = nextStatus ?? job.status;
+          if (statusForStale === "queued" || statusForStale === "processing") {
+            updateJob(job.jobId, {
+              isStale: true,
+              message: "Still queued. Refresh later to check again."
+            });
+          }
         }
       }
     };
@@ -292,13 +384,20 @@ export default function Dashboard() {
         clearInterval(intervalId);
       }
     };
-  }, [jobId, loadGameFromJob, loadGames]);
+  }, [pendingJobs, loadGameFromJob, loadGames, toGameListItem, dismissedLoggedIds]);
 
-  const handleQueued = (newJobId: string, message: string) => {
-    setJobId(newJobId);
-    setJobStatus("queued");
-    setStatusMessage(message);
-    setJobError("");
+  const handleQueued = (jobs: Array<{ jobId: string; message: string }>) => {
+    setPendingJobs((current) => {
+      const existingIds = new Set(current.map((job) => job.jobId));
+      const nextJobs = jobs
+        .filter((job) => !existingIds.has(job.jobId))
+        .map((job) => ({
+          jobId: job.jobId,
+          status: "queued" as JobStatus,
+          message: job.message
+        }));
+      return [...current, ...nextJobs];
+    });
     setEditingGameId(null);
     setEditingMode("edit");
   };
@@ -353,6 +452,15 @@ export default function Dashboard() {
         setEditingGameId(null);
         setEditingMode("edit");
       }
+      setNewLoggedIds((current) => current.filter((id) => id !== gameId));
+      setDismissedLoggedIds((current) =>
+        current.filter((id) => id !== gameId)
+      );
+      setLoggedGameCache((current) => {
+        const next = { ...current };
+        delete next[gameId];
+        return next;
+      });
       await loadGames();
     } catch (error) {
       const message =
@@ -387,15 +495,239 @@ export default function Dashboard() {
   const activeGameLabel = "all games";
   const showLoadMore = gamesTotal !== null && games.length < gamesTotal;
   const handleLoadMore = () => {
-    setGamesLimit((prev) => prev + 10);
+    setGamesLimit((prev) => prev + 20);
   };
-  const pinnedInList = pinnedGame
-    ? games.some((game) => game.id === pinnedGame.id)
-    : false;
-  const displayGames = pinnedGame
-    ? [pinnedGame, ...games.filter((game) => game.id !== pinnedGame.id)]
-    : games;
-  const displayCount = games.length + (pinnedGame && !pinnedInList ? 1 : 0);
+  const displayGames = games;
+  const displayCount = games.length;
+  const handleCloseLoggedPopup = () => {
+    setDismissedLoggedIds((current) => {
+      const next = new Set(current);
+      newLoggedIds.forEach((id) => next.add(id));
+      return Array.from(next);
+    });
+    setNewLoggedIds([]);
+  };
+  const popupGames = newLoggedIds
+    .map((id) => games.find((game) => game.id === id) || loggedGameCache[id])
+    .filter((game): game is GameListItem => Boolean(game));
+  const showLoggedPopup = popupGames.length > 0;
+  const gameNumberMap = useMemo(() => {
+    const combined = [...games];
+    const existingIds = new Set(combined.map((game) => game.id));
+    Object.values(loggedGameCache).forEach((game) => {
+      if (!existingIds.has(game.id)) {
+        combined.push(game);
+        existingIds.add(game.id);
+      }
+    });
+    combined.sort((a, b) => {
+      const aTime = a.played_at
+        ? Date.parse(a.played_at)
+        : Date.parse(a.created_at);
+      const bTime = b.played_at
+        ? Date.parse(b.played_at)
+        : Date.parse(b.created_at);
+      return bTime - aTime;
+    });
+    const total = gamesTotal ?? combined.length;
+    const map = new Map<string, number>();
+    combined.forEach((game, index) => {
+      map.set(game.id, total - index);
+    });
+    return map;
+  }, [games, gamesTotal, loggedGameCache]);
+  const formatJobMessage = (job: PendingJob) => {
+    if (isDebug) {
+      const statusLabel = job.status ? ` Status: ${job.status}.` : "";
+      return `${job.message}${statusLabel} Job ID: ${job.jobId}.`;
+    }
+    if (job.isStale) {
+      return "Still queued. Check back later.";
+    }
+    if (job.status === "queued") {
+      return "Queued for extraction.";
+    }
+    if (job.status === "processing") {
+      return "Processing the image...";
+    }
+    if (job.status === "logged") {
+      return "Logged. Ready to review.";
+    }
+    if (job.status === "error") {
+      return job.lastError
+        ? `Job failed: ${job.lastError}`
+        : "Job failed during processing.";
+    }
+    return job.message;
+  };
+  const getGameNumber = (gameId: string) => gameNumberMap.get(gameId) ?? null;
+  const renderGameCard = (game: GameListItem) => {
+    const expanded = expandedGameId === game.id;
+    const detail = expandedGames[game.id];
+    const rows = detail ? buildScoreRows(detail) : null;
+    const gameNumber = getGameNumber(game.id);
+    const trimmedName = game.game_name?.trim();
+    const gameTitle = trimmedName
+      ? trimmedName
+      : gameNumber
+        ? `Game ${gameNumber}`
+        : "Game";
+
+    return (
+      <div key={game.id} className="game-card">
+        <div className="game-row">
+          <div className="game-meta">
+            <p className="game-title">{gameTitle}</p>
+            <p className="helper">
+              {game.player_name ? `${game.player_name} - ` : ""}
+              {new Date(game.played_at || game.created_at).toLocaleString()}
+              {game.total_score !== null
+                ? ` - Score: ${game.total_score}`
+                : ""}
+            </p>
+          </div>
+          <div className="game-actions-inline">
+            <button
+              type="button"
+              className="edit-toggle"
+              onClick={() => handleEdit(game.id)}
+              aria-label={`Edit ${gameTitle}`}
+              title={`Edit ${gameTitle}`}
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+              >
+                <path
+                  d="M4 20h4l11-11-4-4L4 16v4z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M13 7l4 4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="delete-toggle"
+              onClick={() => handleDelete(game.id)}
+              disabled={deletingGameId === game.id}
+              aria-label={`Delete ${gameTitle}`}
+              title={`Delete ${gameTitle}`}
+            >
+              {deletingGameId === game.id ? (
+                <span className="spinner" aria-hidden="true" />
+              ) : (
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                >
+                  <path
+                    d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              className="expand-toggle"
+              onClick={() => toggleExpand(game.id)}
+              aria-expanded={expanded}
+              aria-controls={`game-score-${game.id}`}
+              aria-label={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
+              title={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+              >
+                <path
+                  d="M9 6l6 6-6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+        {expanded ? (
+          <div className="game-score" id={`game-score-${game.id}`}>
+            {detail && rows ? (
+              editingGameId === game.id ? (
+                <GameReview
+                  game={detail}
+                  mode={editingMode}
+                  onConfirmed={() => handleConfirm(game.id)}
+                  onCancel={handleCancelEdit}
+                />
+              ) : (
+                <div className="score-grid">
+                  <div className="score-row score-header">
+                    {Array.from({ length: 10 }, (_, index) => (
+                      <div key={`h-${game.id}-${index}`} className="score-cell">
+                        {index + 1}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="score-row">
+                    {rows.row1.map((cell, index) => (
+                      <div key={`r1-${game.id}-${index}`} className="score-cell">
+                        {cell}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="score-row">
+                    {rows.row2.map((cell, index) => (
+                      <div key={`r2-${game.id}-${index}`} className="score-cell">
+                        {cell}
+                      </div>
+                    ))}
+                  </div>
+                  {rows.showRow3 ? (
+                    <div className="score-row">
+                      {rows.row3.map((cell, index) => (
+                        <div key={`r3-${game.id}-${index}`} className="score-cell">
+                          {cell}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            ) : (
+              <div className="loading-row">
+                <span className="spinner spinner-muted" aria-hidden="true" />
+                <span className="helper">Loading frames...</span>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="dashboard">
@@ -403,31 +735,36 @@ export default function Dashboard() {
         <div className="panel-header">
           <h2>Log a game</h2>
           <p className="helper">
-            Upload a scoreboard image, then wait for the worker to finish.
+            Upload a scoreboard image, then wait for the worker to finish. <br />
+            To add multiple games at once simply select multiple images. <br />
+            If have different names throughout the scoresheets, write them out comma seperated
           </p>
         </div>
-        <UploadForm onQueued={handleQueued} onError={setJobError} />
-        {statusMessage ? (
-          <div className="status">
-            <span className="status-content">
-              {jobStatus === "queued" || jobStatus === "processing" ? (
-                <span className="spinner spinner-muted" aria-hidden="true" />
-              ) : null}
-              <span>
-                {statusMessage}
-                {jobStatus ? ` Status: ${jobStatus}.` : ""}
-              </span>
-            </span>
+        <UploadForm onQueued={handleQueued} pendingJobsCount={pendingJobs.length} />
+        {pendingJobs.length > 0 ? (
+          <div className="status-stack">
+            {pendingJobs.map((job) => (
+              <div
+                key={job.jobId}
+                className={`status ${job.status === "error" ? "error" : ""}`}
+              >
+                <span className="status-content">
+                  {job.status === "queued" || job.status === "processing" ? (
+                    <span className="spinner spinner-muted" aria-hidden="true" />
+                  ) : null}
+                  <span>{formatJobMessage(job)}</span>
+                </span>
+              </div>
+            ))}
           </div>
         ) : null}
-        {jobError ? <p className="helper error-text">{jobError}</p> : null}
       </section>
 
       <section className="panel anchor-section" id="games">
         <div className="panel-header">
           <h2>Your games</h2>
           <p className="helper">
-            Expand a game to view the frames in a compact score format.
+            Expand a game to view the frames.
           </p>
           <p className="helper">
             {gamesTotal !== null
@@ -435,175 +772,33 @@ export default function Dashboard() {
               : `Showing ${displayCount} games.`}
           </p>
         </div>
+        {showLoggedPopup && popupGames.length > 0 ? (
+          <div className="logged-popup">
+            <div className="logged-popup-header">
+              <div>
+                <h3>Newly logged games</h3>
+                <p className="helper">
+                  Review games for accuracy, then feel free to close this pop up.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="button-secondary logged-popup-close"
+                onClick={handleCloseLoggedPopup}
+              >
+                Close
+              </button>
+            </div>
+            <div className="games-list">
+              {popupGames.map((game) => renderGameCard(game))}
+            </div>
+          </div>
+        ) : null}
         <div className="games-list">
           {displayGames.length === 0 ? (
             <p className="helper">No games yet.</p>
           ) : (
-            displayGames.map((game, index) => {
-              const expanded = expandedGameId === game.id;
-              const detail = expandedGames[game.id];
-              const rows = detail ? buildScoreRows(detail) : null;
-              const gameNumber = displayGames.length - index;
-              const gameTitle =
-                game.game_name && game.game_name.trim().length > 0
-                  ? game.game_name
-                  : `Game ${gameNumber}`;
-
-              return (
-                <div key={game.id} className="game-card">
-                  <div className="game-row">
-                    <div className="game-meta">
-                      <p className="game-title">{gameTitle}</p>
-                      <p className="helper">
-                        {game.player_name ? `${game.player_name} · ` : ""}
-                        {new Date(game.played_at || game.created_at).toLocaleString()}
-                        {game.total_score !== null
-                          ? ` · Score: ${game.total_score}`
-                          : ""}
-                      </p>
-                    </div>
-                    <div className="game-actions-inline">
-                      <button
-                        type="button"
-                        className="edit-toggle"
-                        onClick={() => handleEdit(game.id)}
-                        aria-label={`Edit ${gameTitle}`}
-                        title={`Edit ${gameTitle}`}
-                      >
-                        <svg
-                          aria-hidden="true"
-                          viewBox="0 0 24 24"
-                          width="16"
-                          height="16"
-                        >
-                          <path
-                            d="M4 20h4l11-11-4-4L4 16v4z"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M13 7l4 4"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        className="delete-toggle"
-                        onClick={() => handleDelete(game.id)}
-                        disabled={deletingGameId === game.id}
-                        aria-label={`Delete ${gameTitle}`}
-                        title={`Delete ${gameTitle}`}
-                      >
-                        {deletingGameId === game.id ? (
-                          <span className="spinner" aria-hidden="true" />
-                        ) : (
-                          <svg
-                            aria-hidden="true"
-                            viewBox="0 0 24 24"
-                            width="16"
-                            height="16"
-                          >
-                            <path
-                              d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.6"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="expand-toggle"
-                        onClick={() => toggleExpand(game.id)}
-                        aria-expanded={expanded}
-                        aria-controls={`game-score-${game.id}`}
-                        aria-label={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
-                        title={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
-                      >
-                        <svg
-                          aria-hidden="true"
-                          viewBox="0 0 24 24"
-                          width="16"
-                          height="16"
-                        >
-                          <path
-                            d="M9 6l6 6-6 6"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  {expanded ? (
-                    <div className="game-score" id={`game-score-${game.id}`}>
-                      {detail && rows ? (
-                        editingGameId === game.id ? (
-                          <GameReview
-                            game={detail}
-                            mode={editingMode}
-                            onConfirmed={() => handleConfirm(game.id)}
-                            onCancel={handleCancelEdit}
-                          />
-                        ) : (
-                          <div className="score-grid">
-                            <div className="score-row score-header">
-                              {Array.from({ length: 10 }, (_, index) => (
-                                <div key={`h-${game.id}-${index}`} className="score-cell">
-                                  {index + 1}
-                                </div>
-                              ))}
-                            </div>
-                            <div className="score-row">
-                              {rows.row1.map((cell, index) => (
-                                <div key={`r1-${game.id}-${index}`} className="score-cell">
-                                  {cell}
-                                </div>
-                              ))}
-                            </div>
-                            <div className="score-row">
-                              {rows.row2.map((cell, index) => (
-                                <div key={`r2-${game.id}-${index}`} className="score-cell">
-                                  {cell}
-                                </div>
-                              ))}
-                            </div>
-                            {rows.showRow3 ? (
-                              <div className="score-row">
-                                {rows.row3.map((cell, index) => (
-                                  <div key={`r3-${game.id}-${index}`} className="score-cell">
-                                    {cell}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                        )
-                      ) : (
-                        <div className="loading-row">
-                          <span className="spinner spinner-muted" aria-hidden="true" />
-                          <span className="helper">Loading frames...</span>
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })
+            displayGames.map((game) => renderGameCard(game))
           )}
         </div>
         {showLoadMore ? (
@@ -626,3 +821,6 @@ export default function Dashboard() {
     </div>
   );
 }
+
+
+

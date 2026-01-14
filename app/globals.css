@@ -249,6 +249,16 @@ button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
+.status-stack {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.status-stack .status {
+  margin-top: 0;
+}
+
 .status {
   margin-top: 12px;
   padding: 12px 14px;
@@ -419,6 +429,27 @@ button:hover:not(:disabled) {
 .games-list {
   display: grid;
   gap: 12px;
+}
+
+.logged-popup {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px dashed rgba(15, 107, 95, 0.35);
+  background: rgba(15, 107, 95, 0.06);
+  display: grid;
+  gap: 12px;
+}
+
+.logged-popup-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.logged-popup-close {
+  align-self: flex-start;
 }
 
 .games-footer {
