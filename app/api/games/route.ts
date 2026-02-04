@@ -6,10 +6,12 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const limit = Number.parseInt(searchParams.get("limit") || "20", 10);
-  const offset = Number.parseInt(searchParams.get("offset") || "0", 10);
-  const safeLimit = Number.isFinite(limit) ? limit : 20;
-  const safeOffset = Number.isFinite(offset) ? offset : 0;
+  const limitParam = searchParams.get("limit");
+  const offsetParam = searchParams.get("offset");
+  const limit = limitParam ? Number.parseInt(limitParam, 10) : null;
+  const offset = offsetParam ? Number.parseInt(offsetParam, 10) : null;
+  const safeLimit = limit !== null && Number.isFinite(limit) ? limit : null;
+  const safeOffset = offset !== null && Number.isFinite(offset) ? offset : 0;
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -34,13 +36,19 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from("games")
-    .select("id,game_name,player_name,total_score,status,played_at,created_at", {
-      count: "exact"
-    })
+    .select(
+      "id,game_name,player_name,total_score,status,played_at,created_at,session_id,session:bowling_sessions(id,name,description,started_at,created_at)",
+      {
+        count: "exact"
+      }
+    )
     .eq("user_id", userId)
     .order("played_at", { ascending: false })
-    .order("created_at", { ascending: false })
-    .range(safeOffset, safeOffset + safeLimit - 1);
+    .order("created_at", { ascending: false });
+
+  if (safeLimit !== null) {
+    query = query.range(safeOffset, safeOffset + safeLimit - 1);
+  }
 
   const { data, error, count } = await query;
 

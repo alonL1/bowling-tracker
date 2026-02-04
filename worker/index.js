@@ -128,6 +128,11 @@ function normalizeOptionalUuid(value) {
   if (lower === "undefined" || lower === "null") {
     return null;
   }
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidPattern.test(trimmed)) {
+    return null;
+  }
   return trimmed;
 }
 
@@ -324,6 +329,13 @@ async function processJob() {
   const playerLabel =
     playerNames.length > 0 ? playerNames.join(", ") : String(playerName || "");
   const userId = normalizeOptionalUuid(job.user_id);
+  const sessionId = normalizeOptionalUuid(job.session_id);
+  if (job.user_id && !userId) {
+    console.warn(`Job ${job.id} has invalid user_id:`, job.user_id);
+  }
+  if (job.session_id && !sessionId) {
+    console.warn(`Job ${job.id} has invalid session_id:`, job.session_id);
+  }
   if (!playerName) {
     await setJobError(supabase, job.id, null, "Job missing player name.");
     return { status: "error", jobId: job.id };
@@ -403,6 +415,7 @@ async function processJob() {
   const resolvedPlayerName =
     extractedName || playerNames[0] || String(playerName || "");
   const totalScore = toNullableNumber(extraction?.totalScore);
+  const playedAt = capturedAt || new Date().toISOString();
 
   const { data: createdGame, error: createError } = await supabase
     .from("games")
@@ -410,10 +423,11 @@ async function processJob() {
       player_name: resolvedPlayerName,
       total_score: totalScore,
       captured_at: capturedAt,
-      played_at: capturedAt || new Date().toISOString(),
+      played_at: playedAt,
       raw_extraction: extraction,
       status: "processing",
-      user_id: userId
+      user_id: userId,
+      session_id: sessionId
     })
     .select("id")
     .single();
@@ -430,6 +444,36 @@ async function processJob() {
   }
 
   const gameId = createdGame.id;
+
+  if (sessionId) {
+    const { data: sessionRow, error: sessionError } = await supabase
+      .from("bowling_sessions")
+      .select("started_at")
+      .eq("id", sessionId)
+      .maybeSingle();
+    if (sessionError) {
+      console.warn("Failed to load session for started_at:", sessionError.message);
+    } else if (sessionRow) {
+      const currentStart = sessionRow.started_at
+        ? Date.parse(sessionRow.started_at)
+        : null;
+      const nextStart = Date.parse(playedAt);
+      if (Number.isFinite(nextStart)) {
+        if (!currentStart || nextStart < currentStart) {
+          const { error: updateError } = await supabase
+            .from("bowling_sessions")
+            .update({ started_at: new Date(nextStart).toISOString() })
+            .eq("id", sessionId);
+          if (updateError) {
+            console.warn(
+              "Failed to update session started_at:",
+              updateError.message
+            );
+          }
+        }
+      }
+    }
+  }
 
   const frameRows = frames.map((frame) => {
     const shot1 = toNullableNumber(frame?.shots?.[0]);

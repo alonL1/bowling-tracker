@@ -18,14 +18,22 @@ function normalizeOptionalUuid(value?: string | null) {
   if (lower === "undefined" || lower === "null") {
     return null;
   }
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!uuidPattern.test(trimmed)) {
+    return null;
+  }
   return trimmed;
 }
 
 export async function POST(request: Request) {
   const formData = await request.formData();
   const playerName = formData.get("playerName");
-  const image = formData.get("image");
+  const images = formData
+    .getAll("image")
+    .filter((item) => item instanceof File && item.size > 0) as File[];
   const timezoneOffsetMinutes = formData.get("timezoneOffsetMinutes");
+  const sessionIdValue = formData.get("sessionId");
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -58,16 +66,19 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!(image instanceof File) || image.size === 0) {
+  if (images.length === 0) {
     return NextResponse.json(
       { error: "A scoreboard image is required." },
       { status: 400 }
     );
   }
 
-  if (image.type && !image.type.startsWith("image/")) {
+  const sessionId = normalizeOptionalUuid(
+    typeof sessionIdValue === "string" ? sessionIdValue : null
+  );
+  if (!sessionId) {
     return NextResponse.json(
-      { error: "Only image uploads are supported." },
+      { error: "Session is required when logging games." },
       { status: 400 }
     );
   }
@@ -76,10 +87,28 @@ export async function POST(request: Request) {
     auth: { persistSession: false }
   });
 
+  const { data: session, error: sessionError } = await supabase
+    .from("bowling_sessions")
+    .select("id")
+    .eq("id", sessionId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (sessionError) {
+    return NextResponse.json(
+      { error: sessionError.message || "Failed to validate session." },
+      { status: 500 }
+    );
+  }
+
+  if (!session) {
+    return NextResponse.json(
+      { error: "Selected session was not found." },
+      { status: 400 }
+    );
+  }
+
   const trimmedName = playerName.trim();
-  const jobId = crypto.randomUUID();
-  const extension = image.type?.split("/")[1] || "jpg";
-  const storageKey = `${jobId}.${extension}`;
   const parsedOffset =
     typeof timezoneOffsetMinutes === "string"
       ? Number.parseInt(timezoneOffsetMinutes, 10)
@@ -89,55 +118,72 @@ export async function POST(request: Request) {
       ? parsedOffset
       : null;
 
-  const buffer = Buffer.from(await image.arrayBuffer());
-  const { error: uploadError } = await supabase.storage
-    .from(bucket)
-    .upload(storageKey, buffer, {
-      contentType: image.type || "image/jpeg",
-      upsert: false
-    });
+  const jobs: { jobId: string; message: string }[] = [];
+  const errors: string[] = [];
 
-  if (uploadError) {
-    return NextResponse.json(
-      { error: uploadError.message || "Failed to upload image." },
-      { status: 500 }
-    );
+  for (const image of images) {
+    if (image.type && !image.type.startsWith("image/")) {
+      errors.push("Only image uploads are supported.");
+      continue;
+    }
+
+    const jobId = crypto.randomUUID();
+    const extension = image.type?.split("/")[1] || "jpg";
+    const storageKey = `${jobId}.${extension}`;
+
+    try {
+      const buffer = Buffer.from(await image.arrayBuffer());
+      const { error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(storageKey, buffer, {
+          contentType: image.type || "image/jpeg",
+          upsert: false
+        });
+
+      if (uploadError) {
+        errors.push(uploadError.message || "Failed to upload image.");
+        continue;
+      }
+
+      const { error: jobError } = await supabase.from("analysis_jobs").insert({
+        id: jobId,
+        storage_key: storageKey,
+        status: "queued",
+        player_name: trimmedName,
+        user_id: userId,
+        session_id: sessionId ?? null,
+        timezone_offset_minutes: safeOffset
+      });
+
+      if (jobError) {
+        await supabase.storage.from(bucket).remove([storageKey]);
+        errors.push(jobError.message || "Failed to queue analysis job.");
+        continue;
+      }
+
+      jobs.push({
+        jobId,
+        message: "Queued for extraction."
+      });
+    } catch (error) {
+      errors.push(
+        error instanceof Error ? error.message : "Failed to process upload."
+      );
+    }
   }
 
-  const { error: jobError } = await supabase.from("analysis_jobs").insert({
-    id: jobId,
-    storage_key: storageKey,
-    status: "queued",
-    player_name: trimmedName,
-    user_id: userId,
-    timezone_offset_minutes: safeOffset
-  });
-
-  if (jobError) {
-    await supabase.storage.from(bucket).remove([storageKey]);
-    return NextResponse.json(
-      { error: jobError.message || "Failed to queue analysis job." },
-      { status: 500 }
-    );
-  }
-
-  if (workerUrl) {
-    fetch(`${workerUrl.replace(/\/$/, "")}/run`, {
-      method: "POST",
-      headers: workerToken ? { "X-Worker-Token": workerToken } : undefined
-    }).catch((error) => {
-      console.warn("Immediate worker trigger failed:", error);
+  if (workerUrl && jobs.length > 0) {
+    const runUrl = `${workerUrl.replace(/\/$/, "")}/run`;
+    const headers = workerToken ? { "X-Worker-Token": workerToken } : undefined;
+    jobs.forEach(() => {
+      fetch(runUrl, { method: "POST", headers }).catch((error) => {
+        console.warn("Immediate worker trigger failed:", error);
+      });
     });
   }
 
   return NextResponse.json({
-    jobId,
-    message:
-      "Queued for extraction. The image will be deleted after processing.",
-    metadata: {
-      playerName: trimmedName,
-      size: image.size,
-      type: image.type || "unknown"
-    }
+    jobs,
+    errors
   });
 }

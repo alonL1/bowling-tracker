@@ -4,12 +4,28 @@ import { getUserIdFromRequest } from "../utils/auth";
 
 export const runtime = "nodejs";
 
+function normalizeOptionalUuid(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const lower = trimmed.toLowerCase();
+  if (lower === "undefined" || lower === "null") {
+    return null;
+  }
+  return trimmed;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get("jobId");
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const devUserId = normalizeOptionalUuid(process.env.DEV_USER_ID);
 
   if (!supabaseUrl || !supabaseServiceKey) {
     return NextResponse.json(
@@ -21,7 +37,7 @@ export async function GET(request: Request) {
     );
   }
 
-  const userId = await getUserIdFromRequest(request);
+  const userId = (await getUserIdFromRequest(request)) || devUserId;
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }

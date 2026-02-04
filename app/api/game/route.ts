@@ -406,6 +406,30 @@ export async function PATCH(request: Request) {
     );
   }
 
+  const { data: updatedGame } = await supabase
+    .from("games")
+    .select("session_id")
+    .eq("id", payload.gameId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (updatedGame?.session_id) {
+    const { data: earliestGame } = await supabase
+      .from("games")
+      .select("played_at")
+      .eq("session_id", updatedGame.session_id)
+      .eq("user_id", userId)
+      .order("played_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    await supabase
+      .from("bowling_sessions")
+      .update({ started_at: earliestGame?.played_at ?? null })
+      .eq("id", updatedGame.session_id)
+      .eq("user_id", userId);
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -443,6 +467,13 @@ export async function DELETE(request: Request) {
     auth: { persistSession: false }
   });
 
+  const { data: deletedGame } = await supabase
+    .from("games")
+    .select("session_id")
+    .eq("id", payload.gameId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
   const { error: deleteError } = await supabase
     .from("games")
     .delete()
@@ -454,6 +485,23 @@ export async function DELETE(request: Request) {
       { error: deleteError.message || "Failed to delete game." },
       { status: 500 }
     );
+  }
+
+  if (deletedGame?.session_id) {
+    const { data: earliestGame } = await supabase
+      .from("games")
+      .select("played_at")
+      .eq("session_id", deletedGame.session_id)
+      .eq("user_id", userId)
+      .order("played_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    await supabase
+      .from("bowling_sessions")
+      .update({ started_at: earliestGame?.played_at ?? null })
+      .eq("id", deletedGame.session_id)
+      .eq("user_id", userId);
   }
 
   return NextResponse.json({ ok: true });

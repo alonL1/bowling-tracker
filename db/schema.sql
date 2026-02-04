@@ -1,8 +1,18 @@
 create extension if not exists "pgcrypto";
 
+create table if not exists bowling_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid,
+  name text,
+  description text,
+  started_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists games (
   id uuid primary key default gen_random_uuid(),
   user_id uuid,
+  session_id uuid references bowling_sessions(id) on delete set null,
   game_name text,
   player_name text not null,
   total_score integer,
@@ -32,6 +42,7 @@ create table if not exists shots (
 create table if not exists analysis_jobs (
   id uuid primary key default gen_random_uuid(),
   game_id uuid references games(id) on delete set null,
+  session_id uuid references bowling_sessions(id) on delete set null,
   user_id uuid,
   player_name text not null,
   storage_key text not null,
@@ -52,7 +63,7 @@ create table if not exists chat_questions (
 );
 
 create or replace function claim_next_job()
-returns table (id uuid, storage_key text, player_name text, user_id uuid, timezone_offset_minutes integer)
+returns table (id uuid, storage_key text, player_name text, user_id uuid, timezone_offset_minutes integer, session_id uuid)
 language sql
 as $$
   with next_job as (
@@ -72,7 +83,8 @@ as $$
     analysis_jobs.storage_key,
     analysis_jobs.player_name,
     analysis_jobs.user_id,
-    analysis_jobs.timezone_offset_minutes;
+    analysis_jobs.timezone_offset_minutes,
+    analysis_jobs.session_id;
 $$;
 
 create or replace function execute_sql(query text)

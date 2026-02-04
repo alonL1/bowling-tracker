@@ -1,6 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
 import UploadForm from "./UploadForm";
 import GameReview from "./GameReview";
 import ChatPanel from "./ChatPanel";
@@ -53,10 +66,42 @@ type GameListItem = {
   status: string;
   played_at?: string | null;
   created_at: string;
+  session_id?: string | null;
+  session?: {
+    id: string;
+    name?: string | null;
+    description?: string | null;
+    started_at?: string | null;
+    created_at?: string | null;
+  } | null;
+};
+
+type SessionItem = {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  started_at?: string | null;
+  created_at?: string | null;
 };
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 40;
+
+type DroppableRenderProps = {
+  setNodeRef: (node: HTMLElement | null) => void;
+  isOver: boolean;
+};
+
+function DroppableContainer({
+  id,
+  children
+}: {
+  id: string;
+  children: (props: DroppableRenderProps) => JSX.Element;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return <>{children({ setNodeRef, isOver })}</>;
+}
 
 function toSymbol(pins: number | null) {
   if (pins === null || pins === undefined) {
@@ -119,12 +164,23 @@ export default function Dashboard() {
   const [gameError, setGameError] = useState<string>("");
   const [games, setGames] = useState<GameListItem[]>([]);
   const [gamesTotal, setGamesTotal] = useState<number | null>(null);
-  const [gamesLimit, setGamesLimit] = useState<number>(20);
+  const [sessionLimit, setSessionLimit] = useState<number>(10);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [creatingSession, setCreatingSession] = useState<boolean>(false);
   const [newLoggedIds, setNewLoggedIds] = useState<string[]>([]);
   const [dismissedLoggedIds, setDismissedLoggedIds] = useState<string[]>([]);
   const [loggedGameCache, setLoggedGameCache] = useState<Record<string, GameListItem>>(
     {}
   );
+  const [collapsedSessions, setCollapsedSessions] = useState<Record<string, boolean>>(
+    {}
+  );
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [sessionEditName, setSessionEditName] = useState<string>("");
+  const [sessionEditDescription, setSessionEditDescription] = useState<string>("");
+  const [savingSessionId, setSavingSessionId] = useState<string | null>(null);
+  const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
   const [expandedGames, setExpandedGames] = useState<Record<string, GameDetail>>(
     {}
@@ -133,16 +189,26 @@ export default function Dashboard() {
   const [editingMode, setEditingMode] = useState<"review" | "edit">("edit");
   const [chatGameId, setChatGameId] = useState<string | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
+  const [activeDragGameId, setActiveDragGameId] = useState<string | null>(null);
+  const [movingGameId, setMovingGameId] = useState<string | null>(null);
   const pendingJobsRef = useRef<PendingJob[]>([]);
   const pollCountsRef = useRef<Record<string, number>>({});
   const dismissTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>(
     {}
   );
   const isDebug = process.env.CHAT_DEBUG === "true";
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 }
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 250, tolerance: 5 }
+    })
+  );
 
   const loadGames = useCallback(async () => {
     try {
-      const response = await authFetch(`/api/games?limit=${gamesLimit}`);
+      const response = await authFetch(`/api/games`);
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error || "Failed to load games list.");
@@ -165,7 +231,7 @@ export default function Dashboard() {
       setGameError(message);
       setGamesTotal(null);
     }
-  }, [chatGameId, gamesLimit]);
+  }, [chatGameId]);
 
   const loadGame = useCallback(async (lookup: string) => {
     setGameError("");
@@ -493,12 +559,280 @@ export default function Dashboard() {
   };
 
   const activeGameLabel = "all games";
-  const showLoadMore = gamesTotal !== null && games.length < gamesTotal;
-  const handleLoadMore = () => {
-    setGamesLimit((prev) => prev + 20);
-  };
   const displayGames = games;
-  const displayCount = games.length;
+  const toggleSession = (sessionId: string) => {
+    setCollapsedSessions((current) => ({
+      ...current,
+      [sessionId]: !(current[sessionId] ?? true)
+    }));
+  };
+  const isSessionCollapsed = (sessionId: string) =>
+    collapsedSessions[sessionId] ?? true;
+  const formatAverage = (scores: number[]) => {
+    if (scores.length === 0) {
+      return "—";
+    }
+    const avg = scores.reduce((sum, value) => sum + value, 0) / scores.length;
+    const formatted = avg.toFixed(2);
+    return formatted.endsWith(".00") ? formatted.slice(0, -3) : formatted;
+  };
+  const startSessionEdit = (sessionId: string, name?: string | null, description?: string | null) => {
+    setEditingSessionId(sessionId);
+    setSessionEditName(name?.trim() || "");
+    setSessionEditDescription(description?.trim() || "");
+    setDeleteSessionId(null);
+  };
+  const cancelSessionEdit = () => {
+    setEditingSessionId(null);
+    setSessionEditName("");
+    setSessionEditDescription("");
+  };
+  const saveSessionEdit = async (sessionId: string) => {
+    if (savingSessionId) {
+      return;
+    }
+    setSavingSessionId(sessionId);
+    setGameError("");
+    try {
+      const response = await authFetch("/api/session", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          name: sessionEditName,
+          description: sessionEditDescription
+        })
+      });
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string };
+        throw new Error(payload.error || "Failed to update session.");
+      }
+      await loadGames();
+      cancelSessionEdit();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to update session.";
+      setGameError(message);
+    } finally {
+      setSavingSessionId(null);
+    }
+  };
+  const requestSessionDelete = (sessionId: string) => {
+    setDeleteSessionId(sessionId);
+    setEditingSessionId(null);
+  };
+  const cancelSessionDelete = () => {
+    setDeleteSessionId(null);
+  };
+  const handleSessionDelete = async (sessionId: string, mode: "sessionless" | "delete_games") => {
+    if (deletingSessionId) {
+      return;
+    }
+    setDeletingSessionId(sessionId);
+    setGameError("");
+    try {
+      const response = await authFetch("/api/session", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, mode })
+      });
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string };
+        throw new Error(payload.error || "Failed to delete session.");
+      }
+      await loadGames();
+      setDeleteSessionId(null);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete session.";
+      setGameError(message);
+    } finally {
+      setDeletingSessionId(null);
+    }
+  };
+
+  const moveGameToSession = useCallback(
+    async (gameId: string, sessionId: string | null) => {
+      if (movingGameId) {
+        return;
+      }
+      setMovingGameId(gameId);
+      setGameError("");
+      try {
+        const response = await authFetch("/api/game/session", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ gameId, sessionId })
+        });
+        if (!response.ok) {
+          const payload = (await response.json()) as { error?: string };
+          throw new Error(payload.error || "Failed to move game.");
+        }
+        await loadGames();
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to move game.";
+        setGameError(message);
+      } finally {
+        setMovingGameId(null);
+      }
+    },
+    [loadGames, movingGameId]
+  );
+  const sessionGroups = useMemo(() => {
+    const sessionMap = new Map<
+      string,
+      {
+        sessionId: string;
+        session: GameListItem["session"];
+        games: GameListItem[];
+      }
+    >();
+    const sessionless: GameListItem[] = [];
+
+    games.forEach((game) => {
+      if (game.session_id) {
+        const existing = sessionMap.get(game.session_id);
+        if (existing) {
+          existing.games.push(game);
+        } else {
+          sessionMap.set(game.session_id, {
+            sessionId: game.session_id,
+            session: game.session ?? null,
+            games: [game]
+          });
+        }
+      } else {
+        sessionless.push(game);
+      }
+    });
+
+    const sortByPlayedAtAsc = (list: GameListItem[]) =>
+      list
+        .slice()
+        .sort((a, b) => {
+          const aDate = Date.parse(a.played_at || a.created_at);
+          const bDate = Date.parse(b.played_at || b.created_at);
+          return aDate - bDate;
+        });
+
+    const getSessionSortDate = (group: {
+      session: GameListItem["session"];
+      games: GameListItem[];
+    }) => {
+      if (group.session?.started_at) {
+        return Date.parse(group.session.started_at);
+      }
+      const firstGame = sortByPlayedAtAsc(group.games)[0];
+      if (firstGame) {
+        return Date.parse(firstGame.played_at || firstGame.created_at);
+      }
+      if (group.session?.created_at) {
+        return Date.parse(group.session.created_at);
+      }
+      return 0;
+    };
+
+    const orderedSessions = Array.from(sessionMap.values()).sort((a, b) => {
+      const aDate = getSessionSortDate(a);
+      const bDate = getSessionSortDate(b);
+      return bDate - aDate;
+    });
+
+    const sessionNumberById = new Map<string, number>();
+    orderedSessions
+      .slice()
+      .sort((a, b) => getSessionSortDate(a) - getSessionSortDate(b))
+      .forEach((group, index) => {
+        sessionNumberById.set(group.sessionId, index + 1);
+      });
+
+    const gameTitleMap = new Map<string, string>();
+    orderedSessions.forEach((group) => {
+      sortByPlayedAtAsc(group.games).forEach((game, index) => {
+        gameTitleMap.set(game.id, `Game ${index + 1}`);
+      });
+    });
+    sortByPlayedAtAsc(sessionless).forEach((game, index) => {
+      gameTitleMap.set(game.id, `Game ${index + 1}`);
+    });
+
+    return {
+      orderedSessions,
+      sessionless,
+      sortByPlayedAtAsc,
+      gameTitleMap,
+      sessionNumberById
+    };
+  }, [games]);
+  const showLoadMoreSessions =
+    sessionGroups.orderedSessions.length > sessionLimit;
+  const handleLoadMoreSessions = () => {
+    setSessionLimit((prev) => prev + 10);
+  };
+  const displayedSessionCount =
+    Math.min(sessionLimit, sessionGroups.orderedSessions.length) +
+    (sessionGroups.sessionless.length > 0 ? 1 : 0);
+  const sessionCountLabel = displayedSessionCount === 1 ? "session" : "sessions";
+  const visibleSessions = sessionGroups.orderedSessions.slice(0, sessionLimit);
+  const sessionOptions = useMemo(() => {
+    return sessionGroups.orderedSessions.map((group) => {
+      const sessionLabel =
+        group.session?.name?.trim() ||
+        `Session ${sessionGroups.sessionNumberById.get(group.sessionId) ?? ""}`.trim();
+      return {
+        id: group.sessionId,
+        label: sessionLabel || "Session"
+      };
+    });
+  }, [sessionGroups]);
+  const handleSessionChange = (sessionId: string | null) => {
+    setSelectedSessionId(sessionId);
+  };
+  useEffect(() => {
+    if (selectedSessionId === "new") {
+      return;
+    }
+    if (sessionOptions.length === 0) {
+      setSelectedSessionId("new");
+      return;
+    }
+    if (
+      selectedSessionId &&
+      sessionOptions.some((option) => option.id === selectedSessionId)
+    ) {
+      return;
+    }
+    setSelectedSessionId("new");
+  }, [selectedSessionId, sessionOptions]);
+  const handleCreateSession = useCallback(async () => {
+    if (creatingSession) {
+      return null;
+    }
+    setCreatingSession(true);
+    setGameError("");
+    try {
+      const response = await authFetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string };
+        throw new Error(payload.error || "Failed to create session.");
+      }
+      const payload = (await response.json()) as { session: SessionItem };
+      const created = payload.session;
+      return created.id;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to create session.";
+      setGameError(message);
+      return null;
+    } finally {
+      setCreatingSession(false);
+    }
+  }, [creatingSession]);
   const handleCloseLoggedPopup = () => {
     setDismissedLoggedIds((current) => {
       const next = new Set(current);
@@ -561,20 +895,95 @@ export default function Dashboard() {
     return job.message;
   };
   const getGameNumber = (gameId: string) => gameNumberMap.get(gameId) ?? null;
-  const renderGameCard = (game: GameListItem) => {
+  const DraggableGameCard = ({
+    game,
+    titleOverride
+  }: {
+    game: GameListItem;
+    titleOverride?: string;
+  }) => {
+    const { attributes, listeners, setNodeRef, transform, isDragging } =
+      useDraggable({
+        id: game.id,
+        data: { type: "game", gameId: game.id }
+      });
+    const style = {
+      transform: transform ? CSS.Transform.toString(transform) : undefined
+    };
+
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={`game-card draggable${isDragging ? " dragging" : ""}`}
+        {...attributes}
+        {...listeners}
+      >
+        {renderGameCardContent(game, titleOverride)}
+      </div>
+    );
+  };
+
+  const activeDragGame = useMemo(() => {
+    if (!activeDragGameId) {
+      return null;
+    }
+    const fromGames = games.find((game) => game.id === activeDragGameId);
+    if (fromGames) {
+      return fromGames;
+    }
+    const fromCache = loggedGameCache[activeDragGameId];
+    return fromCache ?? null;
+  }, [activeDragGameId, games, loggedGameCache]);
+
+  const handleDragStart = (event: DragStartEvent) => {
+    if (event.active?.data?.current?.type === "game") {
+      setActiveDragGameId(String(event.active.id));
+    }
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDragGameId(null);
+    if (!over) {
+      return;
+    }
+    if (active?.data?.current?.type !== "game") {
+      return;
+    }
+    const overId = String(over.id);
+    if (!overId.startsWith("session:")) {
+      return;
+    }
+    const target = overId.replace("session:", "");
+    const nextSessionId = target === "sessionless" ? null : target;
+    const currentGame = games.find((game) => game.id === active.id);
+    const currentSessionId = currentGame?.session_id ?? null;
+    if (currentSessionId === nextSessionId) {
+      return;
+    }
+    await moveGameToSession(String(active.id), nextSessionId);
+  };
+  function renderGameCardContent(
+    game: GameListItem,
+    titleOverride?: string,
+    isOverlay?: boolean
+  ) {
     const expanded = expandedGameId === game.id;
     const detail = expandedGames[game.id];
     const rows = detail ? buildScoreRows(detail) : null;
     const gameNumber = getGameNumber(game.id);
     const trimmedName = game.game_name?.trim();
-    const gameTitle = trimmedName
-      ? trimmedName
-      : gameNumber
-        ? `Game ${gameNumber}`
-        : "Game";
+    const gameTitle = titleOverride
+      ? titleOverride
+      : trimmedName
+        ? trimmedName
+        : gameNumber
+          ? `Game ${gameNumber}`
+          : "Game";
 
     return (
-      <div key={game.id} className="game-card">
+      <>
         <div className="game-row">
           <div className="game-meta">
             <p className="game-title">{gameTitle}</p>
@@ -586,49 +995,15 @@ export default function Dashboard() {
                 : ""}
             </p>
           </div>
-          <div className="game-actions-inline">
-            <button
-              type="button"
-              className="edit-toggle"
-              onClick={() => handleEdit(game.id)}
-              aria-label={`Edit ${gameTitle}`}
-              title={`Edit ${gameTitle}`}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
+          {!isOverlay ? (
+            <div className="game-actions-inline">
+              <button
+                type="button"
+                className="edit-toggle"
+                onClick={() => handleEdit(game.id)}
+                aria-label={`Edit ${gameTitle}`}
+                title={`Edit ${gameTitle}`}
               >
-                <path
-                  d="M4 20h4l11-11-4-4L4 16v4z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M13 7l4 4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="delete-toggle"
-              onClick={() => handleDelete(game.id)}
-              disabled={deletingGameId === game.id}
-              aria-label={`Delete ${gameTitle}`}
-              title={`Delete ${gameTitle}`}
-            >
-              {deletingGameId === game.id ? (
-                <span className="spinner" aria-hidden="true" />
-              ) : (
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 24 24"
@@ -636,7 +1011,15 @@ export default function Dashboard() {
                   height="16"
                 >
                   <path
-                    d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
+                    d="M4 20h4l11-11-4-4L4 16v4z"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M13 7l4 4"
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.6"
@@ -644,36 +1027,64 @@ export default function Dashboard() {
                     strokeLinejoin="round"
                   />
                 </svg>
-              )}
-            </button>
-            <button
-              type="button"
-              className="expand-toggle"
-              onClick={() => toggleExpand(game.id)}
-              aria-expanded={expanded}
-              aria-controls={`game-score-${game.id}`}
-              aria-label={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
-              title={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
+              </button>
+              <button
+                type="button"
+                className="delete-toggle"
+                onClick={() => handleDelete(game.id)}
+                disabled={deletingGameId === game.id}
+                aria-label={`Delete ${gameTitle}`}
+                title={`Delete ${gameTitle}`}
               >
-                <path
-                  d="M9 6l6 6-6 6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          </div>
+                {deletingGameId === game.id ? (
+                  <span className="spinner" aria-hidden="true" />
+                ) : (
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                  >
+                    <path
+                      d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                className="expand-toggle"
+                onClick={() => toggleExpand(game.id)}
+                aria-expanded={expanded}
+                aria-controls={`game-score-${game.id}`}
+                aria-label={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
+                title={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                >
+                  <path
+                    d="M9 6l6 6-6 6"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          ) : null}
         </div>
-        {expanded ? (
+        {expanded && !isOverlay ? (
           <div className="game-score" id={`game-score-${game.id}`}>
             {detail && rows ? (
               editingGameId === game.id ? (
@@ -725,9 +1136,9 @@ export default function Dashboard() {
             )}
           </div>
         ) : null}
-      </div>
+      </>
     );
-  };
+  }
 
   return (
     <div className="dashboard">
@@ -740,7 +1151,14 @@ export default function Dashboard() {
             If have different names throughout the scoresheets, write them out comma seperated
           </p>
         </div>
-        <UploadForm onQueued={handleQueued} pendingJobsCount={pendingJobs.length} />
+        <UploadForm
+          onQueued={handleQueued}
+          pendingJobsCount={pendingJobs.length}
+          sessions={sessionOptions}
+          selectedSessionId={selectedSessionId}
+          onSessionChange={handleSessionChange}
+          onCreateSession={handleCreateSession}
+        />
         {pendingJobs.length > 0 ? (
           <div className="status-stack">
             {pendingJobs.map((job) => (
@@ -767,48 +1185,422 @@ export default function Dashboard() {
             Expand a game to view the frames.
           </p>
           <p className="helper">
-            {gamesTotal !== null
-              ? `Showing ${displayCount} of ${gamesTotal} games.`
-              : `Showing ${displayCount} games.`}
+            {`Showing ${displayedSessionCount} ${sessionCountLabel}.`}
           </p>
         </div>
-        {showLoggedPopup && popupGames.length > 0 ? (
-          <div className="logged-popup">
-            <div className="logged-popup-header">
-              <div>
-                <h3>Newly logged games</h3>
-                <p className="helper">
-                  Review games for accuracy, then feel free to close this pop up.
-                </p>
+        {displayGames.length === 0 ? (
+          <p className="helper">No games yet.</p>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            {showLoggedPopup && popupGames.length > 0 ? (
+              <div className="logged-popup">
+                <div className="logged-popup-header">
+                  <div>
+                    <h3>Newly logged games</h3>
+                    <p className="helper">
+                      Review games for accuracy, then feel free to close this pop up.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="button-secondary logged-popup-close"
+                    onClick={handleCloseLoggedPopup}
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="games-list">
+                  {popupGames.map((game) => (
+                    <DraggableGameCard
+                      key={game.id}
+                      game={game}
+                      titleOverride={sessionGroups.gameTitleMap.get(game.id)}
+                    />
+                  ))}
+                </div>
               </div>
-              <button
-                type="button"
-                className="button-secondary logged-popup-close"
-                onClick={handleCloseLoggedPopup}
-              >
-                Close
-              </button>
+            ) : null}
+            <div className="session-stack">
+              {visibleSessions.map((group) => {
+                const sessionId = group.sessionId;
+                const collapsed = isSessionCollapsed(sessionId);
+                const sortedGames = sessionGroups.sortByPlayedAtAsc(group.games);
+                const scores = group.games
+                  .map((game) => game.total_score)
+                  .filter((score): score is number => typeof score === "number");
+                const firstGame = sortedGames[0];
+                const firstDateTimeSource =
+                  group.session?.started_at ||
+                  (firstGame ? firstGame.played_at || firstGame.created_at : null);
+                const firstDateTime = firstDateTimeSource
+                  ? new Date(firstDateTimeSource).toLocaleString()
+                  : null;
+                const sessionLabel =
+                  group.session?.name?.trim() ||
+                  `Session ${sessionGroups.sessionNumberById.get(sessionId) ?? ""}`.trim();
+                const isEditing = editingSessionId === sessionId;
+                const isDeletePrompt = deleteSessionId === sessionId;
+                const isSaving = savingSessionId === sessionId;
+                const isDeleting = deletingSessionId === sessionId;
+                return (
+                  <DroppableContainer
+                    key={sessionId}
+                    id={`session:${sessionId}`}
+                  >
+                    {({ setNodeRef, isOver }) => (
+                      <div
+                        ref={setNodeRef}
+                        className={`session-group session-drop-target${
+                          isOver ? " is-over" : ""
+                        }`}
+                      >
+                        <div
+                          className="session-header"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => toggleSession(sessionId)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              toggleSession(sessionId);
+                            }
+                          }}
+                        >
+                          <div className="session-header-top">
+                            <div className="session-header-text">
+                              <h3>{sessionLabel || "Session"}</h3>
+                              <p className="helper session-meta">
+                                <span>{group.games.length} games</span>
+                                <span>Avg {formatAverage(scores)}</span>
+                                {collapsed && firstDateTime ? (
+                                  <span>{firstDateTime}</span>
+                                ) : null}
+                              </p>
+                            </div>
+                            <div className="session-actions-inline">
+                              {!collapsed ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="edit-toggle"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      startSessionEdit(
+                                        sessionId,
+                                        group.session?.name,
+                                        group.session?.description
+                                      );
+                                    }}
+                                    aria-label={`Edit ${sessionLabel || "Session"}`}
+                                    title={`Edit ${sessionLabel || "Session"}`}
+                                    disabled={isSaving || isDeleting}
+                                  >
+                                    <svg
+                                      aria-hidden="true"
+                                      viewBox="0 0 24 24"
+                                      width="16"
+                                      height="16"
+                                    >
+                                      <path
+                                        d="M4 20h4l11-11-4-4L4 16v4z"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M13 7l4 4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="delete-toggle"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      requestSessionDelete(sessionId);
+                                    }}
+                                    aria-label={`Delete ${sessionLabel || "Session"}`}
+                                    title={`Delete ${sessionLabel || "Session"}`}
+                                    disabled={isSaving || isDeleting}
+                                  >
+                                    {isDeleting ? (
+                                      <span className="spinner" aria-hidden="true" />
+                                    ) : (
+                                      <svg
+                                        aria-hidden="true"
+                                        viewBox="0 0 24 24"
+                                        width="16"
+                                        height="16"
+                                      >
+                                        <path
+                                          d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                      </svg>
+                                    )}
+                                  </button>
+                                </>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="expand-toggle"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleSession(sessionId);
+                                }}
+                                aria-expanded={!collapsed}
+                                aria-label={`${collapsed ? "Expand" : "Collapse"} ${sessionLabel || "Session"}`}
+                                title={`${collapsed ? "Expand" : "Collapse"} ${sessionLabel || "Session"}`}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  viewBox="0 0 24 24"
+                                  width="16"
+                                  height="16"
+                                >
+                                  <path
+                                    d="M9 6l6 6-6 6"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          {group.session?.description ? (
+                            <p className="helper">{group.session.description}</p>
+                          ) : null}
+                        </div>
+                        {!collapsed ? (
+                          <div className="session-body">
+                            {isEditing ? (
+                              <div className="session-edit">
+                                <div className="session-edit-fields">
+                                  <div>
+                                    <label htmlFor={`session-name-${sessionId}`}>Session name</label>
+                                    <input
+                                      id={`session-name-${sessionId}`}
+                                      type="text"
+                                      value={sessionEditName}
+                                      onChange={(event) => setSessionEditName(event.target.value)}
+                                      placeholder={sessionLabel || "Session name"}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label htmlFor={`session-desc-${sessionId}`}>Description</label>
+                                    <input
+                                      id={`session-desc-${sessionId}`}
+                                      type="text"
+                                      value={sessionEditDescription}
+                                      onChange={(event) =>
+                                        setSessionEditDescription(event.target.value)
+                                      }
+                                      placeholder="Optional description"
+                                    />
+                                  </div>
+                                </div>
+                                <div className="session-edit-actions">
+                                  <button
+                                    type="button"
+                                    className="button-secondary"
+                                    onClick={cancelSessionEdit}
+                                    disabled={isSaving}
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => saveSessionEdit(sessionId)}
+                                    disabled={isSaving}
+                                  >
+                                    {isSaving ? "Saving..." : "Save session"}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                            {isDeletePrompt ? (
+                              <div className="session-delete">
+                                <p className="helper">
+                                  Delete this session. What should happen to the games inside?
+                                </p>
+                                <div className="session-delete-actions">
+                                  <button
+                                    type="button"
+                                    className="button-secondary"
+                                    onClick={() => handleSessionDelete(sessionId, "sessionless")}
+                                    disabled={isDeleting}
+                                  >
+                                    Move to sessionless
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSessionDelete(sessionId, "delete_games")}
+                                    disabled={isDeleting}
+                                  >
+                                    Delete permanently
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button-muted"
+                                    onClick={cancelSessionDelete}
+                                    disabled={isDeleting}
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                            <div className="games-list">
+                              {sortedGames.map((game) => (
+                                <DraggableGameCard
+                                  key={game.id}
+                                  game={game}
+                                  titleOverride={sessionGroups.gameTitleMap.get(game.id)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </DroppableContainer>
+                );
+              })}
+              {sessionGroups.sessionless.length > 0 ? (() => {
+                const sessionId = "sessionless";
+                const collapsed = isSessionCollapsed(sessionId);
+                const sortedGames = sessionGroups.sortByPlayedAtAsc(
+                  sessionGroups.sessionless
+                );
+                const scores = sessionGroups.sessionless
+                  .map((game) => game.total_score)
+                  .filter((score): score is number => typeof score === "number");
+                const firstGame = sortedGames[0];
+                const firstDateTime = firstGame
+                  ? new Date(
+                      firstGame.played_at || firstGame.created_at
+                    ).toLocaleString()
+                  : null;
+                return (
+                  <DroppableContainer id={`session:${sessionId}`}>
+                    {({ setNodeRef, isOver }) => (
+                      <div
+                        ref={setNodeRef}
+                        className={`session-group session-drop-target${
+                          isOver ? " is-over" : ""
+                        }`}
+                      >
+                        <div
+                          className="session-header"
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => toggleSession(sessionId)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              toggleSession(sessionId);
+                            }
+                          }}
+                        >
+                          <div className="session-header-top">
+                            <div className="session-header-text">
+                              <h3>Sessionless games</h3>
+                              <p className="helper session-meta">
+                                <span>{sessionGroups.sessionless.length} games</span>
+                                <span>Avg {formatAverage(scores)}</span>
+                                {collapsed && firstDateTime ? (
+                                  <span>{firstDateTime}</span>
+                                ) : null}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="expand-toggle"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleSession(sessionId);
+                              }}
+                              aria-expanded={!collapsed}
+                              aria-label={`${collapsed ? "Expand" : "Collapse"} Sessionless games`}
+                              title={`${collapsed ? "Expand" : "Collapse"} Sessionless games`}
+                            >
+                              <svg
+                                aria-hidden="true"
+                                viewBox="0 0 24 24"
+                                width="16"
+                                height="16"
+                              >
+                                <path
+                                  d="M9 6l6 6-6 6"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.6"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </button>
+                          </div>
+                          <p className="helper">
+                            These games were not given a session.
+                          </p>
+                        </div>
+                        {!collapsed ? (
+                          <div className="games-list">
+                            {sortedGames.map((game) => (
+                              <DraggableGameCard
+                                key={game.id}
+                                game={game}
+                                titleOverride={sessionGroups.gameTitleMap.get(game.id)}
+                              />
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </DroppableContainer>
+                );
+              })() : null}
             </div>
-            <div className="games-list">
-              {popupGames.map((game) => renderGameCard(game))}
-            </div>
-          </div>
-        ) : null}
-        <div className="games-list">
-          {displayGames.length === 0 ? (
-            <p className="helper">No games yet.</p>
-          ) : (
-            displayGames.map((game) => renderGameCard(game))
-          )}
-        </div>
-        {showLoadMore ? (
+            <DragOverlay>
+              {activeDragGame ? (
+                <div className="game-card drag-overlay">
+                  {renderGameCardContent(
+                    activeDragGame,
+                    sessionGroups.gameTitleMap.get(activeDragGame.id),
+                    true
+                  )}
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
+        )}
+        {showLoadMoreSessions ? (
           <div className="games-footer">
             <button
               type="button"
               className="button-secondary load-more-button"
-              onClick={handleLoadMore}
+              onClick={handleLoadMoreSessions}
             >
-              Load more
+              Load more sessions
             </button>
           </div>
         ) : null}
