@@ -164,14 +164,16 @@ export default function Dashboard() {
   const [gameError, setGameError] = useState<string>("");
   const [games, setGames] = useState<GameListItem[]>([]);
   const [gamesTotal, setGamesTotal] = useState<number | null>(null);
-  const [sessionLimit, setSessionLimit] = useState<number>(10);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState<boolean>(false);
-  const [newLoggedIds, setNewLoggedIds] = useState<string[]>([]);
-  const [dismissedLoggedIds, setDismissedLoggedIds] = useState<string[]>([]);
-  const [loggedGameCache, setLoggedGameCache] = useState<Record<string, GameListItem>>(
-    {}
-  );
+  const [pendingBatch, setPendingBatch] = useState<{
+    jobIds: string[];
+    loggedGameIds: string[];
+  } | null>(null);
+  const [reviewGameIds, setReviewGameIds] = useState<string[]>([]);
+  const [scrollTargetSessionId, setScrollTargetSessionId] = useState<
+    string | null
+  >(null);
   const [collapsedSessions, setCollapsedSessions] = useState<Record<string, boolean>>(
     {}
   );
@@ -193,6 +195,9 @@ export default function Dashboard() {
   const [movingGameId, setMovingGameId] = useState<string | null>(null);
   const pendingJobsRef = useRef<PendingJob[]>([]);
   const pollCountsRef = useRef<Record<string, number>>({});
+  const gameCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const sessionHeaderRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const scrollAttemptsRef = useRef<number>(0);
   const dismissTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>(
     {}
   );
@@ -252,19 +257,6 @@ export default function Dashboard() {
     }
   }, []);
 
-  const toGameListItem = useCallback(
-    (game: GameDetail): GameListItem => ({
-      id: game.id,
-      game_name: game.game_name ?? null,
-      player_name: game.player_name,
-      total_score: game.total_score ?? null,
-      status: game.status,
-      played_at: game.played_at ?? null,
-      created_at: game.created_at ?? new Date().toISOString()
-    }),
-    []
-  );
-
   const loadGameFromJob = useCallback(async (lookupJobId: string) => {
     setGameError("");
     try {
@@ -294,6 +286,50 @@ export default function Dashboard() {
   useEffect(() => {
     pendingJobsRef.current = pendingJobs;
   }, [pendingJobs]);
+
+  useEffect(() => {
+    if (!pendingBatch) {
+      return;
+    }
+    if (pendingBatch.loggedGameIds.length !== pendingBatch.jobIds.length) {
+      return;
+    }
+    setReviewGameIds(pendingBatch.loggedGameIds);
+    setPendingBatch(null);
+  }, [pendingBatch]);
+
+  useEffect(() => {
+    if (!scrollTargetSessionId) {
+      return;
+    }
+    let cancelled = false;
+    const attemptScroll = () => {
+      if (cancelled) {
+        return;
+      }
+      const node = sessionHeaderRefs.current[scrollTargetSessionId];
+      if (node) {
+        const offset = 100;
+        const top =
+          node.getBoundingClientRect().top + window.scrollY - offset;
+        window.scrollTo({ top, behavior: "smooth" });
+        scrollAttemptsRef.current = 0;
+        setScrollTargetSessionId(null);
+        return;
+      }
+      if (scrollAttemptsRef.current >= 10) {
+        scrollAttemptsRef.current = 0;
+        setScrollTargetSessionId(null);
+        return;
+      }
+      scrollAttemptsRef.current += 1;
+      setTimeout(attemptScroll, 150);
+    };
+    attemptScroll();
+    return () => {
+      cancelled = true;
+    };
+  }, [scrollTargetSessionId]);
 
   useEffect(() => {
     const activeIds = new Set(pendingJobs.map((job) => job.jobId));
@@ -384,24 +420,23 @@ export default function Dashboard() {
             nextMessage = "Processing with Gemini...";
           } else if (payload.status === "logged") {
             nextMessage = "Extraction complete. Logged.";
-            const loggedGame = await loadGameFromJob(job.jobId);
-            if (loggedGame) {
-              const listItem = toGameListItem(loggedGame);
-              setLoggedGameCache((current) => ({
-                ...current,
-                [listItem.id]: listItem
-              }));
-              setNewLoggedIds((current) => {
-                if (current.includes(listItem.id)) {
+            const loggedId =
+              payload.gameId || (await loadGameFromJob(job.jobId))?.id || null;
+            await loadGames();
+            if (loggedId) {
+              setPendingBatch((current) => {
+                if (!current || !current.jobIds.includes(job.jobId)) {
                   return current;
                 }
-                if (dismissedLoggedIds.includes(listItem.id)) {
+                if (current.loggedGameIds.includes(loggedId)) {
                   return current;
                 }
-                return [listItem.id, ...current];
+                return {
+                  ...current,
+                  loggedGameIds: [...current.loggedGameIds, loggedId]
+                };
               });
             }
-            await loadGames();
             scheduleDismiss(job.jobId);
           } else if (payload.status === "error") {
             nextMessage = payload.lastError
@@ -450,7 +485,7 @@ export default function Dashboard() {
         clearInterval(intervalId);
       }
     };
-  }, [pendingJobs, loadGameFromJob, loadGames, toGameListItem, dismissedLoggedIds]);
+  }, [pendingJobs, loadGameFromJob, loadGames]);
 
   const handleQueued = (jobs: Array<{ jobId: string; message: string }>) => {
     setPendingJobs((current) => {
@@ -464,8 +499,47 @@ export default function Dashboard() {
         }));
       return [...current, ...nextJobs];
     });
+    if (jobs.length > 0) {
+      setPendingBatch({
+        jobIds: jobs.map((job) => job.jobId),
+        loggedGameIds: []
+      });
+    }
     setEditingGameId(null);
     setEditingMode("edit");
+  };
+
+  const handleReviewRecentlyLogged = () => {
+    if (reviewGameIds.length === 0) {
+      return;
+    }
+    const sessionIds = new Set<string>();
+    let firstSessionId: string | null = null;
+    reviewGameIds.forEach((gameId) => {
+      const match = games.find((game) => game.id === gameId);
+      if (!match) {
+        return;
+      }
+      if (!firstSessionId) {
+        firstSessionId = match.session_id ?? "sessionless";
+      }
+      sessionIds.add(match.session_id ?? "sessionless");
+    });
+
+    if (sessionIds.size > 0) {
+      setCollapsedSessions((current) => {
+        const next = { ...current };
+        sessionIds.forEach((sessionId) => {
+          next[sessionId] = false;
+        });
+        return next;
+      });
+    }
+
+    setReviewGameIds([]);
+    if (firstSessionId) {
+      setScrollTargetSessionId(firstSessionId);
+    }
   };
 
   const handleConfirm = async (gameId: string) => {
@@ -720,29 +794,32 @@ export default function Dashboard() {
       session: GameListItem["session"];
       games: GameListItem[];
     }) => {
-      if (group.session?.started_at) {
-        return Date.parse(group.session.started_at);
-      }
-      const firstGame = sortByPlayedAtAsc(group.games)[0];
-      if (firstGame) {
-        return Date.parse(firstGame.played_at || firstGame.created_at);
-      }
       if (group.session?.created_at) {
         return Date.parse(group.session.created_at);
       }
       return 0;
     };
 
-    const orderedSessions = Array.from(sessionMap.values()).sort((a, b) => {
+    const compareSessions = (
+      a: { sessionId: string; session: GameListItem["session"]; games: GameListItem[] },
+      b: { sessionId: string; session: GameListItem["session"]; games: GameListItem[] }
+    ) => {
       const aDate = getSessionSortDate(a);
       const bDate = getSessionSortDate(b);
-      return bDate - aDate;
+      if (aDate !== bDate) {
+        return aDate - bDate;
+      }
+      return a.sessionId.localeCompare(b.sessionId);
+    };
+
+    const orderedSessions = Array.from(sessionMap.values()).sort((a, b) => {
+      return compareSessions(b, a);
     });
 
     const sessionNumberById = new Map<string, number>();
     orderedSessions
       .slice()
-      .sort((a, b) => getSessionSortDate(a) - getSessionSortDate(b))
+      .sort(compareSessions)
       .forEach((group, index) => {
         sessionNumberById.set(group.sessionId, index + 1);
       });
@@ -765,16 +842,11 @@ export default function Dashboard() {
       sessionNumberById
     };
   }, [games]);
-  const showLoadMoreSessions =
-    sessionGroups.orderedSessions.length > sessionLimit;
-  const handleLoadMoreSessions = () => {
-    setSessionLimit((prev) => prev + 10);
-  };
   const displayedSessionCount =
-    Math.min(sessionLimit, sessionGroups.orderedSessions.length) +
+    sessionGroups.orderedSessions.length +
     (sessionGroups.sessionless.length > 0 ? 1 : 0);
   const sessionCountLabel = displayedSessionCount === 1 ? "session" : "sessions";
-  const visibleSessions = sessionGroups.orderedSessions.slice(0, sessionLimit);
+  const visibleSessions = sessionGroups.orderedSessions;
   const sessionOptions = useMemo(() => {
     return sessionGroups.orderedSessions.map((group) => {
       const sessionLabel =
@@ -833,28 +905,8 @@ export default function Dashboard() {
       setCreatingSession(false);
     }
   }, [creatingSession]);
-  const handleCloseLoggedPopup = () => {
-    setDismissedLoggedIds((current) => {
-      const next = new Set(current);
-      newLoggedIds.forEach((id) => next.add(id));
-      return Array.from(next);
-    });
-    setNewLoggedIds([]);
-  };
-  const popupGames = newLoggedIds
-    .map((id) => games.find((game) => game.id === id) || loggedGameCache[id])
-    .filter((game): game is GameListItem => Boolean(game));
-  const showLoggedPopup = popupGames.length > 0;
   const gameNumberMap = useMemo(() => {
-    const combined = [...games];
-    const existingIds = new Set(combined.map((game) => game.id));
-    Object.values(loggedGameCache).forEach((game) => {
-      if (!existingIds.has(game.id)) {
-        combined.push(game);
-        existingIds.add(game.id);
-      }
-    });
-    combined.sort((a, b) => {
+    const ordered = [...games].sort((a, b) => {
       const aTime = a.played_at
         ? Date.parse(a.played_at)
         : Date.parse(a.created_at);
@@ -863,13 +915,13 @@ export default function Dashboard() {
         : Date.parse(b.created_at);
       return bTime - aTime;
     });
-    const total = gamesTotal ?? combined.length;
+    const total = gamesTotal ?? ordered.length;
     const map = new Map<string, number>();
-    combined.forEach((game, index) => {
+    ordered.forEach((game, index) => {
       map.set(game.id, total - index);
     });
     return map;
-  }, [games, gamesTotal, loggedGameCache]);
+  }, [games, gamesTotal]);
   const formatJobMessage = (job: PendingJob) => {
     if (isDebug) {
       const statusLabel = job.status ? ` Status: ${job.status}.` : "";
@@ -895,6 +947,26 @@ export default function Dashboard() {
     return job.message;
   };
   const getGameNumber = (gameId: string) => gameNumberMap.get(gameId) ?? null;
+  const registerGameRef = useCallback(
+    (gameId: string) => (node: HTMLDivElement | null) => {
+      if (node) {
+        gameCardRefs.current[gameId] = node;
+      } else {
+        delete gameCardRefs.current[gameId];
+      }
+    },
+    []
+  );
+  const registerSessionHeaderRef = useCallback(
+    (sessionId: string) => (node: HTMLDivElement | null) => {
+      if (node) {
+        sessionHeaderRefs.current[sessionId] = node;
+      } else {
+        delete sessionHeaderRefs.current[sessionId];
+      }
+    },
+    []
+  );
   const DraggableGameCard = ({
     game,
     titleOverride
@@ -912,14 +984,16 @@ export default function Dashboard() {
     };
 
     return (
-      <div
-        ref={setNodeRef}
-        style={style}
-        className={`game-card draggable${isDragging ? " dragging" : ""}`}
-        {...attributes}
-        {...listeners}
-      >
-        {renderGameCardContent(game, titleOverride)}
+      <div ref={registerGameRef(game.id)} className="game-card-wrapper">
+        <div
+          ref={setNodeRef}
+          style={style}
+          className={`game-card draggable${isDragging ? " dragging" : ""}`}
+          {...attributes}
+          {...listeners}
+        >
+          {renderGameCardContent(game, titleOverride)}
+        </div>
       </div>
     );
   };
@@ -928,13 +1002,8 @@ export default function Dashboard() {
     if (!activeDragGameId) {
       return null;
     }
-    const fromGames = games.find((game) => game.id === activeDragGameId);
-    if (fromGames) {
-      return fromGames;
-    }
-    const fromCache = loggedGameCache[activeDragGameId];
-    return fromCache ?? null;
-  }, [activeDragGameId, games, loggedGameCache]);
+    return games.find((game) => game.id === activeDragGameId) ?? null;
+  }, [activeDragGameId, games]);
 
   const handleDragStart = (event: DragStartEvent) => {
     if (event.active?.data?.current?.type === "game") {
@@ -1159,6 +1228,17 @@ export default function Dashboard() {
           onSessionChange={handleSessionChange}
           onCreateSession={handleCreateSession}
         />
+        {reviewGameIds.length > 0 ? (
+          <div className="status-stack">
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={handleReviewRecentlyLogged}
+            >
+              Review recently logged games
+            </button>
+          </div>
+        ) : null}
         {pendingJobs.length > 0 ? (
           <div className="status-stack">
             {pendingJobs.map((job) => (
@@ -1196,34 +1276,6 @@ export default function Dashboard() {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            {showLoggedPopup && popupGames.length > 0 ? (
-              <div className="logged-popup">
-                <div className="logged-popup-header">
-                  <div>
-                    <h3>Newly logged games</h3>
-                    <p className="helper">
-                      Review games for accuracy, then feel free to close this pop up.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="button-secondary logged-popup-close"
-                    onClick={handleCloseLoggedPopup}
-                  >
-                    Close
-                  </button>
-                </div>
-                <div className="games-list">
-                  {popupGames.map((game) => (
-                    <DraggableGameCard
-                      key={game.id}
-                      game={game}
-                      titleOverride={sessionGroups.gameTitleMap.get(game.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
             <div className="session-stack">
               {visibleSessions.map((group) => {
                 const sessionId = group.sessionId;
@@ -1259,6 +1311,7 @@ export default function Dashboard() {
                         }`}
                       >
                         <div
+                          ref={registerSessionHeaderRef(sessionId)}
                           className="session-header"
                           role="button"
                           tabIndex={0}
@@ -1509,6 +1562,7 @@ export default function Dashboard() {
                         }`}
                       >
                         <div
+                          ref={registerSessionHeaderRef(sessionId)}
                           className="session-header"
                           role="button"
                           tabIndex={0}
@@ -1593,17 +1647,6 @@ export default function Dashboard() {
             </DragOverlay>
           </DndContext>
         )}
-        {showLoadMoreSessions ? (
-          <div className="games-footer">
-            <button
-              type="button"
-              className="button-secondary load-more-button"
-              onClick={handleLoadMoreSessions}
-            >
-              Load more sessions
-            </button>
-          </div>
-        ) : null}
         {gameError ? <p className="helper error-text">{gameError}</p> : null}
       </section>
 

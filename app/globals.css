@@ -446,6 +446,10 @@ button:hover:not(:disabled) {
   gap: 12px;
 }
 
+.game-card-wrapper {
+  position: relative;
+}
+
 .session-stack {
   display: grid;
   gap: 16px;
