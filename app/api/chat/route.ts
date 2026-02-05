@@ -2210,7 +2210,7 @@ export async function POST(request: Request) {
       }));
     if (sessionlessGames.length > 0) {
       sessionGameIndex.push({
-        sessionId: null,
+        sessionId: "sessionless",
         sessionLabel: "Sessionless games",
         sessionName: null,
         games: sessionlessGames
