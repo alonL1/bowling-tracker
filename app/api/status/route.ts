@@ -52,7 +52,7 @@ export async function GET(request: Request) {
 
   const { data: job, error } = await supabase
     .from("analysis_jobs")
-    .select("id,status,last_error,updated_at,game_id")
+    .select("id,status,last_error,updated_at,game_id,created_at,session_id,player_name")
     .eq("id", jobId)
     .eq("user_id", userId)
     .single();
@@ -64,13 +64,69 @@ export async function GET(request: Request) {
     );
   }
 
-  const normalizedStatus = job.status === "ready" ? "logged" : job.status;
+  let normalizedStatus = job.status === "ready" ? "logged" : job.status;
+  let resolvedGameId = job.game_id;
+
+  if (normalizedStatus !== "logged" && job.game_id) {
+    const { data: game } = await supabase
+      .from("games")
+      .select("status")
+      .eq("id", job.game_id)
+      .maybeSingle();
+    if (game?.status === "logged") {
+      normalizedStatus = "logged";
+    }
+  }
+
+  if (normalizedStatus !== "logged" && !job.game_id) {
+    let candidateQuery = supabase
+      .from("games")
+      .select("id,status")
+      .eq("user_id", userId)
+      .eq("player_name", job.player_name)
+      .gte("created_at", job.created_at)
+      .order("created_at", { ascending: true })
+      .limit(5);
+
+    if (job.session_id) {
+      candidateQuery = candidateQuery.eq("session_id", job.session_id);
+    } else {
+      candidateQuery = candidateQuery.is("session_id", null);
+    }
+
+    const { data: candidates } = await candidateQuery;
+    if (candidates && candidates.length > 0) {
+      for (const candidate of candidates) {
+        const { data: existingLink } = await supabase
+          .from("analysis_jobs")
+          .select("id")
+          .eq("game_id", candidate.id)
+          .maybeSingle();
+        if (existingLink) {
+          continue;
+        }
+        resolvedGameId = candidate.id;
+        if (candidate.status === "logged") {
+          normalizedStatus = "logged";
+        }
+        await supabase
+          .from("analysis_jobs")
+          .update({
+            game_id: candidate.id,
+            status: normalizedStatus === "logged" ? "logged" : job.status,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", job.id);
+        break;
+      }
+    }
+  }
 
   return NextResponse.json({
     jobId: job.id,
     status: normalizedStatus,
     lastError: job.last_error,
     updatedAt: job.updated_at,
-    gameId: job.game_id
+    gameId: resolvedGameId
   });
 }

@@ -98,3 +98,31 @@ begin
   return coalesce(result, '[]'::jsonb);
 end;
 $$;
+
+-- Row Level Security for bowling_sessions
+alter table bowling_sessions enable row level security;
+
+drop policy if exists "bowling_sessions_select_own" on bowling_sessions;
+create policy "bowling_sessions_select_own"
+  on bowling_sessions
+  for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "bowling_sessions_insert_own" on bowling_sessions;
+create policy "bowling_sessions_insert_own"
+  on bowling_sessions
+  for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "bowling_sessions_update_own" on bowling_sessions;
+create policy "bowling_sessions_update_own"
+  on bowling_sessions
+  for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "bowling_sessions_delete_own" on bowling_sessions;
+create policy "bowling_sessions_delete_own"
+  on bowling_sessions
+  for delete
+  using (auth.uid() = user_id);

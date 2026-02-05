@@ -281,9 +281,17 @@ function resolveThinkingConfig(mode) {
 
 async function setJobError(supabase, jobId, gameId, message) {
   console.error(`Job ${jobId} failed: ${message}`);
+  const jobUpdate = {
+    status: "error",
+    last_error: message,
+    updated_at: new Date().toISOString()
+  };
+  if (gameId) {
+    jobUpdate.game_id = gameId;
+  }
   await supabase
     .from("analysis_jobs")
-    .update({ status: "error", last_error: message, updated_at: new Date().toISOString() })
+    .update(jobUpdate)
     .eq("id", jobId);
 
   if (gameId) {
@@ -444,6 +452,14 @@ async function processJob() {
   }
 
   const gameId = createdGame.id;
+
+  const { error: jobLinkError } = await supabase
+    .from("analysis_jobs")
+    .update({ game_id: gameId, updated_at: new Date().toISOString() })
+    .eq("id", job.id);
+  if (jobLinkError) {
+    console.warn(`Failed to link game ${gameId} to job ${job.id}:`, jobLinkError.message);
+  }
 
   if (sessionId) {
     const { data: sessionRow, error: sessionError } = await supabase
