@@ -207,7 +207,7 @@ export default function Dashboard() {
       activationConstraint: { distance: 8 }
     }),
     useSensor(TouchSensor, {
-      activationConstraint: { delay: 250, tolerance: 5 }
+      activationConstraint: { delay: 350, tolerance: 3 }
     })
   );
 
@@ -592,15 +592,7 @@ export default function Dashboard() {
         setEditingGameId(null);
         setEditingMode("edit");
       }
-      setNewLoggedIds((current) => current.filter((id) => id !== gameId));
-      setDismissedLoggedIds((current) =>
-        current.filter((id) => id !== gameId)
-      );
-      setLoggedGameCache((current) => {
-        const next = { ...current };
-        delete next[gameId];
-        return next;
-      });
+      setReviewGameIds((current) => current.filter((id) => id !== gameId));
       await loadGames();
     } catch (error) {
       const message =

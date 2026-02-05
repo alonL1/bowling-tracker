@@ -22,12 +22,21 @@ type Frame = {
 
 type Game = {
   id: string;
+  session_id?: string | null;
   game_name?: string | null;
   player_name: string;
   total_score: number | null;
   played_at?: string | null;
   created_at?: string;
   frames?: Frame[];
+};
+
+type BowlingSession = {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+  started_at?: string | null;
+  created_at?: string | null;
 };
 
 type OrderedGame = Game & {
@@ -50,6 +59,19 @@ type SqlResult = {
   empty?: boolean;
   answer?: string;
   error?: string;
+  timings?: {
+    sqlPromptMs: number;
+    sqlQueryMs: number;
+    sqlAnswerMs: number;
+  };
+};
+
+type ChatTimings = {
+  parseRequestMs: number;
+  authMs: number;
+  loadGamesMs: number;
+  loadSessionsMs: number;
+  buildIndexMs: number;
 };
 
 type DateFilter = {
@@ -188,17 +210,20 @@ function buildPrompt(
   summary: unknown,
   index: unknown,
   selection: unknown,
-  frameStats: unknown
+  frameStats: unknown,
+  sessionGameIndex: unknown
 ) {
   // prompt for summary-based answer
   // You are a bowling stats assistant that is familiar with bowling terminology. Answer the question using only the JSON data below.
   // You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
   // If the data does not include the answer, say so briefly.
+  // Ignore any session not present in the Session/Game Index.
   // When listing multiple items, format them as a bulleted or numbered list (one item per line).
   // Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
   // Answer with a direct response. Do not include "Answer:".
   // Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
   // should be answered similarly to "Your average score across across games x to y is n."
+  // If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
   // If a response is null, instead of using the word "null" use language such as "You have no games x to y"
   //
   // Scope: *scope*
@@ -208,7 +233,10 @@ function buildPrompt(
   // Game Index:
   // *game index*
   //
-  // Selection:
+  // Session/Game Index:
+  // *session game index*
+  //
+  // Selection (hint only; may be incomplete for complex queries):
   // *selection*
   //
   // Frame Aggregates:
@@ -219,11 +247,13 @@ function buildPrompt(
   return `You are a bowling stats assistant that is familiar with bowling terminology. Answer the question using only the JSON data below.
 You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
 If the data does not include the answer, say so briefly.
+Ignore any session not present in the Session/Game Index.
 When listing multiple items, format them as a bulleted or numbered list (one item per line).
 Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
 Answer with a direct response. Do not include "Answer:".
 Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
 should be answered similarly to "Your average score across across games x to y is n."
+If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
 If a response is null, instead of using the word "null" use language such as "You have no games x to y"
 
 Scope: ${scope}
@@ -233,7 +263,10 @@ ${JSON.stringify(summary, null, 2)}
 Game Index:
 ${JSON.stringify(index, null, 2)}
 
-Selection:
+Session/Game Index:
+${JSON.stringify(sessionGameIndex ?? [], null, 2)}
+
+Selection (hint only; may be incomplete for complex queries):
 ${JSON.stringify(selection, null, 2)}
 
 Frame Aggregates:
@@ -248,12 +281,14 @@ function buildContextPrompt(
   scope: string,
   context: unknown,
   selection: unknown,
+  sessionGameIndex: unknown,
   timezoneOffsetMinutes?: number
 ) {
   // prompt for context-based answer
   // You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
   // You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
   // If the answer is not present, say so briefly.
+  // Ignore any session not present in the Session/Game Index.
   // Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
   // If you mention times, convert them to the user's local time.
   // local time + *timezone offset* = UTC.
@@ -264,10 +299,14 @@ function buildContextPrompt(
   // Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
   // should be answered similarly to "Your average score across across games x to y is n."
   // Do not mention query limits.
+  // If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
   // If a response is null, instead of using the word "null" use language such as "You have no games x to y"
   //
   // Scope: *scope*
-  // Selection:
+  // Session/Game Index:
+  // *session game index*
+  //
+  // Selection (hint only; may be incomplete for complex queries):
   // *selection*
   //
   // Context:
@@ -278,6 +317,7 @@ function buildContextPrompt(
   return `You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
 You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
 If the answer is not present, say so briefly.
+Ignore any session not present in the Session/Game Index.
 Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 If you mention times, convert them to the user's local time.
 local time + ${timezoneOffsetMinutes ?? "unknown"} = UTC.
@@ -287,10 +327,14 @@ Answer with a direct response. Do not include "Answer:".
 Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
 should be answered similarly to "Your average score across across games x to y is n."
 Do not mention query limits.
+If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
 If a response is null, instead of using the word "null" use language such as "You have no games x to y"
 
 Scope: ${scope}
-Selection:
+Session/Game Index:
+${JSON.stringify(sessionGameIndex ?? [], null, 2)}
+
+Selection (hint only; may be incomplete for complex queries):
 ${JSON.stringify(selection, null, 2)}
 
 Context:
@@ -304,6 +348,7 @@ function buildSqlPrompt(
   question: string,
   index: unknown,
   schema: string,
+  sessionIndex: unknown,
   timezoneOffsetMinutes?: number
 ) {
 
@@ -315,7 +360,13 @@ function buildSqlPrompt(
   // - Only SELECT statements.
   // - Use table and column names exactly as defined.
   // - If you cannot answer with SQL, set sql to "__USE_CONTEXT__" and explain.
-  // - The game index already reflects any time filters; only use games listed below.
+  // - The game index is a full list of games (not filtered). Use it for labels, but follow the question text for filtering.
+  // - Session labels and IDs are provided in the Session Index. If the user references Session N or a session name, map it to session_id and filter by games.session_id.
+  // - Empty sessions do not exist for this task. Never include or count any session that is not in the Session Index.
+  // - When listing sessions, use the Session Index labels (sessionLabel) and never output raw UUIDs unless the user explicitly asks for IDs.
+  // - If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
+  // - If the question lists games, include games.id, games.session_id, games.played_at, and games.total_score in the SELECT so labels can be mapped.
+  // - If the question lists sessions, include bowling_sessions.id in the SELECT so labels can be mapped.
   // - The user's timezone offset (minutes from UTC) is *timezone offset*.
   // - Times mentioned in the question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
   // - Times in Schema and Game Index are in UTC.
@@ -323,6 +374,9 @@ function buildSqlPrompt(
   //
   // Schema:
   // *schema*
+  //
+  // Session Index:
+  // *session index*
   //
   // Game Index:
   // *game index*
@@ -336,8 +390,14 @@ Return JSON only with this schema: {"sql": string|null, "explanation": string}.
 - Only SELECT statements.
 - Use table and column names exactly as defined.
 - If you cannot answer with SQL, set sql to "__USE_CONTEXT__" and explain.
-- The game index already reflects any time filters; only use games listed below.
+- The game index is a full list of games (not filtered). Use it for labels, but follow the question text for filtering.
 - Labels like "Game 3" come from the Game Index ordering; do not filter by games.game_name for "Game N" labels unless the user explicitly mentions a custom name.
+- Session labels and IDs are provided in the Session Index. If the user references Session N or a session name, map it to session_id and filter by games.session_id.
+- Empty sessions do not exist for this task. Never include or count any session that is not in the Session Index.
+- When listing sessions, use the Session Index labels (sessionLabel) and never output raw UUIDs unless the user explicitly asks for IDs.
+- If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
+- If the question lists games, include games.id, games.session_id, games.played_at, and games.total_score in the SELECT so labels can be mapped.
+- If the question lists sessions, include bowling_sessions.id in the SELECT so labels can be mapped.
 - The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 - Times mentioned in the user's question are in the user's local time unless explicitly stated otherwise; convert to UTC for querying.
 - Times in Schema and Game Index are in UTC.
@@ -345,6 +405,9 @@ Return JSON only with this schema: {"sql": string|null, "explanation": string}.
 
 Schema:
 ${schema}
+
+Session Index:
+${JSON.stringify(sessionIndex ?? [], null, 2)}
 
 Game Index:
 ${JSON.stringify(index, null, 2)}
@@ -357,7 +420,8 @@ function buildSqlAnswerPrompt(
   question: string,
   sql: string,
   results: unknown,
-  timezoneOffsetMinutes?: number
+  timezoneOffsetMinutes?: number,
+  labelMapping?: unknown
 ) {
 
   // prompt for SQL answer generation
@@ -368,11 +432,16 @@ function buildSqlAnswerPrompt(
   // UTC - *timezone offset* minutes = local time.
   // Understand common bowling lingo.
   // When listing multiple items, format them as a bulleted or numbered list (one item per line).
+  // If results include gameLabel (or sessionLabel), use those labels instead of raw IDs or null game_name values.
+  // Never mention sessions that are not present in the Label Mapping.
   // Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
   // Answer with a direct response. Do not include "Answer:".
   // Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
   // should be answered similarly to "Your average score across across games x to y is n."
   // If a response is null, instead of using the word "null" use language such as "You have no games x to y"
+  //
+  // Label Mapping:
+  // *label mapping*
   //
   // SQL:
   // *sql*
@@ -388,6 +457,8 @@ All timestamps in the results are UTC. The user's timezone offset (minutes from 
 If you mention times, convert them to the user's local time.
 UTC - ${timezoneOffsetMinutes ?? "unknown"} minutes = local time.
 When listing multiple items, format them as a bulleted or numbered list (one item per line).
+If results include gameLabel (or sessionLabel), use those labels instead of raw IDs or null game_name values.
+Never mention sessions that are not present in the Label Mapping.
 Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
 Answer with a direct response. Do not include "Answer:".
 Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
@@ -396,6 +467,9 @@ If a response is null, instead of using the word "null" use language such as "Yo
 
 SQL:
 ${sql}
+
+Label Mapping:
+${JSON.stringify(labelMapping ?? {}, null, 2)}
 
 Results JSON:
 ${JSON.stringify(results, null, 2)}
@@ -443,8 +517,75 @@ function extractGameNumbers(question: string) {
   return Array.from(numbers).sort((a, b) => a - b);
 }
 
-function mapNumbersToNames(numbers: number[]) {
-  return numbers.map((value) => `Game ${value}`);
+function extractSessionNumbers(question: string) {
+  const numbers = new Set<number>();
+  const rangeRegex = /sessions?\s*(\d+)\s*(?:-|to)\s*(\d+)/gi;
+  let rangeMatch: RegExpExecArray | null;
+  while ((rangeMatch = rangeRegex.exec(question))) {
+    const start = Number.parseInt(rangeMatch[1], 10);
+    const end = Number.parseInt(rangeMatch[2], 10);
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      const min = Math.min(start, end);
+      const max = Math.max(start, end);
+      for (let value = min; value <= max; value += 1) {
+        numbers.add(value);
+      }
+    }
+  }
+
+  const listMatch = question.match(/sessions?\s+([0-9,\sand]+)/i);
+  if (listMatch && listMatch[1]) {
+    const listNumbers = listMatch[1].match(/\d+/g) || [];
+    listNumbers.forEach((value) => {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        numbers.add(parsed);
+      }
+    });
+  }
+
+  const singleRegex = /session\s*(\d+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = singleRegex.exec(question))) {
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed)) {
+      numbers.add(parsed);
+    }
+  }
+
+  return Array.from(numbers).sort((a, b) => a - b);
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractSessionNameMatches(question: string, names: string[]) {
+  const lowered = question.toLowerCase();
+  const ordered = names
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  const matches: string[] = [];
+  ordered.forEach((name) => {
+    const escaped = escapeRegex(name);
+    const regex = new RegExp(`\\b${escaped}\\b`, "i");
+    if (regex.test(lowered)) {
+      matches.push(name);
+    }
+  });
+  return matches;
+}
+
+function mentionsSessionless(question: string) {
+  const lower = question.toLowerCase();
+  return (
+    lower.includes("sessionless") ||
+    lower.includes("no session") ||
+    lower.includes("without session") ||
+    lower.includes("without a session") ||
+    lower.includes("no sessions")
+  );
 }
 
 function ensureSentence(text: string) {
@@ -1032,9 +1173,72 @@ function formatGameRange(numbers: number[]) {
   return `games ${joined}`;
 }
 
+function formatLabelList(labels: string[]) {
+  if (labels.length === 0) {
+    return null;
+  }
+  if (labels.length === 1) {
+    return labels[0];
+  }
+  if (labels.length === 2) {
+    return `${labels[0]} and ${labels[1]}`;
+  }
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
+function buildLabelMapping(
+  sessionIndex: Array<{ sessionId: string; sessionLabel: string }> | [],
+  gameEntries: Array<{ id: string; label: string }>
+) {
+  const sessionLabels: Record<string, string> = {};
+  sessionIndex.forEach((session) => {
+    if (session.sessionId) {
+      sessionLabels[session.sessionId] = session.sessionLabel;
+    }
+  });
+  const gameLabels: Record<string, string> = {};
+  gameEntries.forEach((entry) => {
+    gameLabels[entry.id] = entry.label;
+  });
+  return { sessionLabels, gameLabels };
+}
+
+function isSessionListOnlyQuestion(question: string) {
+  const lower = question.toLowerCase();
+  const wantsList =
+    lower.includes("list") ||
+    lower.includes("show") ||
+    lower.includes("what sessions") ||
+    lower.includes("which sessions");
+  if (!wantsList || !lower.includes("session")) {
+    return false;
+  }
+  const disallow = [
+    "average",
+    "avg",
+    "score",
+    "highest",
+    "lowest",
+    "best",
+    "worst",
+    "compare",
+    "rate",
+    "percent",
+    "strike",
+    "spare",
+    "frame",
+    "game ",
+    "games ",
+    "games in",
+    "game in"
+  ];
+  return !disallow.some((token) => lower.includes(token));
+}
+
 function buildSelectionLabel(
   selectedGameNumbers: number[],
-  localTimeFilter: TimeFilter
+  localTimeFilter: TimeFilter,
+  sessionLabels?: string[]
 ) {
   const gameLabel = formatGameRange(selectedGameNumbers);
   const timeParts: string[] = [];
@@ -1062,6 +1266,12 @@ function buildSelectionLabel(
   if (timeLabel) {
     return `games ${timeLabel}`;
   }
+  if (sessionLabels && sessionLabels.length > 0) {
+    const sessionList = formatLabelList(sessionLabels);
+    if (sessionList) {
+      return `sessions ${sessionList}`;
+    }
+  }
   return null;
 }
 
@@ -1072,11 +1282,16 @@ function tryShortcut(
   frameStats: FrameAggregate[],
   selectedFrames: number[],
   hasTimeFilter: boolean,
-  selectionLabel: string | null
+  selectionLabel: string | null,
+  selectedSessionLabels: string[]
 ) {
   const lower = question.toLowerCase();
   const includesAverage = lower.includes("average") || lower.includes("avg");
   const scopeSuffix = selectionLabel ? ` on ${selectionLabel}` : "";
+  const sessionSuffix =
+    !scopeSuffix && selectedSessionLabels.length > 0
+      ? ` in ${formatLabelList(selectedSessionLabels)}`
+      : "";
 
   if (/(how many|number of) games/.test(lower)) {
     return {
@@ -1103,7 +1318,7 @@ function tryShortcut(
     }
     return {
       handled: true,
-      answer: `Your average score${scopeSuffix} is **${summary.averageScore}**.`
+      answer: `Your average score${scopeSuffix || sessionSuffix} is **${summary.averageScore}**.`
     };
   }
 
@@ -1114,7 +1329,7 @@ function tryShortcut(
     );
     return {
       handled: true,
-      answer: `Your total score${scopeSuffix} is **${total}**.`
+      answer: `Your total score${scopeSuffix || sessionSuffix} is **${total}**.`
     };
   }
 
@@ -1128,7 +1343,7 @@ function tryShortcut(
     );
     return {
       handled: true,
-      answer: `Your highest score is **${best.total_score}** in **${best.game_name}**.`
+      answer: `Your highest score${scopeSuffix || sessionSuffix} is **${best.total_score}** in **${best.game_name}**.`
     };
   }
 
@@ -1142,7 +1357,7 @@ function tryShortcut(
     );
     return {
       handled: true,
-      answer: `Your lowest score is **${worst.total_score}** in **${worst.game_name}**.`
+      answer: `Your lowest score${scopeSuffix || sessionSuffix} is **${worst.total_score}** in **${worst.game_name}**.`
     };
   }
 
@@ -1161,7 +1376,7 @@ function tryShortcut(
     }
     return {
       handled: true,
-      answer: `Your strike rate${scopeSuffix} is **${formatRate(summary.strikeRate)}**.`
+      answer: `Your strike rate${scopeSuffix || sessionSuffix} is **${formatRate(summary.strikeRate)}**.`
     };
   }
 
@@ -1180,7 +1395,7 @@ function tryShortcut(
     }
     return {
       handled: true,
-      answer: `Your spare rate${scopeSuffix} is **${formatRate(summary.spareRate)}**.`
+      answer: `Your spare rate${scopeSuffix || sessionSuffix} is **${formatRate(summary.spareRate)}**.`
     };
   }
 
@@ -1198,7 +1413,7 @@ function tryShortcut(
       );
     return {
       handled: true,
-      answer: `Average pins per frame${scopeSuffix}: ${lines.join(", ")}.`
+      answer: `Average pins per frame${scopeSuffix || sessionSuffix}: ${lines.join(", ")}.`
     };
   }
 
@@ -1254,6 +1469,79 @@ function safeParseJson(text: string) {
   }
 }
 
+type GameIndexEntry = {
+  gameName?: string;
+  totalScore?: number | null;
+  playedAt?: string | null;
+  sessionLabel?: string | null;
+  sessionName?: string | null;
+  sessionId?: string | null;
+};
+
+function toIsoTimestamp(value: unknown) {
+  if (!value || typeof value !== "string") {
+    return null;
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
+function annotateRowsWithGameLabels(
+  rows: unknown[],
+  index: unknown
+) {
+  if (!Array.isArray(rows)) {
+    return rows;
+  }
+  const indexEntries: GameIndexEntry[] = Array.isArray(index)
+    ? (index as GameIndexEntry[])
+    : [];
+  const playedAtMap = new Map<string, GameIndexEntry[]>();
+  indexEntries.forEach((entry) => {
+    const iso = toIsoTimestamp(entry.playedAt);
+    if (!iso) {
+      return;
+    }
+    const list = playedAtMap.get(iso) ?? [];
+    list.push(entry);
+    playedAtMap.set(iso, list);
+  });
+
+  return rows.map((row) => {
+    if (!row || typeof row !== "object") {
+      return row;
+    }
+    const next = { ...(row as Record<string, unknown>) };
+    const playedAtIso = toIsoTimestamp(next.played_at ?? next.playedAt);
+    if (playedAtIso && playedAtMap.has(playedAtIso)) {
+      const candidates = playedAtMap.get(playedAtIso) ?? [];
+      const score = next.total_score ?? next.totalScore;
+      const matched =
+        typeof score === "number"
+          ? candidates.find((entry) => entry.totalScore === score)
+          : candidates[0];
+      if (matched) {
+        if (!next.gameLabel && matched.gameName) {
+          next.gameLabel = matched.gameName;
+        }
+        if (!next.sessionLabel && matched.sessionLabel) {
+          next.sessionLabel = matched.sessionLabel;
+        }
+        if (!next.sessionName && matched.sessionName) {
+          next.sessionName = matched.sessionName;
+        }
+        if (!next.sessionId && matched.sessionId) {
+          next.sessionId = matched.sessionId;
+        }
+      }
+    }
+    return next;
+  });
+}
+
 function validateSql(sql: string) {
   const trimmed = sql.trim().replace(/;+\s*$/, "");
   if (!/^select\b/i.test(trimmed)) {
@@ -1299,12 +1587,19 @@ async function runSqlMethod(
   model: string,
   question: string,
   index: unknown,
+  sessionIndex: unknown,
   timeFilter: TimeFilter,
   timezoneOffsetMinutes?: number,
   userAccessToken?: string | null
 ): Promise<SqlResult> {
   const debug = process.env.CHAT_DEBUG === "true";
-  const schema = `games(id uuid, game_name text, player_name text, total_score int, played_at timestamptz, created_at timestamptz, user_id uuid)
+  const sqlTimings = {
+    sqlPromptMs: 0,
+    sqlQueryMs: 0,
+    sqlAnswerMs: 0
+  };
+  const schema = `bowling_sessions(id uuid, user_id uuid, name text, description text, started_at timestamptz, created_at timestamptz)
+games(id uuid, session_id uuid, game_name text, player_name text, total_score int, played_at timestamptz, created_at timestamptz, user_id uuid)
 frames(id uuid, game_id uuid, frame_number int, is_strike boolean, is_spare boolean)
 shots(id uuid, frame_id uuid, shot_number int, pins int)`;
 
@@ -1313,12 +1608,15 @@ shots(id uuid, frame_id uuid, shot_number int, pins int)`;
     question,
     index,
     schema,
+    sessionIndex,
     timezoneOffsetMinutes
   )}`;
   if (debug) {
     console.log("SQL prompt:", sqlPrompt);
   }
+  const sqlPromptStart = Date.now();
   const sqlText = await callGemini(apiKey, model, sqlPrompt, "application/json");
+  sqlTimings.sqlPromptMs = Date.now() - sqlPromptStart;
   if (debug) {
     console.log("SQL raw response:", sqlText);
   }
@@ -1363,9 +1661,11 @@ shots(id uuid, frame_id uuid, shot_number int, pins int)`;
         })
       : supabase;
 
+  const sqlQueryStart = Date.now();
   const { data, error } = await rpcClient.rpc("execute_sql", {
     query: validated.sql
   });
+  sqlTimings.sqlQueryMs = Date.now() - sqlQueryStart;
 
   if (error) {
     if (debug) {
@@ -1376,22 +1676,37 @@ shots(id uuid, frame_id uuid, shot_number int, pins int)`;
 
   const parsedRows = typeof data === "string" ? safeParseJson(data) : data;
   const rows = Array.isArray(parsedRows) ? parsedRows : [];
+  const annotatedRows = annotateRowsWithGameLabels(rows, index);
+  const labelMapping = buildLabelMapping(
+    sessionIndex as Array<{ sessionId: string; sessionLabel: string }>,
+    (index as Array<{ id?: string; gameName?: string }>).map((entry) => ({
+      id: entry.id || "",
+      label: entry.gameName || ""
+    }))
+  );
   if (debug) {
-    console.log("SQL result rows:", rows);
+    console.log("SQL result rows:", annotatedRows);
   }
 
   // prompt for SQL answer generation
   const answerPrompt = buildSqlAnswerPrompt(
     question,
     validated.sql,
-    rows,
-    timezoneOffsetMinutes
+    annotatedRows,
+    timezoneOffsetMinutes,
+    labelMapping
   );
   if (debug) {
     console.log("SQL answer prompt:", answerPrompt);
   }
+  const sqlAnswerStart = Date.now();
   const answerText = await callGemini(apiKey, model, answerPrompt);
-  return { ok: true, answer: ensureSentence(answerText || "No response generated.") };
+  sqlTimings.sqlAnswerMs = Date.now() - sqlAnswerStart;
+  return {
+    ok: true,
+    answer: ensureSentence(answerText || "No response generated."),
+    timings: sqlTimings
+  };
 }
 
 export async function POST(request: Request) {
@@ -1409,6 +1724,13 @@ export async function POST(request: Request) {
   const showTiming = process.env.CHAT_SHOW_TIMING === "true";
   const startedAt = Date.now();
   const debug = process.env.CHAT_DEBUG === "true";
+  const timings: ChatTimings = {
+    parseRequestMs: 0,
+    authMs: 0,
+    loadGamesMs: 0,
+    loadSessionsMs: 0,
+    buildIndexMs: 0
+  };
 
   if (!supabaseUrl || !supabaseServiceKey) {
     return NextResponse.json(
@@ -1424,11 +1746,13 @@ export async function POST(request: Request) {
     );
   }
 
+  const parseStart = Date.now();
   const payload = (await request.json()) as {
     question?: string;
     gameId?: string;
     timezoneOffsetMinutes?: number;
   };
+  timings.parseRequestMs = Date.now() - parseStart;
 
   if (!payload.question) {
     return NextResponse.json(
@@ -1437,8 +1761,10 @@ export async function POST(request: Request) {
     );
   }
 
+  const authStart = Date.now();
   const { userId, accessToken: userAccessToken } =
     (await getUserFromRequest(request)) || { userId: null, accessToken: null };
+  timings.authMs = Date.now() - authStart;
   const effectiveUserId = userId || devUserId || null;
   if (!effectiveUserId) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -1454,14 +1780,16 @@ export async function POST(request: Request) {
   let scope = "all games";
 
   if (payload.gameId) {
+    const loadGamesStart = Date.now();
     const { data, error } = await supabase
       .from("games")
       .select(
-        "id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
+        "id,session_id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
       .eq("id", payload.gameId)
       .eq("user_id", effectiveUserId)
       .single();
+    timings.loadGamesMs = Date.now() - loadGamesStart;
 
     if (error || !data) {
       return NextResponse.json(
@@ -1473,14 +1801,16 @@ export async function POST(request: Request) {
     games = [data as Game];
     scope = "current game only";
   } else {
+    const loadGamesStart = Date.now();
     const { data, error } = await supabase
       .from("games")
       .select(
-        "id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
+        "id,session_id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
       .eq("user_id", effectiveUserId)
       .order("played_at", { ascending: false })
       .limit(100);
+    timings.loadGamesMs = Date.now() - loadGamesStart;
 
     if (error) {
       return NextResponse.json(
@@ -1492,6 +1822,57 @@ export async function POST(request: Request) {
     games = (data as Game[]) || [];
     scope = "all games for the signed-in user";
   }
+
+  const loadSessionsStart = Date.now();
+  const { data: sessionRows, error: sessionError } = await supabase
+    .from("bowling_sessions")
+    .select("id,name,description,started_at,created_at")
+    .eq("user_id", effectiveUserId);
+  timings.loadSessionsMs = Date.now() - loadSessionsStart;
+
+  if (sessionError && debug) {
+    console.log("Session load error:", sessionError);
+  }
+
+  const buildIndexStart = Date.now();
+  const sessions = (sessionRows as BowlingSession[] | null) ?? [];
+  const sessionIdsWithGames = new Set(
+    games.map((game) => game.session_id).filter(Boolean) as string[]
+  );
+  const sessionsWithGames = sessions.filter((session) =>
+    sessionIdsWithGames.has(session.id)
+  );
+  const orderedSessions = sessionsWithGames.slice().sort((a, b) => {
+    const aTime = a.created_at ? Date.parse(a.created_at) : 0;
+    const bTime = b.created_at ? Date.parse(b.created_at) : 0;
+    if (aTime !== bTime) {
+      return aTime - bTime;
+    }
+    return a.id.localeCompare(b.id);
+  });
+
+  const sessionLabelById = new Map<string, string>();
+  const sessionNameById = new Map<string, string | null>();
+  const sessionIndex = orderedSessions.map((session, index) => {
+    const trimmedName = session.name?.trim() || "";
+    const label = trimmedName.length > 0 ? trimmedName : `Session ${index + 1}`;
+    sessionLabelById.set(session.id, label);
+    sessionNameById.set(session.id, trimmedName.length > 0 ? trimmedName : null);
+    return {
+      sessionId: session.id,
+      sessionLabel: label,
+      sessionName: trimmedName.length > 0 ? trimmedName : null,
+      createdAt: session.created_at
+    };
+  });
+
+  const customNameById = new Map<string, string>();
+  games.forEach((game) => {
+    const trimmed = game.game_name?.trim();
+    if (trimmed) {
+      customNameById.set(game.id, trimmed);
+    }
+  });
 
   const orderedGames: OrderedGame[] = games
     .slice()
@@ -1518,17 +1899,100 @@ export async function POST(request: Request) {
       };
     });
 
-  const selectedNumbers = extractGameNumbers(question);
-  const selectedNames = mapNumbersToNames(selectedNumbers).map((name) =>
-    name.toLowerCase()
+  const sessionNumbers = extractSessionNumbers(question);
+  const sessionNameMatches = extractSessionNameMatches(
+    question,
+    sessionIndex
+      .map((session) => session.sessionName)
+      .filter(Boolean) as string[]
   );
-  const selectedFrames = extractFrameNumbers(question);
-  const selectedGames =
-    selectedNames.length > 0
-      ? orderedGames.filter((game) =>
-          selectedNames.includes(game.game_name.toLowerCase())
+  const hasSessionless = mentionsSessionless(question);
+  const selectedSessionIds = new Set<string>();
+  if (sessionNumbers.length > 0) {
+    sessionNumbers.forEach((value) => {
+      const label = `session ${value}`;
+      const matched = sessionIndex.find(
+        (session) => session.sessionLabel.toLowerCase() === label
+      );
+      if (matched) {
+        selectedSessionIds.add(matched.sessionId);
+      }
+    });
+  }
+  if (sessionNameMatches.length > 0) {
+    sessionIndex.forEach((session) => {
+      if (!session.sessionName) {
+        return;
+      }
+      if (
+        sessionNameMatches.some(
+          (name) => name.toLowerCase() === session.sessionName?.toLowerCase()
         )
-      : orderedGames;
+      ) {
+        selectedSessionIds.add(session.sessionId);
+      }
+    });
+  }
+
+  const hasSessionFilter =
+    selectedSessionIds.size > 0 || hasSessionless;
+  const sessionFilteredGames = hasSessionFilter
+    ? orderedGames.filter((game) => {
+        if (!game.session_id) {
+          return hasSessionless;
+        }
+        return selectedSessionIds.has(game.session_id);
+      })
+    : orderedGames;
+
+  const selectedNumbers = extractGameNumbers(question);
+  const selectedFrames = extractFrameNumbers(question);
+  const gameLabelById = new Map<string, string>();
+  const gameNumberById = new Map<string, number>();
+  const grouped = new Map<string, OrderedGame[]>();
+  orderedGames.forEach((game) => {
+    const key = game.session_id ?? "sessionless";
+    const list = grouped.get(key) ?? [];
+    list.push(game);
+    grouped.set(key, list);
+  });
+  grouped.forEach((groupGames) => {
+    groupGames
+      .slice()
+      .sort((a, b) => {
+        const aTime = a.played_at
+          ? Date.parse(a.played_at)
+          : a.created_at
+            ? Date.parse(a.created_at)
+            : 0;
+        const bTime = b.played_at
+          ? Date.parse(b.played_at)
+          : b.created_at
+            ? Date.parse(b.created_at)
+            : 0;
+        return aTime - bTime;
+      })
+      .forEach((game, index) => {
+        const number = index + 1;
+        gameNumberById.set(game.id, number);
+        const customName = customNameById.get(game.id);
+        const sessionLabel = game.session_id
+          ? sessionLabelById.get(game.session_id) ?? "Session"
+          : "Sessionless games";
+        const fallbackLabel = hasSessionFilter
+          ? `Game ${number}`
+          : `Game ${number} in ${sessionLabel}`;
+        gameLabelById.set(game.id, customName ?? fallbackLabel);
+      });
+  });
+  const getGameLabel = (game: OrderedGame) =>
+    gameLabelById.get(game.id) ?? game.game_name;
+  const selectedGames =
+    selectedNumbers.length > 0
+      ? sessionFilteredGames.filter((game) =>
+          selectedNumbers.includes(gameNumberById.get(game.id) ?? -1)
+        )
+      : sessionFilteredGames;
 
   const localTimeFilter = extractTimeFilter(question);
   const timeFilter = normalizeTimeFilterToUtc(
@@ -1555,30 +2019,58 @@ export async function POST(request: Request) {
   const frameStatsOffline = summarizeFrames(offlineGames).filter((entry) =>
     selectedFrames.length > 0 ? selectedFrames.includes(entry.frame) : true
   );
-  const indexSource =
-    selectedNames.length > 0 ? selectedGames : orderedGames;
+  const indexSource = orderedGames;
   const index = indexSource.map((game) => ({
-    gameName: game.game_name,
+    id: game.id,
+    gameName: getGameLabel(game),
     totalScore: game.total_score,
     playedAt: game.played_at,
-    createdAt: game.created_at
+    createdAt: game.created_at,
+    sessionId: game.session_id ?? null,
+    sessionName: game.session_id
+      ? sessionNameById.get(game.session_id) ?? null
+      : null,
+    sessionLabel: game.session_id
+      ? sessionLabelById.get(game.session_id) ?? null
+      : null
   }));
+  const selectedSessionLabels = Array.from(selectedSessionIds)
+    .map((sessionId) => sessionLabelById.get(sessionId))
+    .filter(Boolean) as string[];
+  if (hasSessionless) {
+    selectedSessionLabels.push("Sessionless games");
+  }
+  if (!payload.gameId && hasSessionFilter) {
+    const labelList = formatLabelList(selectedSessionLabels);
+    if (labelList) {
+      scope = `games in ${labelList}`;
+    }
+  }
+  const selectedGameLabels = selectedGames.map((game) => getGameLabel(game));
   const selection = {
     selectedGameNumbers: selectedNumbers,
-    selectedGameNames: orderedGames
-      .filter((game) =>
-        selectedNames.includes(game.game_name.toLowerCase())
-      )
-      .map((game) => game.game_name),
+    selectedGameNames: selectedGameLabels,
     selectedFrameNumbers: selectedFrames,
+    selectedSessionIds: Array.from(selectedSessionIds),
+    selectedSessionNumbers: sessionNumbers,
+    selectedSessionNames: sessionNameMatches,
+    selectedSessionLabels,
+    sessionless: hasSessionless,
     timeFilter,
-    timezoneOffsetMinutes: payload.timezoneOffsetMinutes
+    timezoneOffsetMinutes: payload.timezoneOffsetMinutes,
+    sessionIndex
   };
   const selectionOnline = {
     selectedGameNumbers: selectedNumbers,
     selectedGameNames: selection.selectedGameNames,
-    selectedFrameNumbers: selectedFrames
+    selectedFrameNumbers: selectedFrames,
+    selectedSessionIds: Array.from(selectedSessionIds),
+    selectedSessionNumbers: sessionNumbers,
+    selectedSessionNames: sessionNameMatches,
+    selectedSessionLabels,
+    sessionless: hasSessionless
   };
+  timings.buildIndexMs = Date.now() - buildIndexStart;
 
   const onlineErrors: string[] = [];
 
@@ -1592,16 +2084,34 @@ export async function POST(request: Request) {
         model,
         question,
         index,
+        sessionIndex,
         timeFilter,
         payload.timezoneOffsetMinutes,
         userAccessToken
       );
       if (sqlResult.ok && sqlResult.answer) {
+        if (debug && sqlResult.timings) {
+          console.log("SQL timings:", sqlResult.timings);
+        }
+        if (debug) {
+          console.log("Chat timings:", timings);
+        }
         const finalAnswer = formatAnswer(sqlResult.answer, question);
         void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
+        const extraOverhead =
+          showTiming
+            ? `Overhead parse ${formatTiming(timings.parseRequestMs)}, auth ${formatTiming(timings.authMs)}, games ${formatTiming(timings.loadGamesMs)}, sessions ${formatTiming(timings.loadSessionsMs)}, build ${formatTiming(timings.buildIndexMs)}`
+            : "";
+        const extraMeta =
+          showTiming && sqlResult.timings
+            ? `SQL prompt ${formatTiming(sqlResult.timings.sqlPromptMs)}, SQL query ${formatTiming(sqlResult.timings.sqlQueryMs)}, SQL answer ${formatTiming(sqlResult.timings.sqlAnswerMs)}`
+            : "";
+        const combinedMeta = [buildAnswerMeta("sql", startedAt, showMethod, showTiming), extraMeta, extraOverhead]
+          .filter(Boolean)
+          .join(showTiming && extraMeta ? " · " : "");
         return {
           answer: finalAnswer,
-          meta: buildAnswerMeta("sql", startedAt, showMethod, showTiming)
+          meta: combinedMeta || buildAnswerMeta("sql", startedAt, showMethod, showTiming)
         };
       }
       if (sqlResult.fallback) {
@@ -1621,9 +2131,16 @@ export async function POST(request: Request) {
   const attemptContext = async () => {
     const contextLimit = 15;
     const contextGames = onlineGames.slice(0, contextLimit).map((game) => ({
-      gameName: game.game_name,
+      gameName: getGameLabel(game),
       playedAt: game.played_at,
       totalScore: game.total_score,
+      sessionId: game.session_id ?? null,
+      sessionLabel: game.session_id
+        ? sessionLabelById.get(game.session_id) ?? null
+        : null,
+      sessionName: game.session_id
+        ? sessionNameById.get(game.session_id) ?? null
+        : null,
       frames: (game.frames || [])
         .filter((frame) =>
           selectedFrames.length > 0
@@ -1636,9 +2153,74 @@ export async function POST(request: Request) {
         }))
     }));
 
+    const sessionGameIndex = sessionIndex
+      .map((session) => {
+        const gamesInSession = sessionFilteredGames
+          .filter((game) => game.session_id === session.sessionId)
+          .slice()
+          .sort((a, b) => {
+            const aTime = a.played_at
+              ? Date.parse(a.played_at)
+              : a.created_at
+                ? Date.parse(a.created_at)
+                : 0;
+            const bTime = b.played_at
+              ? Date.parse(b.played_at)
+              : b.created_at
+                ? Date.parse(b.created_at)
+                : 0;
+            return aTime - bTime;
+          })
+          .map((game) => ({
+            gameLabel: `Game ${gameNumberById.get(game.id) ?? 0}`,
+            totalScore: game.total_score,
+            playedAt: game.played_at
+          }));
+        if (gamesInSession.length === 0) {
+          return null;
+        }
+        return {
+          sessionId: session.sessionId,
+          sessionLabel: session.sessionLabel,
+          sessionName: session.sessionName,
+          games: gamesInSession
+        };
+      })
+      .filter(Boolean);
+    const sessionlessGames = sessionFilteredGames
+      .filter((game) => !game.session_id)
+      .slice()
+      .sort((a, b) => {
+        const aTime = a.played_at
+          ? Date.parse(a.played_at)
+          : a.created_at
+            ? Date.parse(a.created_at)
+            : 0;
+        const bTime = b.played_at
+          ? Date.parse(b.played_at)
+          : b.created_at
+            ? Date.parse(b.created_at)
+            : 0;
+        return aTime - bTime;
+      })
+      .map((game) => ({
+        gameLabel: `Game ${gameNumberById.get(game.id) ?? 0}`,
+        totalScore: game.total_score,
+        playedAt: game.played_at
+      }));
+    if (sessionlessGames.length > 0) {
+      sessionGameIndex.push({
+        sessionId: null,
+        sessionLabel: "Sessionless games",
+        sessionName: null,
+        games: sessionlessGames
+      });
+    }
+
     const contextPayload = {
       truncated: onlineGames.length > contextLimit,
       contextGames,
+      sessionGameIndex,
       summary: summaryOnline,
       frameStats: frameStatsOnline
     };
@@ -1650,20 +2232,34 @@ export async function POST(request: Request) {
         scope,
         contextPayload,
         selectionOnline,
+        sessionGameIndex,
         payload.timezoneOffsetMinutes
       );
       if (debug) {
         console.log("Context prompt:", contextPrompt);
       }
+      const contextStart = Date.now();
       const contextAnswer = await callGemini(apiKey, model, contextPrompt);
+      const contextMs = Date.now() - contextStart;
       if (debug) {
         console.log("Context raw response:", contextAnswer);
+        console.log("Context timing:", formatTiming(contextMs));
+        console.log("Chat timings:", timings);
       }
       const finalAnswer = formatAnswer(contextAnswer, question);
       void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
+      const extraOverhead =
+        showTiming
+          ? `Overhead parse ${formatTiming(timings.parseRequestMs)}, auth ${formatTiming(timings.authMs)}, games ${formatTiming(timings.loadGamesMs)}, sessions ${formatTiming(timings.loadSessionsMs)}, build ${formatTiming(timings.buildIndexMs)}`
+          : "";
+      const extraMeta =
+        showTiming ? `Context ${formatTiming(contextMs)}` : "";
+      const combinedMeta = [buildAnswerMeta("context", startedAt, showMethod, showTiming), extraMeta, extraOverhead]
+        .filter(Boolean)
+        .join(showTiming && extraMeta ? " · " : "");
       return {
         answer: finalAnswer,
-        meta: buildAnswerMeta("context", startedAt, showMethod, showTiming)
+        meta: combinedMeta || buildAnswerMeta("context", startedAt, showMethod, showTiming)
       };
     } catch (error) {
       onlineErrors.push(
@@ -1715,7 +2311,11 @@ export async function POST(request: Request) {
       ? onlineErrors.join(" ")
       : "Chat failed.";
   const debugError = process.env.CHAT_DEBUG === "true";
-  const selectionLabel = buildSelectionLabel(selectedNumbers, localTimeFilter);
+  const selectionLabel = buildSelectionLabel(
+    selectedNumbers,
+    localTimeFilter,
+    selectedSessionLabels
+  );
   const shortcut = tryShortcut(
     question,
     offlineGames,
@@ -1723,7 +2323,8 @@ export async function POST(request: Request) {
     frameStatsOffline,
     selectedFrames,
     hasTimeFilter,
-    selectionLabel
+    selectionLabel,
+    selectedSessionLabels
   );
   const offlineAnswer =
     shortcut.handled && shortcut.answer
