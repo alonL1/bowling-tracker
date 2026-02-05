@@ -27,13 +27,47 @@ function normalizeOptionalUuid(value?: string | null) {
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData();
-  const playerName = formData.get("playerName");
-  const images = formData
-    .getAll("image")
-    .filter((item) => item instanceof File && item.size > 0) as File[];
-  const timezoneOffsetMinutes = formData.get("timezoneOffsetMinutes");
-  const sessionIdValue = formData.get("sessionId");
+  const contentType = request.headers.get("content-type") || "";
+  let playerName: string | null = null;
+  let images: File[] = [];
+  let storageKeys: string[] = [];
+  let timezoneOffsetMinutes: string | null = null;
+  let sessionIdValue: string | null = null;
+
+  if (contentType.includes("application/json")) {
+    const payload = (await request.json()) as {
+      playerName?: string;
+      storageKeys?: string[];
+      sessionId?: string;
+      timezoneOffsetMinutes?: string;
+    };
+    playerName = typeof payload.playerName === "string" ? payload.playerName : null;
+    storageKeys = Array.isArray(payload.storageKeys)
+      ? payload.storageKeys.filter((key): key is string => typeof key === "string")
+      : [];
+    sessionIdValue = typeof payload.sessionId === "string" ? payload.sessionId : null;
+    timezoneOffsetMinutes =
+      typeof payload.timezoneOffsetMinutes === "string"
+        ? payload.timezoneOffsetMinutes
+        : null;
+  } else {
+    const formData = await request.formData();
+    playerName =
+      typeof formData.get("playerName") === "string"
+        ? String(formData.get("playerName"))
+        : null;
+    images = formData
+      .getAll("image")
+      .filter((item) => item instanceof File && item.size > 0) as File[];
+    timezoneOffsetMinutes =
+      typeof formData.get("timezoneOffsetMinutes") === "string"
+        ? String(formData.get("timezoneOffsetMinutes"))
+        : null;
+    sessionIdValue =
+      typeof formData.get("sessionId") === "string"
+        ? String(formData.get("sessionId"))
+        : null;
+  }
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -66,7 +100,11 @@ export async function POST(request: Request) {
     );
   }
 
-  if (images.length === 0) {
+  const cleanStorageKeys = storageKeys
+    .map((key) => key.trim())
+    .filter(Boolean);
+
+  if (images.length === 0 && cleanStorageKeys.length === 0) {
     return NextResponse.json(
       { error: "A scoreboard image is required." },
       { status: 400 }
@@ -121,33 +159,52 @@ export async function POST(request: Request) {
   const jobs: { jobId: string; message: string }[] = [];
   const errors: string[] = [];
 
-  for (const image of images) {
-    if (image.type && !image.type.startsWith("image/")) {
-      errors.push("Only image uploads are supported.");
-      continue;
-    }
+  const items: Array<{ storageKey: string }> = [];
 
-    const jobId = crypto.randomUUID();
-    const extension = image.type?.split("/")[1] || "jpg";
-    const storageKey = `${jobId}.${extension}`;
-
-    try {
-      const buffer = Buffer.from(await image.arrayBuffer());
-      const { error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(storageKey, buffer, {
-          contentType: image.type || "image/jpeg",
-          upsert: false
-        });
-
-      if (uploadError) {
-        errors.push(uploadError.message || "Failed to upload image.");
+  if (cleanStorageKeys.length > 0) {
+    cleanStorageKeys.forEach((key) => {
+      items.push({ storageKey: key });
+    });
+  } else {
+    for (const image of images) {
+      if (image.type && !image.type.startsWith("image/")) {
+        errors.push("Only image uploads are supported.");
         continue;
       }
 
+      const jobId = crypto.randomUUID();
+      const extension = image.type?.split("/")[1] || "jpg";
+      const storageKey = `${jobId}.${extension}`;
+
+      try {
+        const buffer = Buffer.from(await image.arrayBuffer());
+        const { error: uploadError } = await supabase.storage
+          .from(bucket)
+          .upload(storageKey, buffer, {
+            contentType: image.type || "image/jpeg",
+            upsert: false
+          });
+
+        if (uploadError) {
+          errors.push(uploadError.message || "Failed to upload image.");
+          continue;
+        }
+
+        items.push({ storageKey });
+      } catch (error) {
+        errors.push(
+          error instanceof Error ? error.message : "Failed to process upload."
+        );
+      }
+    }
+  }
+
+  for (const item of items) {
+    const jobId = crypto.randomUUID();
+    try {
       const { error: jobError } = await supabase.from("analysis_jobs").insert({
         id: jobId,
-        storage_key: storageKey,
+        storage_key: item.storageKey,
         status: "queued",
         player_name: trimmedName,
         user_id: userId,
@@ -156,7 +213,7 @@ export async function POST(request: Request) {
       });
 
       if (jobError) {
-        await supabase.storage.from(bucket).remove([storageKey]);
+        await supabase.storage.from(bucket).remove([item.storageKey]);
         errors.push(jobError.message || "Failed to queue analysis job.");
         continue;
       }
@@ -166,8 +223,9 @@ export async function POST(request: Request) {
         message: "Queued for extraction."
       });
     } catch (error) {
+      await supabase.storage.from(bucket).remove([item.storageKey]);
       errors.push(
-        error instanceof Error ? error.message : "Failed to process upload."
+        error instanceof Error ? error.message : "Failed to queue analysis job."
       );
     }
   }

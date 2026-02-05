@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { authFetch } from "../lib/authClient";
+import { authFetch, getAccessToken, supabase } from "../lib/authClient";
 
 type SubmitState = "idle" | "submitting" | "queued" | "error";
 
@@ -43,6 +43,22 @@ export default function UploadForm({
   const [message, setMessage] = useState<string>("");
   const [jobIds, setJobIds] = useState<string[]>([]);
   const isDebug = process.env.CHAT_DEBUG === "true";
+  const bucket =
+    process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET || "scoreboards-temp";
+
+  const getExtension = (file: File) => {
+    const nameParts = file.name.split(".");
+    if (nameParts.length > 1) {
+      const ext = nameParts[nameParts.length - 1]?.trim();
+      if (ext) {
+        return ext.toLowerCase();
+      }
+    }
+    if (file.type && file.type.includes("/")) {
+      return file.type.split("/")[1] || "jpg";
+    }
+    return "jpg";
+  };
 
   useEffect(() => {
     if (pendingJobsCount === 0 && jobIds.length > 0) {
@@ -121,16 +137,49 @@ export default function UploadForm({
     }
 
     try {
-      const requestData = new FormData();
+      if (!supabase) {
+        throw new Error("Supabase client not configured.");
+      }
+      await getAccessToken();
+
       const normalizedNames = nameList.join(", ");
-      requestData.append("playerName", normalizedNames);
-      requestData.append("timezoneOffsetMinutes", timezoneOffsetMinutes);
-      requestData.append("sessionId", resolvedSessionId);
-      images.forEach((image) => requestData.append("image", image));
+      const uploadErrors: string[] = [];
+      const storageKeys: string[] = [];
+
+      for (const image of images) {
+        const extension = getExtension(image);
+        const storageKey = `${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from(bucket)
+          .upload(storageKey, image, {
+            contentType: image.type || "image/jpeg",
+            upsert: false
+          });
+        if (uploadError) {
+          uploadErrors.push(uploadError.message || "Failed to upload image.");
+          continue;
+        }
+        storageKeys.push(storageKey);
+      }
+
+      if (storageKeys.length === 0) {
+        const messageText =
+          uploadErrors[0] || "Failed to upload any scoreboard images.";
+        setStatus("error");
+        setMessage(messageText);
+        onError?.(messageText);
+        return;
+      }
 
       const response = await authFetch("/api/submit", {
         method: "POST",
-        body: requestData
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          playerName: normalizedNames,
+          timezoneOffsetMinutes,
+          sessionId: resolvedSessionId,
+          storageKeys
+        })
       });
 
       if (!response.ok) {
@@ -140,7 +189,7 @@ export default function UploadForm({
 
       const payload = (await response.json()) as SubmitResponse;
       const queuedJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
-      const errors = payload.errors || [];
+      const errors = [...(payload.errors || []), ...uploadErrors];
 
       if (queuedJobs.length === 0) {
         const messageText = errors[0] || "Submission failed.";
