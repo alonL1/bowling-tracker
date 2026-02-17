@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   useDraggable,
   useDroppable,
@@ -192,6 +192,7 @@ export default function Dashboard() {
   const [chatGameId, setChatGameId] = useState<string | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
   const [activeDragGameId, setActiveDragGameId] = useState<string | null>(null);
+  const [touchHoldGameId, setTouchHoldGameId] = useState<string | null>(null);
   const [movingGameId, setMovingGameId] = useState<string | null>(null);
   const pendingJobsRef = useRef<PendingJob[]>([]);
   const pollCountsRef = useRef<Record<string, number>>({});
@@ -201,15 +202,40 @@ export default function Dashboard() {
   const dismissTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>(
     {}
   );
+  const touchHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchHoldCandidateRef = useRef<string | null>(null);
   const isDebug = process.env.CHAT_DEBUG === "true";
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: { distance: 8 }
     }),
     useSensor(TouchSensor, {
-      activationConstraint: { delay: 350, tolerance: 3 }
+      activationConstraint: { delay: 260, tolerance: 8 }
     })
   );
+  const scheduleTouchHold = useCallback((gameId: string) => {
+    if (touchHoldTimerRef.current) {
+      clearTimeout(touchHoldTimerRef.current);
+    }
+    touchHoldCandidateRef.current = gameId;
+    touchHoldTimerRef.current = setTimeout(() => {
+      if (touchHoldCandidateRef.current === gameId) {
+        setTouchHoldGameId(gameId);
+      }
+      touchHoldTimerRef.current = null;
+    }, 180);
+  }, []);
+
+  const clearTouchHold = useCallback((gameId?: string) => {
+    if (touchHoldTimerRef.current) {
+      clearTimeout(touchHoldTimerRef.current);
+      touchHoldTimerRef.current = null;
+    }
+    if (!gameId || touchHoldCandidateRef.current === gameId) {
+      touchHoldCandidateRef.current = null;
+      setTouchHoldGameId((current) => (gameId ? (current === gameId ? null : current) : null));
+    }
+  }, []);
 
   const loadGames = useCallback(async () => {
     try {
@@ -347,8 +373,9 @@ export default function Dashboard() {
         clearTimeout(timer);
       });
       dismissTimersRef.current = {};
+      clearTouchHold();
     };
-  }, []);
+  }, [clearTouchHold]);
 
   useEffect(() => {
     const hasActiveJobs = pendingJobs.some(
@@ -974,13 +1001,20 @@ export default function Dashboard() {
     const style = {
       transform: transform ? CSS.Transform.toString(transform) : undefined
     };
+    const isTouchReady = touchHoldGameId === game.id;
 
     return (
       <div ref={registerGameRef(game.id)} className="game-card-wrapper">
         <div
           ref={setNodeRef}
           style={style}
-          className={`game-card draggable${isDragging ? " dragging" : ""}`}
+          className={`game-card draggable${isDragging ? " dragging" : ""}${
+            isTouchReady ? " touch-ready" : ""
+          }`}
+          onTouchStartCapture={() => scheduleTouchHold(game.id)}
+          onTouchMoveCapture={() => clearTouchHold(game.id)}
+          onTouchEndCapture={() => clearTouchHold(game.id)}
+          onTouchCancelCapture={() => clearTouchHold(game.id)}
           {...attributes}
           {...listeners}
         >
@@ -998,12 +1032,14 @@ export default function Dashboard() {
   }, [activeDragGameId, games]);
 
   const handleDragStart = (event: DragStartEvent) => {
+    clearTouchHold();
     if (event.active?.data?.current?.type === "game") {
       setActiveDragGameId(String(event.active.id));
     }
   };
 
   const handleDragEnd = async (event: DragEndEvent) => {
+    clearTouchHold();
     const { active, over } = event;
     setActiveDragGameId(null);
     if (!over) {

@@ -593,6 +593,14 @@ button:hover:not(:disabled) {
 
 .game-card.draggable {
   cursor: grab;
+  touch-action: pan-y;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.game-card.touch-ready {
+  transform: scale(1.02);
+  box-shadow: 0 10px 22px rgba(15, 107, 95, 0.16);
+  border-color: rgba(15, 107, 95, 0.36);
 }
 
 .game-card.dragging {
