@@ -25,6 +25,7 @@ type UploadFormProps = {
   onError?: (message: string) => void;
   pendingJobsCount?: number;
   sessions?: SessionOption[];
+  isSessionsLoading?: boolean;
   selectedSessionId?: string | null;
   onSessionChange?: (sessionId: string | null) => void;
   onCreateSession?: () => Promise<string | null>;
@@ -35,6 +36,7 @@ export default function UploadForm({
   onError,
   pendingJobsCount = 0,
   sessions = [],
+  isSessionsLoading = false,
   selectedSessionId = null,
   onSessionChange,
   onCreateSession
@@ -241,7 +243,9 @@ export default function UploadForm({
               onSessionChange?.(event.target.value || null)
             }
           >
-            {sessions.length === 0 ? (
+            {isSessionsLoading && sessions.length === 0 ? (
+              <option value="new">Loading sessions...</option>
+            ) : sessions.length === 0 ? (
               <option value="new">New session</option>
             ) : (
               <>
@@ -280,7 +284,7 @@ export default function UploadForm({
       <div className="full">
         <button
           type="submit"
-          disabled={status === "submitting" || !selectedSessionId}
+          disabled={status === "submitting" || !selectedSessionId || isSessionsLoading}
         >
           <span className="button-content">
             {status === "submitting" ? (

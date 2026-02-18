@@ -8,6 +8,7 @@ shots in Postgres.
 
 - Next.js App Router UI with a minimal upload flow
 - API route that uploads the image to Supabase Storage and queues a job row
+- Email/password auth with Supabase Auth
 - Starter SQL schema for games, frames, shots, and analysis jobs
 
 ## Local dev
@@ -15,13 +16,15 @@ shots in Postgres.
 1. Install dependencies: `npm install`
 2. Create a Supabase project and run `db/schema.sql`
 3. Create a storage bucket named `scoreboards-temp` (or set `SUPABASE_STORAGE_BUCKET`)
-4. Copy `.env.example` to `.env.local` and fill in the values
-5. Run the dev server: `npm run dev`
-6. Visit `http://localhost:3000`
+4. Configure Storage policy for uploads (`storage.objects` insert policy for `authenticated` and your bucket)
+5. Copy `.env.example` to `.env.local` and fill in the values
+6. Enable Email auth in Supabase Auth settings
+7. Run the dev server: `npm run dev`
+8. Visit `http://localhost:3000`
 
 ## API
 
-- `POST /api/submit`: accepts `playerName` and `image` (multipart form).
+- `POST /api/submit`: accepts `playerName` and `storageKeys` (JSON) for direct-to-Storage uploads.
 - `GET /api/status?jobId=...`: returns the job status from `analysis_jobs`.
 - `GET /api/game?jobId=...`: fetches game details with frames + shots.
 - `GET /api/games?limit=...`: lists recent games.
@@ -30,8 +33,7 @@ shots in Postgres.
 
 ## Notes
 
-- For now, `user_id` can be `NULL`. Set `DEV_USER_ID` if you want to associate
-  uploads with a specific user UUID.
+- API routes authenticate from Supabase bearer token. `DEV_USER_ID` remains available for local debugging fallback.
 
 ## Worker (Cloud Run + Gemini)
 

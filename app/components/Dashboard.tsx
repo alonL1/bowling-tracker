@@ -13,6 +13,7 @@ import {
   type DragEndEvent,
   type DragStartEvent
 } from "@dnd-kit/core";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import UploadForm from "./UploadForm";
 import GameReview from "./GameReview";
@@ -87,6 +88,15 @@ type SessionItem = {
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 40;
 
+type DashboardProps = {
+  showSubmit?: boolean;
+  showGames?: boolean;
+  showChat?: boolean;
+  autoReviewGameIds?: string[];
+  onAutoReviewHandled?: () => void;
+  reloadToken?: number;
+};
+
 type DroppableRenderProps = {
   setNodeRef: (node: HTMLElement | null) => void;
   isOver: boolean;
@@ -159,10 +169,18 @@ function buildScoreRows(game: GameDetail) {
   return { row1, row2, row3, showRow3 };
 }
 
-export default function Dashboard() {
+export default function Dashboard({
+  showSubmit = true,
+  showGames = true,
+  showChat = true,
+  autoReviewGameIds = [],
+  onAutoReviewHandled,
+  reloadToken
+}: DashboardProps) {
   const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
   const [gameError, setGameError] = useState<string>("");
   const [games, setGames] = useState<GameListItem[]>([]);
+  const [isGamesLoading, setIsGamesLoading] = useState<boolean>(true);
   const [gamesTotal, setGamesTotal] = useState<number | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [creatingSession, setCreatingSession] = useState<boolean>(false);
@@ -237,32 +255,49 @@ export default function Dashboard() {
     }
   }, []);
 
+  const parseJsonResponse = useCallback(async <T,>(response: Response) => {
+    const raw = await response.text();
+    if (!raw) {
+      return {} as T;
+    }
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      throw new Error(
+        `Request failed with non-JSON response (status ${response.status}).`
+      );
+    }
+  }, []);
+
   const loadGames = useCallback(async () => {
+    setIsGamesLoading(true);
     try {
       const response = await authFetch(`/api/games`);
       if (!response.ok) {
-        const payload = (await response.json()) as { error?: string };
+        const payload = await parseJsonResponse<{ error?: string }>(response);
         throw new Error(payload.error || "Failed to load games list.");
       }
-      const payload = (await response.json()) as {
+      const payload = await parseJsonResponse<{
         games: GameListItem[];
         count?: number | null;
-      };
+      }>(response);
       const nextGames = payload.games || [];
       setGames(nextGames);
       setGamesTotal(
         typeof payload.count === "number" ? payload.count : null
       );
-      if (!chatGameId && nextGames.length > 0) {
-        setChatGameId(nextGames[0].id);
+      if (nextGames.length > 0) {
+        setChatGameId((current) => current ?? nextGames[0].id);
       }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to load games list.";
       setGameError(message);
       setGamesTotal(null);
+    } finally {
+      setIsGamesLoading(false);
     }
-  }, [chatGameId]);
+  }, [parseJsonResponse]);
 
   const loadGame = useCallback(async (lookup: string) => {
     setGameError("");
@@ -310,6 +345,13 @@ export default function Dashboard() {
   }, [loadGames]);
 
   useEffect(() => {
+    if (reloadToken === undefined) {
+      return;
+    }
+    void loadGames();
+  }, [reloadToken, loadGames]);
+
+  useEffect(() => {
     pendingJobsRef.current = pendingJobs;
   }, [pendingJobs]);
 
@@ -323,6 +365,38 @@ export default function Dashboard() {
     setReviewGameIds(pendingBatch.loggedGameIds);
     setPendingBatch(null);
   }, [pendingBatch]);
+
+  useEffect(() => {
+    if (!showGames || autoReviewGameIds.length === 0 || games.length === 0) {
+      return;
+    }
+    const sessionIds = new Set<string>();
+    let firstSessionId: string | null = null;
+    autoReviewGameIds.forEach((gameId) => {
+      const match = games.find((game) => game.id === gameId);
+      if (!match) {
+        return;
+      }
+      if (!firstSessionId) {
+        firstSessionId = match.session_id ?? "sessionless";
+      }
+      sessionIds.add(match.session_id ?? "sessionless");
+    });
+
+    if (sessionIds.size > 0) {
+      setCollapsedSessions((current) => {
+        const next = { ...current };
+        sessionIds.forEach((sessionId) => {
+          next[sessionId] = false;
+        });
+        return next;
+      });
+    }
+    if (firstSessionId) {
+      setScrollTargetSessionId(firstSessionId);
+    }
+    onAutoReviewHandled?.();
+  }, [autoReviewGameIds, games, onAutoReviewHandled, showGames]);
 
   useEffect(() => {
     if (!scrollTargetSessionId) {
@@ -749,8 +823,29 @@ export default function Dashboard() {
       if (movingGameId) {
         return;
       }
+      const sourceGame = games.find((game) => game.id === gameId);
+      const previousSessionId = sourceGame?.session_id ?? null;
+      if (!sourceGame || previousSessionId === sessionId) {
+        return;
+      }
+      const targetSessionMeta =
+        sessionId === null
+          ? null
+          : games.find((game) => game.session_id === sessionId)?.session ?? null;
+
       setMovingGameId(gameId);
       setGameError("");
+      setGames((current) =>
+        current.map((game) =>
+          game.id === gameId
+            ? {
+                ...game,
+                session_id: sessionId,
+                session: targetSessionMeta
+              }
+            : game
+        )
+      );
       try {
         const response = await authFetch("/api/game/session", {
           method: "PATCH",
@@ -761,8 +856,19 @@ export default function Dashboard() {
           const payload = (await response.json()) as { error?: string };
           throw new Error(payload.error || "Failed to move game.");
         }
-        await loadGames();
+        void loadGames();
       } catch (error) {
+        setGames((current) =>
+          current.map((game) =>
+            game.id === gameId
+              ? {
+                  ...game,
+                  session_id: previousSessionId,
+                  session: sourceGame.session ?? null
+                }
+              : game
+          )
+        );
         const message =
           error instanceof Error ? error.message : "Failed to move game.";
         setGameError(message);
@@ -770,7 +876,7 @@ export default function Dashboard() {
         setMovingGameId(null);
       }
     },
-    [loadGames, movingGameId]
+    [games, loadGames, movingGameId]
   );
   const sessionGroups = useMemo(() => {
     const sessionMap = new Map<
@@ -1012,7 +1118,14 @@ export default function Dashboard() {
             isTouchReady ? " touch-ready" : ""
           }`}
           onTouchStartCapture={() => scheduleTouchHold(game.id)}
-          onTouchMoveCapture={() => clearTouchHold(game.id)}
+          onTouchMoveCapture={() => {
+            if (
+              touchHoldCandidateRef.current === game.id ||
+              touchHoldGameId === game.id
+            ) {
+              clearTouchHold(game.id);
+            }
+          }}
           onTouchEndCapture={() => clearTouchHold(game.id)}
           onTouchCancelCapture={() => clearTouchHold(game.id)}
           {...attributes}
@@ -1239,7 +1352,8 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
-      <section className="panel anchor-section" id="submit">
+      {showSubmit ? (
+        <section className="panel">
         <div className="panel-header">
           <h2>Log a game</h2>
           <p className="helper">
@@ -1252,6 +1366,7 @@ export default function Dashboard() {
           onQueued={handleQueued}
           pendingJobsCount={pendingJobs.length}
           sessions={sessionOptions}
+          isSessionsLoading={isGamesLoading}
           selectedSessionId={selectedSessionId}
           onSessionChange={handleSessionChange}
           onCreateSession={handleCreateSession}
@@ -1285,22 +1400,34 @@ export default function Dashboard() {
           </div>
         ) : null}
       </section>
+      ) : null}
 
-      <section className="panel anchor-section" id="games">
+      {showGames ? (
+      <section className="panel">
         <div className="panel-header">
           <h2>Your games</h2>
-          <p className="helper">
-            Expand a game to view the frames.
-          </p>
-          <p className="helper">
-            {`Showing ${displayedSessionCount} ${sessionCountLabel}.`}
-          </p>
+          {!isGamesLoading && displayGames.length > 0 ? (
+            <>
+              <p className="helper">
+                Expand a game to view the frames.
+              </p>
+              <p className="helper">
+                {`Showing ${displayedSessionCount} ${sessionCountLabel}.`}
+              </p>
+            </>
+          ) : null}
         </div>
-        {displayGames.length === 0 ? (
+        {isGamesLoading && displayGames.length === 0 ? (
+          <div className="loading-row">
+            <span className="spinner spinner-muted" aria-hidden="true" />
+            <span className="helper">Loading games and sessions...</span>
+          </div>
+        ) : displayGames.length === 0 ? (
           <p className="helper">No games yet.</p>
         ) : (
           <DndContext
             sensors={sensors}
+            modifiers={[restrictToVerticalAxis]}
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
@@ -1677,10 +1804,13 @@ export default function Dashboard() {
         )}
         {gameError ? <p className="helper error-text">{gameError}</p> : null}
       </section>
+      ) : null}
 
-      <section className="panel anchor-section" id="chat">
+      {showChat ? (
+      <section className="panel">
         <ChatPanel gameLabel={activeGameLabel} />
       </section>
+      ) : null}
     </div>
   );
 }
