@@ -16,19 +16,26 @@ function NavItem({
   exact?: boolean;
 }) {
   const pathname = usePathname();
-  const active = exact ? pathname === href : pathname.startsWith(href);
+  const currentPathname = pathname ?? "";
+  const active = exact
+    ? currentPathname === href
+    : currentPathname.startsWith(href);
   return (
-    <Link
-      href={href}
-      className={`nav-link${active ? " active" : ""}`}
-      aria-label={label}
-      aria-current={active ? "page" : undefined}
-    >
-      <span className="nav-icon" aria-hidden="true">
-        {icon}
+    <div className={`nav-item${active ? " active" : ""}`}>
+      <Link
+        href={href}
+        className={`nav-link${active ? " active" : ""}`}
+        aria-label={label}
+        aria-current={active ? "page" : undefined}
+      >
+        <span className="nav-icon" aria-hidden="true">
+          {icon}
+        </span>
+      </Link>
+      <span className="nav-label" aria-hidden={!active}>
+        {label}
       </span>
-      <span className="nav-label">{label}</span>
-    </Link>
+    </div>
   );
 }
 
@@ -62,40 +69,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <nav className="top-nav">
         <div className="nav-links">
           <NavItem
-            href="/"
-            label="Overview"
-            exact
-            icon={
-              <svg viewBox="0 0 24 24" width="18" height="18">
-                <path
-                  d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            }
-          />
-          <NavItem
-            href="/log"
-            label="Log"
-            icon={
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path
-                  d="M12 4v10m0-10 4 4m-4-4-4 4M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            }
-          />
-          <NavItem
-            href="/games"
-            label="Games"
+            href="/sessions"
+            label="Sessions"
             icon={
               <svg viewBox="0 0 24 24" width="20" height="20">
                 <path
@@ -133,6 +108,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   stroke="currentColor"
                   strokeWidth="1.6"
                   strokeLinecap="round"
+                />
+              </svg>
+            }
+          />
+          <NavItem
+            href="/log"
+            label="Record"
+            icon={
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <path
+                  d="M12 4v10m0-10 4 4m-4-4-4 4M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            }
+          />
+          <NavItem
+            href="/friends"
+            label="Friends"
+            icon={
+              <svg viewBox="0 0 24 24" width="20" height="20">
+                <path
+                  d="M8.5 11a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm7 0a2.5 2.5 0 1 0-2.5-2.5A2.5 2.5 0 0 0 15.5 11zM3.5 19a5 5 0 0 1 10 0m-1 0a4 4 0 0 1 8 0"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                 />
               </svg>
             }

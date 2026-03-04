@@ -15,6 +15,7 @@ import {
 } from "@dnd-kit/core";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
+import LaneRule from "./LaneRule";
 import UploadForm from "./UploadForm";
 import GameReview from "./GameReview";
 import ChatPanel from "./ChatPanel";
@@ -92,6 +93,8 @@ type DashboardProps = {
   showSubmit?: boolean;
   showGames?: boolean;
   showChat?: boolean;
+  showGamesHeader?: boolean;
+  gamesContainerClassName?: string;
   autoReviewGameIds?: string[];
   onAutoReviewHandled?: () => void;
   reloadToken?: number;
@@ -173,6 +176,8 @@ export default function Dashboard({
   showSubmit = true,
   showGames = true,
   showChat = true,
+  showGamesHeader = true,
+  gamesContainerClassName = "panel",
   autoReviewGameIds = [],
   onAutoReviewHandled,
   reloadToken
@@ -967,10 +972,6 @@ export default function Dashboard({
       sessionNumberById
     };
   }, [games]);
-  const displayedSessionCount =
-    sessionGroups.orderedSessions.length +
-    (sessionGroups.sessionless.length > 0 ? 1 : 0);
-  const sessionCountLabel = displayedSessionCount === 1 ? "session" : "sessions";
   const visibleSessions = sessionGroups.orderedSessions;
   const sessionOptions = useMemo(() => {
     return sessionGroups.orderedSessions.map((group) => {
@@ -1403,20 +1404,13 @@ export default function Dashboard({
       ) : null}
 
       {showGames ? (
-      <section className="panel">
-        <div className="panel-header">
-          <h2>Your games</h2>
-          {!isGamesLoading && displayGames.length > 0 ? (
-            <>
-              <p className="helper">
-                Expand a game to view the frames.
-              </p>
-              <p className="helper">
-                {`Showing ${displayedSessionCount} ${sessionCountLabel}.`}
-              </p>
-            </>
-          ) : null}
-        </div>
+      <section className={gamesContainerClassName}>
+        {showGamesHeader ? (
+          <div className="panel-header">
+            <h2>Sessions</h2>
+            <p className="helper">Review, edit, and organize your sessions.</p>
+          </div>
+        ) : null}
         {isGamesLoading && displayGames.length === 0 ? (
           <div className="loading-row">
             <span className="spinner spinner-muted" aria-hidden="true" />
@@ -1432,7 +1426,7 @@ export default function Dashboard({
             onDragEnd={handleDragEnd}
           >
             <div className="session-stack">
-              {visibleSessions.map((group) => {
+              {visibleSessions.map((group, index) => {
                 const sessionId = group.sessionId;
                 const collapsed = isSessionCollapsed(sessionId);
                 const sortedGames = sessionGroups.sortByPlayedAtAsc(group.games);
@@ -1454,97 +1448,63 @@ export default function Dashboard({
                 const isSaving = savingSessionId === sessionId;
                 const isDeleting = deletingSessionId === sessionId;
                 return (
-                  <DroppableContainer
-                    key={sessionId}
-                    id={`session:${sessionId}`}
-                  >
-                    {({ setNodeRef, isOver }) => (
-                      <div
-                        ref={setNodeRef}
-                        className={`session-group session-drop-target${
-                          isOver ? " is-over" : ""
-                        }`}
-                      >
+                  <div key={sessionId} className="session-stack-entry">
+                    {index > 0 ? <LaneRule variant="dots" className="lane-rule-inline" /> : null}
+                    <DroppableContainer
+                      id={`session:${sessionId}`}
+                    >
+                      {({ setNodeRef, isOver }) => (
                         <div
-                          ref={registerSessionHeaderRef(sessionId)}
-                          className="session-header"
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => toggleSession(sessionId)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              toggleSession(sessionId);
-                            }
-                          }}
+                          ref={setNodeRef}
+                          className={`session-group session-drop-target${
+                            isOver ? " is-over" : ""
+                          }`}
                         >
-                          <div className="session-header-top">
-                            <div className="session-header-text">
-                              <h3>{sessionLabel || "Session"}</h3>
-                              <p className="helper session-meta">
-                                <span>{group.games.length} games</span>
-                                <span>Avg {formatAverage(scores)}</span>
-                                {collapsed && firstDateTime ? (
-                                  <span>{firstDateTime}</span>
-                                ) : null}
-                              </p>
-                            </div>
-                            <div className="session-actions-inline">
-                              {!collapsed ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    className="edit-toggle"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      startSessionEdit(
-                                        sessionId,
-                                        group.session?.name,
-                                        group.session?.description
-                                      );
-                                    }}
-                                    aria-label={`Edit ${sessionLabel || "Session"}`}
-                                    title={`Edit ${sessionLabel || "Session"}`}
-                                    disabled={isSaving || isDeleting}
-                                  >
-                                    <svg
-                                      aria-hidden="true"
-                                      viewBox="0 0 24 24"
-                                      width="16"
-                                      height="16"
+                          <div
+                            ref={registerSessionHeaderRef(sessionId)}
+                            className="session-header"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => toggleSession(sessionId)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                toggleSession(sessionId);
+                              }
+                            }}
+                          >
+                            <div className="session-header-top">
+                              <div className="session-header-text">
+                                <h3>{sessionLabel || "Session"}</h3>
+                                <p className="helper session-meta">
+                                  <span>
+                                    {group.games.length}{" "}
+                                    {group.games.length === 1 ? "game" : "games"}
+                                  </span>
+                                  <span>Avg {formatAverage(scores)}</span>
+                                  {collapsed && firstDateTime ? (
+                                    <span>{firstDateTime}</span>
+                                  ) : null}
+                                </p>
+                              </div>
+                              <div className="session-actions-inline">
+                                {!collapsed ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="edit-toggle"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        startSessionEdit(
+                                          sessionId,
+                                          group.session?.name,
+                                          group.session?.description
+                                        );
+                                      }}
+                                      aria-label={`Edit ${sessionLabel || "Session"}`}
+                                      title={`Edit ${sessionLabel || "Session"}`}
+                                      disabled={isSaving || isDeleting}
                                     >
-                                      <path
-                                        d="M4 20h4l11-11-4-4L4 16v4z"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.6"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                      />
-                                      <path
-                                        d="M13 7l4 4"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        strokeWidth="1.6"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                      />
-                                    </svg>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="delete-toggle"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      requestSessionDelete(sessionId);
-                                    }}
-                                    aria-label={`Delete ${sessionLabel || "Session"}`}
-                                    title={`Delete ${sessionLabel || "Session"}`}
-                                    disabled={isSaving || isDeleting}
-                                  >
-                                    {isDeleting ? (
-                                      <span className="spinner" aria-hidden="true" />
-                                    ) : (
                                       <svg
                                         aria-hidden="true"
                                         viewBox="0 0 24 24"
@@ -1552,7 +1512,15 @@ export default function Dashboard({
                                         height="16"
                                       >
                                         <path
-                                          d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
+                                          d="M4 20h4l11-11-4-4L4 16v4z"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                        <path
+                                          d="M13 7l4 4"
                                           fill="none"
                                           stroke="currentColor"
                                           strokeWidth="1.6"
@@ -1560,136 +1528,167 @@ export default function Dashboard({
                                           strokeLinejoin="round"
                                         />
                                       </svg>
-                                    )}
-                                  </button>
-                                </>
-                              ) : null}
-                              <button
-                                type="button"
-                                className="expand-toggle"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  toggleSession(sessionId);
-                                }}
-                                aria-expanded={!collapsed}
-                                aria-label={`${collapsed ? "Expand" : "Collapse"} ${sessionLabel || "Session"}`}
-                                title={`${collapsed ? "Expand" : "Collapse"} ${sessionLabel || "Session"}`}
-                              >
-                                <svg
-                                  aria-hidden="true"
-                                  viewBox="0 0 24 24"
-                                  width="16"
-                                  height="16"
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="delete-toggle"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        requestSessionDelete(sessionId);
+                                      }}
+                                      aria-label={`Delete ${sessionLabel || "Session"}`}
+                                      title={`Delete ${sessionLabel || "Session"}`}
+                                      disabled={isSaving || isDeleting}
+                                    >
+                                      {isDeleting ? (
+                                        <span className="spinner" aria-hidden="true" />
+                                      ) : (
+                                        <svg
+                                          aria-hidden="true"
+                                          viewBox="0 0 24 24"
+                                          width="16"
+                                          height="16"
+                                        >
+                                          <path
+                                            d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="1.6"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                        </svg>
+                                      )}
+                                    </button>
+                                  </>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="expand-toggle"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    toggleSession(sessionId);
+                                  }}
+                                  aria-expanded={!collapsed}
+                                  aria-label={`${collapsed ? "Expand" : "Collapse"} ${sessionLabel || "Session"}`}
+                                  title={`${collapsed ? "Expand" : "Collapse"} ${sessionLabel || "Session"}`}
                                 >
-                                  <path
-                                    d="M9 6l6 6-6 6"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.6"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                              </button>
+                                  <svg
+                                    aria-hidden="true"
+                                    viewBox="0 0 24 24"
+                                    width="16"
+                                    height="16"
+                                  >
+                                    <path
+                                      d="M9 6l6 6-6 6"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.6"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                              </div>
                             </div>
+                            {group.session?.description ? (
+                              <p className="helper">{group.session.description}</p>
+                            ) : null}
                           </div>
-                          {group.session?.description ? (
-                            <p className="helper">{group.session.description}</p>
+                          {!collapsed ? (
+                            <div className="session-body">
+                              {isEditing ? (
+                                <div className="session-edit">
+                                  <div className="session-edit-fields">
+                                    <div>
+                                      <label htmlFor={`session-name-${sessionId}`}>Session name</label>
+                                      <input
+                                        id={`session-name-${sessionId}`}
+                                        type="text"
+                                        value={sessionEditName}
+                                        onChange={(event) => setSessionEditName(event.target.value)}
+                                        placeholder={sessionLabel || "Session name"}
+                                      />
+                                    </div>
+                                    <div>
+                                      <label htmlFor={`session-desc-${sessionId}`}>Description</label>
+                                      <input
+                                        id={`session-desc-${sessionId}`}
+                                        type="text"
+                                        value={sessionEditDescription}
+                                        onChange={(event) =>
+                                          setSessionEditDescription(event.target.value)
+                                        }
+                                        placeholder="Optional description"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="session-edit-actions">
+                                    <button
+                                      type="button"
+                                      className="button-secondary"
+                                      onClick={cancelSessionEdit}
+                                      disabled={isSaving}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => saveSessionEdit(sessionId)}
+                                      disabled={isSaving}
+                                    >
+                                      {isSaving ? "Saving..." : "Save session"}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
+                              {isDeletePrompt ? (
+                                <div className="session-delete">
+                                  <p className="helper">
+                                    Delete this session. What should happen to the games inside?
+                                  </p>
+                                  <div className="session-delete-actions">
+                                    <button
+                                      type="button"
+                                      className="button-secondary"
+                                      onClick={() => handleSessionDelete(sessionId, "sessionless")}
+                                      disabled={isDeleting}
+                                    >
+                                      Move to sessionless
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSessionDelete(sessionId, "delete_games")}
+                                      disabled={isDeleting}
+                                    >
+                                      Delete permanently
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="button-muted"
+                                      onClick={cancelSessionDelete}
+                                      disabled={isDeleting}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
+                              <div className="games-list">
+                                {sortedGames.map((game) => (
+                                  <DraggableGameCard
+                                    key={game.id}
+                                    game={game}
+                                    titleOverride={sessionGroups.gameTitleMap.get(game.id)}
+                                  />
+                                ))}
+                              </div>
+                            </div>
                           ) : null}
                         </div>
-                        {!collapsed ? (
-                          <div className="session-body">
-                            {isEditing ? (
-                              <div className="session-edit">
-                                <div className="session-edit-fields">
-                                  <div>
-                                    <label htmlFor={`session-name-${sessionId}`}>Session name</label>
-                                    <input
-                                      id={`session-name-${sessionId}`}
-                                      type="text"
-                                      value={sessionEditName}
-                                      onChange={(event) => setSessionEditName(event.target.value)}
-                                      placeholder={sessionLabel || "Session name"}
-                                    />
-                                  </div>
-                                  <div>
-                                    <label htmlFor={`session-desc-${sessionId}`}>Description</label>
-                                    <input
-                                      id={`session-desc-${sessionId}`}
-                                      type="text"
-                                      value={sessionEditDescription}
-                                      onChange={(event) =>
-                                        setSessionEditDescription(event.target.value)
-                                      }
-                                      placeholder="Optional description"
-                                    />
-                                  </div>
-                                </div>
-                                <div className="session-edit-actions">
-                                  <button
-                                    type="button"
-                                    className="button-secondary"
-                                    onClick={cancelSessionEdit}
-                                    disabled={isSaving}
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => saveSessionEdit(sessionId)}
-                                    disabled={isSaving}
-                                  >
-                                    {isSaving ? "Saving..." : "Save session"}
-                                  </button>
-                                </div>
-                              </div>
-                            ) : null}
-                            {isDeletePrompt ? (
-                              <div className="session-delete">
-                                <p className="helper">
-                                  Delete this session. What should happen to the games inside?
-                                </p>
-                                <div className="session-delete-actions">
-                                  <button
-                                    type="button"
-                                    className="button-secondary"
-                                    onClick={() => handleSessionDelete(sessionId, "sessionless")}
-                                    disabled={isDeleting}
-                                  >
-                                    Move to sessionless
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSessionDelete(sessionId, "delete_games")}
-                                    disabled={isDeleting}
-                                  >
-                                    Delete permanently
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="button-muted"
-                                    onClick={cancelSessionDelete}
-                                    disabled={isDeleting}
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </div>
-                            ) : null}
-                            <div className="games-list">
-                              {sortedGames.map((game) => (
-                                <DraggableGameCard
-                                  key={game.id}
-                                  game={game}
-                                  titleOverride={sessionGroups.gameTitleMap.get(game.id)}
-                                />
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-                  </DroppableContainer>
+                      )}
+                    </DroppableContainer>
+                  </div>
                 );
               })}
               {sessionGroups.sessionless.length > 0 ? (() => {
@@ -1710,80 +1709,92 @@ export default function Dashboard({
                 return (
                   <DroppableContainer id={`session:${sessionId}`}>
                     {({ setNodeRef, isOver }) => (
-                      <div
-                        ref={setNodeRef}
-                        className={`session-group session-drop-target${
-                          isOver ? " is-over" : ""
-                        }`}
-                      >
-                        <div
-                          ref={registerSessionHeaderRef(sessionId)}
-                          className="session-header"
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => toggleSession(sessionId)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              toggleSession(sessionId);
-                            }
-                          }}
-                        >
-                          <div className="session-header-top">
-                            <div className="session-header-text">
-                              <h3>Sessionless games</h3>
-                              <p className="helper session-meta">
-                                <span>{sessionGroups.sessionless.length} games</span>
-                                <span>Avg {formatAverage(scores)}</span>
-                                {collapsed && firstDateTime ? (
-                                  <span>{firstDateTime}</span>
-                                ) : null}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              className="expand-toggle"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                toggleSession(sessionId);
-                              }}
-                              aria-expanded={!collapsed}
-                              aria-label={`${collapsed ? "Expand" : "Collapse"} Sessionless games`}
-                              title={`${collapsed ? "Expand" : "Collapse"} Sessionless games`}
-                            >
-                              <svg
-                                aria-hidden="true"
-                                viewBox="0 0 24 24"
-                                width="16"
-                                height="16"
-                              >
-                                <path
-                                  d="M9 6l6 6-6 6"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </button>
-                          </div>
-                          <p className="helper">
-                            These games were not given a session.
-                          </p>
-                        </div>
-                        {!collapsed ? (
-                          <div className="games-list">
-                            {sortedGames.map((game) => (
-                              <DraggableGameCard
-                                key={game.id}
-                                game={game}
-                                titleOverride={sessionGroups.gameTitleMap.get(game.id)}
-                              />
-                            ))}
-                          </div>
+                      <>
+                        {visibleSessions.length > 0 ? (
+                          <LaneRule variant="dots" className="lane-rule-inline" />
                         ) : null}
-                      </div>
+                        <div
+                          ref={setNodeRef}
+                          className={`session-group session-drop-target${
+                            isOver ? " is-over" : ""
+                          }`}
+                        >
+                          <div
+                            ref={registerSessionHeaderRef(sessionId)}
+                            className="session-header"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => toggleSession(sessionId)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                toggleSession(sessionId);
+                              }
+                            }}
+                          >
+                            <div className="session-header-top">
+                              <div className="session-header-text">
+                                <h3>Sessionless games</h3>
+                                <p className="helper session-meta">
+                                  <span>
+                                    {sessionGroups.sessionless.length}{" "}
+                                    {sessionGroups.sessionless.length === 1
+                                      ? "game"
+                                      : "games"}
+                                  </span>
+                                  <span>Avg {formatAverage(scores)}</span>
+                                  {collapsed && firstDateTime ? (
+                                    <span>{firstDateTime}</span>
+                                  ) : null}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="expand-toggle"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleSession(sessionId);
+                                }}
+                                aria-expanded={!collapsed}
+                                aria-label={`${collapsed ? "Expand" : "Collapse"} Sessionless games`}
+                                title={`${collapsed ? "Expand" : "Collapse"} Sessionless games`}
+                              >
+                                <svg
+                                  aria-hidden="true"
+                                  viewBox="0 0 24 24"
+                                  width="16"
+                                  height="16"
+                                >
+                                  <path
+                                    d="M9 6l6 6-6 6"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                            <p className="helper">
+                              These games were not given a session.
+                            </p>
+                          </div>
+                          {!collapsed ? (
+                            <div className="session-body">
+                              <div className="games-list">
+                                {sortedGames.map((game) => (
+                                  <DraggableGameCard
+                                    key={game.id}
+                                    game={game}
+                                    titleOverride={sessionGroups.gameTitleMap.get(game.id)}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                        </div>
+                      </>
                     )}
                   </DroppableContainer>
                 );

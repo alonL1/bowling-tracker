@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
+import LaneRule from "../components/LaneRule";
 import {
   authFetch,
   getCurrentUser,
@@ -234,7 +235,7 @@ export default function LoginPage() {
       <main className="container">
         <div className="loading-row">
           <span className="spinner spinner-muted" aria-hidden="true" />
-          <span className="helper">Redirecting to overview...</span>
+          <span className="helper">Redirecting to sessions...</span>
         </div>
       </main>
     );
@@ -242,15 +243,16 @@ export default function LoginPage() {
 
   return (
     <main className="container auth-shell">
-      <header className="hero anchor-section" id="overview">
-        <div>
+      <section className="screen auth-shell-content">
+        <header className="screen-header">
           <p className="eyebrow">Bowling Tracker</p>
-          <h1>Sign in to your bowling account.</h1>
-          <p className="lede">
+          <h1 className="screen-title">Sign in to your bowling account.</h1>
+          <p className="screen-subtitle">
             Keep your games private, track sessions, and chat with your stats.
           </p>
-        </div>
-        <div className="hero-card auth-card">
+        </header>
+        <LaneRule variant="arrows" />
+        <div className="section-block auth-card">
           <h2>{authMode === "sign-in" ? "Sign In" : "Create Account"}</h2>
           <form className="form-grid" onSubmit={handleAuthSubmit}>
             <div>
@@ -312,12 +314,12 @@ export default function LoginPage() {
             ) : null}
           </form>
         </div>
-      </header>
+      </section>
 
       {transferPrompt ? (
         <div className="auth-modal-backdrop" role="presentation">
           <section
-            className="auth-modal panel"
+            className="auth-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="guest-transfer-title"
@@ -327,6 +329,7 @@ export default function LoginPage() {
               You are signed in. Do you want to move your guest sessions and
               games to this account, or keep this account as-is?
             </p>
+            <LaneRule variant="dots" className="lane-rule-inline" />
             <div className="auth-actions">
               <button type="button" onClick={handleSaveLogs} disabled={transferBusy}>
                 {transferBusy ? "Saving logs..." : "Save my logs"}

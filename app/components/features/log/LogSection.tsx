@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import LaneRule from "../../LaneRule";
 import UploadForm from "../../UploadForm";
 import { useGames } from "../../providers/GamesProvider";
 import { useJobs } from "../../providers/JobsProvider";
@@ -151,57 +152,73 @@ export default function LogSection() {
     }
     const query = recentlyLoggedGameIds.join(",");
     clearRecentlyLoggedGameIds();
-    router.push(`/games?recent=${encodeURIComponent(query)}`);
+    router.push(`/sessions?recent=${encodeURIComponent(query)}`);
   };
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Log a game</h2>
-        <p className="helper">
+    <section className="screen">
+      <header className="screen-header">
+        <h1 className="screen-title">Record</h1>
+        <p className="screen-subtitle">
           Upload a scoreboard image, then wait for the worker to finish. <br />
           To add multiple games at once simply select multiple images. <br />
           If have different names throughout the scoresheets, write them out comma
           seperated
         </p>
+      </header>
+      <LaneRule variant="arrows" />
+      <div className="section-block">
+        <UploadForm
+          onQueued={enqueueJobs}
+          onError={setGameError}
+          pendingJobsCount={pendingJobs.length}
+          sessions={sessionOptions}
+          isSessionsLoading={isGamesLoading}
+          selectedSessionId={selectedSessionId}
+          onSessionChange={setSelectedSessionId}
+          onCreateSession={handleCreateSession}
+        />
       </div>
-      <UploadForm
-        onQueued={enqueueJobs}
-        onError={setGameError}
-        pendingJobsCount={pendingJobs.length}
-        sessions={sessionOptions}
-        isSessionsLoading={isGamesLoading}
-        selectedSessionId={selectedSessionId}
-        onSessionChange={setSelectedSessionId}
-        onCreateSession={handleCreateSession}
-      />
 
       {recentlyLoggedGameIds.length > 0 ? (
-        <div className="status-stack">
-          <button
-            type="button"
-            className="button-secondary"
-            onClick={handleReviewRecentlyLogged}
-          >
-            Review recently logged games
-          </button>
+        <div className="section-stack">
+          <LaneRule variant="dots" />
+          <div className="status-stack">
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={handleReviewRecentlyLogged}
+            >
+              Review recently logged games
+            </button>
+          </div>
         </div>
       ) : null}
 
       {pendingJobs.length > 0 ? (
-        <div className="status-stack">
-          {pendingJobs.map((job) => (
-            <div
-              key={job.jobId}
-              className={`status${job.status === "error" ? " error" : ""}`}
-            >
-              {formatJobMessage(job, isDebug)}
-            </div>
-          ))}
+        <div className="section-stack">
+          <LaneRule variant="dots" />
+          <div className="status-stack">
+            {pendingJobs.map((job) => (
+              <div
+                key={job.jobId}
+                className={`status${job.status === "error" ? " error" : ""}`}
+              >
+                {formatJobMessage(job, isDebug)}
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
 
-      {gameError ? <p className="helper error-text">{gameError}</p> : null}
+      {gameError ? (
+        <div className="section-stack">
+          {(recentlyLoggedGameIds.length === 0 && pendingJobs.length === 0) ? (
+            <LaneRule variant="dots" />
+          ) : null}
+          <p className="helper error-text">{gameError}</p>
+        </div>
+      ) : null}
     </section>
   );
 }

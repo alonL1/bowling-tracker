@@ -1,5 +1,5 @@
-import GamesSection from "../../components/features/games/GamesSection";
+import { redirect } from "next/navigation";
 
 export default function GamesPage() {
-  return <GamesSection />;
+  redirect("/sessions");
 }

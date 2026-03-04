@@ -1,5 +1,5 @@
-import OverviewSection from "../components/features/overview/OverviewSection";
+import { redirect } from "next/navigation";
 
-export default function OverviewPage() {
-  return <OverviewSection />;
+export default function AppHomePage() {
+  redirect("/sessions");
 }

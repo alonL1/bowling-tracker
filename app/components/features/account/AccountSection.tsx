@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import LaneRule from "../../LaneRule";
 import { useAuth } from "../../providers/AuthProvider";
 
 export default function AccountSection() {
@@ -29,16 +30,17 @@ export default function AccountSection() {
   };
 
   return (
-    <section className="panel">
-      <div className="panel-header">
-        <h2>Account</h2>
-        <p className="helper">
+    <section className="screen">
+      <header className="screen-header">
+        <h1 className="screen-title">Account</h1>
+        <p className="screen-subtitle">
           {isGuest
             ? "You are currently using a guest session."
             : "You are signed into your account."}
         </p>
-      </div>
-      <div className="form-grid">
+      </header>
+      <LaneRule variant="arrows" />
+      <div className="section-block form-grid">
         <p>
           <strong>{isGuest ? "Guest" : user?.email || "Signed in"}</strong>
         </p>

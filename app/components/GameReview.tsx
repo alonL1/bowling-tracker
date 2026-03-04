@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import LaneRule from "./LaneRule";
 import { authFetch } from "../lib/authClient";
 
 type Shot = {
@@ -289,6 +290,7 @@ export default function GameReview({
           </div>
         </div>
       </div>
+      <LaneRule variant="dots" className="lane-rule-inline" />
 
       <div className="score-grid edit-score-grid">
         <div className="score-row score-header">

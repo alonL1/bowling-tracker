@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import LaneRule from "./LaneRule";
 import { authFetch } from "../lib/authClient";
 
 type Message = {
@@ -269,6 +270,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
           </div>
         ) : null}
       </div>
+      <LaneRule variant="dots" className="lane-rule-inline" />
       <div className="chat-messages">
         {messages.map((message, index) => {
           const next = messages[index + 1];
@@ -293,6 +295,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
           );
         })}
       </div>
+      <LaneRule variant="dots" className="lane-rule-inline" />
       <form className="chat-form" onSubmit={handleAsk}>
         <textarea
           className="chat-input"
