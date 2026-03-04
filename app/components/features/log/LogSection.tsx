@@ -44,6 +44,7 @@ export default function LogSection() {
     clearRecentlyLoggedGameIds
   } = useJobs();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [isHelpExpanded, setIsHelpExpanded] = useState(false);
   const isDebug = process.env.CHAT_DEBUG === "true";
 
   useEffect(() => {
@@ -160,13 +161,52 @@ export default function LogSection() {
       <header className="screen-header">
         <h1 className="screen-title">Record</h1>
         <p className="screen-subtitle">
-          Upload a scoreboard image, then wait for the worker to finish. <br />
-          To add multiple games at once simply select multiple images. <br />
-          If have different names throughout the scoresheets, write them out comma
-          seperated
+          Record new games and add them to your personal log.
         </p>
       </header>
       <LaneRule variant="arrows" />
+      <div className="section-stack">
+        <div className="collapsible-header">
+          <button
+            type="button"
+            className="button-secondary collapsible-toggle"
+            aria-expanded={isHelpExpanded}
+            onClick={() => setIsHelpExpanded((current) => !current)}
+          >
+            <span>Help</span>
+            <span className="expand-toggle" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16">
+                <path
+                  d="M9 6l6 6-6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          </button>
+        </div>
+        {isHelpExpanded ? (
+          <div className="collapsible-help">
+            <p className="helper">
+              Either add games to a new session or select a previous session to add
+              games to.
+            </p>
+            <p className="helper">
+              Upload scoreboard images, then wait for the worker to finish.
+            </p>
+            <p className="helper">
+              To add multiple games at once, simply select multiple images.
+            </p>
+            <p className="helper">
+              If you have different names throughout the scoresheets, write them out
+              comma separated.
+            </p>
+          </div>
+        ) : null}
+      </div>
       <div className="section-block">
         <UploadForm
           onQueued={enqueueJobs}

@@ -7,7 +7,8 @@ export default function ChatSection() {
       <header className="screen-header">
         <h1 className="screen-title">Chat</h1>
         <p className="screen-subtitle">
-          Ask about your bowling stats, patterns, sessions, and trends.
+          Ask about your bowling stats, patterns, sessions, and trends. <br />
+          Chats can be about anything, get creative or checkout our examples.
         </p>
       </header>
       <LaneRule variant="arrows" />

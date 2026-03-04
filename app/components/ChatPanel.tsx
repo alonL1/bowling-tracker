@@ -232,18 +232,29 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
 
   return (
     <div className="chat-section">
-      <div className="panel-header">
-        <h2>Ask about your stats</h2>
-        <p className="helper">
-          Ask anything about your bowling stats. Chats can be about anything, get creative or checkout our examples.
-        </p>
-        <button
-          type="button"
-          className="text-button"
-          onClick={() => setShowExamples((prev) => !prev)}
-        >
-          {showExamples ? "Hide examples" : "View examples"}
-        </button>
+      <div className="section-stack">
+        <div className="collapsible-header">
+          <button
+            type="button"
+            className="button-secondary collapsible-toggle"
+            aria-expanded={showExamples}
+            onClick={() => setShowExamples((prev) => !prev)}
+          >
+            <span>{showExamples ? "Hide examples" : "View examples"}</span>
+            <span className="expand-toggle" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16">
+                <path
+                  d="M9 6l6 6-6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          </button>
+        </div>
         {showExamples ? (
           <div className="examples">
             <p className="helper">Examples:</p>
@@ -295,7 +306,6 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
           );
         })}
       </div>
-      <LaneRule variant="dots" className="lane-rule-inline" />
       <form className="chat-form" onSubmit={handleAsk}>
         <textarea
           className="chat-input"

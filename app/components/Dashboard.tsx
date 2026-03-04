@@ -206,7 +206,9 @@ export default function Dashboard({
   const [savingSessionId, setSavingSessionId] = useState<string | null>(null);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
-  const [expandedGameId, setExpandedGameId] = useState<string | null>(null);
+  const [expandedGameIds, setExpandedGameIds] = useState<Record<string, boolean>>(
+    {}
+  );
   const [expandedGames, setExpandedGames] = useState<Record<string, GameDetail>>(
     {}
   );
@@ -651,7 +653,6 @@ export default function Dashboard({
   const handleConfirm = async (gameId: string) => {
     setEditingGameId(null);
     setEditingMode("edit");
-    setExpandedGameId(null);
     await loadGame(gameId);
     await loadGames();
   };
@@ -659,7 +660,6 @@ export default function Dashboard({
   const handleCancelEdit = () => {
     setEditingGameId(null);
     setEditingMode("edit");
-    setExpandedGameId(null);
   };
 
   const handleDelete = async (gameId: string) => {
@@ -691,9 +691,11 @@ export default function Dashboard({
         delete next[gameId];
         return next;
       });
-      if (expandedGameId === gameId) {
-        setExpandedGameId(null);
-      }
+      setExpandedGameIds((current) => {
+        const next = { ...current };
+        delete next[gameId];
+        return next;
+      });
       if (editingGameId === gameId) {
         setEditingGameId(null);
         setEditingMode("edit");
@@ -710,7 +712,7 @@ export default function Dashboard({
   };
 
   const handleEdit = async (gameId: string) => {
-    setExpandedGameId(gameId);
+    setExpandedGameIds((current) => ({ ...current, [gameId]: true }));
     const detail = expandedGames[gameId] ?? (await loadGame(gameId));
     if (detail) {
       setEditingGameId(gameId);
@@ -719,12 +721,25 @@ export default function Dashboard({
   };
 
   const toggleExpand = async (gameId: string) => {
-    const nextId = expandedGameId === gameId ? null : gameId;
-    setExpandedGameId(nextId);
-    if (nextId && !expandedGames[nextId]) {
-      await loadGame(nextId);
+    const isExpanded = Boolean(expandedGameIds[gameId]);
+    if (isExpanded) {
+      setExpandedGameIds((current) => {
+        const next = { ...current };
+        delete next[gameId];
+        return next;
+      });
+      if (editingGameId === gameId) {
+        setEditingGameId(null);
+        setEditingMode("edit");
+      }
+      return;
     }
-    if (nextId !== gameId || nextId === null) {
+
+    setExpandedGameIds((current) => ({ ...current, [gameId]: true }));
+    if (!expandedGames[gameId]) {
+      await loadGame(gameId);
+    }
+    if (editingGameId && editingGameId !== gameId) {
       setEditingGameId(null);
       setEditingMode("edit");
     }
@@ -733,10 +748,35 @@ export default function Dashboard({
   const activeGameLabel = "all games";
   const displayGames = games;
   const toggleSession = (sessionId: string) => {
+    const nextCollapsed = !(collapsedSessions[sessionId] ?? true);
     setCollapsedSessions((current) => ({
       ...current,
-      [sessionId]: !(current[sessionId] ?? true)
+      [sessionId]: nextCollapsed
     }));
+    if (!nextCollapsed) {
+      return;
+    }
+    const sessionGameIds =
+      sessionId === "sessionless"
+        ? sessionGroups.sessionless.map((game) => game.id)
+        : sessionGroups.orderedSessions
+            .find((group) => group.sessionId === sessionId)
+            ?.games.map((game) => game.id) ?? [];
+    if (sessionGameIds.length === 0) {
+      return;
+    }
+    const sessionGameIdSet = new Set(sessionGameIds);
+    setExpandedGameIds((current) => {
+      const next = { ...current };
+      sessionGameIds.forEach((gameId) => {
+        delete next[gameId];
+      });
+      return next;
+    });
+    if (editingGameId && sessionGameIdSet.has(editingGameId)) {
+      setEditingGameId(null);
+      setEditingMode("edit");
+    }
   };
   const isSessionCollapsed = (sessionId: string) =>
     collapsedSessions[sessionId] ?? true;
@@ -1118,6 +1158,7 @@ export default function Dashboard({
           className={`game-card draggable${isDragging ? " dragging" : ""}${
             isTouchReady ? " touch-ready" : ""
           }`}
+          onClick={() => toggleExpand(game.id)}
           onTouchStartCapture={() => scheduleTouchHold(game.id)}
           onTouchMoveCapture={() => {
             if (
@@ -1180,7 +1221,7 @@ export default function Dashboard({
     titleOverride?: string,
     isOverlay?: boolean
   ) {
-    const expanded = expandedGameId === game.id;
+    const expanded = !isOverlay && Boolean(expandedGameIds[game.id]);
     const detail = expandedGames[game.id];
     const rows = detail ? buildScoreRows(detail) : null;
     const gameNumber = getGameNumber(game.id);
@@ -1192,57 +1233,66 @@ export default function Dashboard({
         : gameNumber
           ? `Game ${gameNumber}`
           : "Game";
+    const titleWithScore =
+      game.total_score !== null ? `${gameTitle}: ${game.total_score}` : gameTitle;
 
     return (
       <>
         <div className="game-row">
           <div className="game-meta">
-            <p className="game-title">{gameTitle}</p>
-            <p className="helper">
-              {game.player_name ? `${game.player_name} - ` : ""}
-              {new Date(game.played_at || game.created_at).toLocaleString()}
-              {game.total_score !== null
-                ? ` - Score: ${game.total_score}`
-                : ""}
-            </p>
+            <p className="game-title">{titleWithScore}</p>
+            {expanded ? (
+              <p className="helper">
+                {game.player_name ? `${game.player_name} - ` : ""}
+                {new Date(game.played_at || game.created_at).toLocaleString()}
+              </p>
+            ) : null}
           </div>
           {!isOverlay ? (
             <div className="game-actions-inline">
-              <button
-                type="button"
-                className="edit-toggle"
-                onClick={() => handleEdit(game.id)}
-                aria-label={`Edit ${gameTitle}`}
-                title={`Edit ${gameTitle}`}
-              >
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  width="16"
-                  height="16"
+              {expanded ? (
+                <button
+                  type="button"
+                  className="edit-toggle"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleEdit(game.id);
+                  }}
+                  aria-label={`Edit ${gameTitle}`}
+                  title={`Edit ${gameTitle}`}
                 >
-                  <path
-                    d="M4 20h4l11-11-4-4L4 16v4z"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M13 7l4 4"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                  >
+                    <path
+                      d="M4 20h4l11-11-4-4L4 16v4z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M13 7l4 4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="delete-toggle"
-                onClick={() => handleDelete(game.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleDelete(game.id);
+                }}
                 disabled={deletingGameId === game.id}
                 aria-label={`Delete ${gameTitle}`}
                 title={`Delete ${gameTitle}`}
@@ -1270,7 +1320,10 @@ export default function Dashboard({
               <button
                 type="button"
                 className="expand-toggle"
-                onClick={() => toggleExpand(game.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleExpand(game.id);
+                }}
                 aria-expanded={expanded}
                 aria-controls={`game-score-${game.id}`}
                 aria-label={`${expanded ? "Collapse" : "Expand"} ${gameTitle}`}
@@ -1426,7 +1479,7 @@ export default function Dashboard({
             onDragEnd={handleDragEnd}
           >
             <div className="session-stack">
-              {visibleSessions.map((group, index) => {
+              {visibleSessions.map((group) => {
                 const sessionId = group.sessionId;
                 const collapsed = isSessionCollapsed(sessionId);
                 const sortedGames = sessionGroups.sortByPlayedAtAsc(group.games);
@@ -1438,18 +1491,23 @@ export default function Dashboard({
                   group.session?.started_at ||
                   (firstGame ? firstGame.played_at || firstGame.created_at : null);
                 const firstDateTime = firstDateTimeSource
-                  ? new Date(firstDateTimeSource).toLocaleString()
+                  ? new Date(firstDateTimeSource).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric"
+                    })
                   : null;
                 const sessionLabel =
                   group.session?.name?.trim() ||
                   `Session ${sessionGroups.sessionNumberById.get(sessionId) ?? ""}`.trim();
+                const sessionTitle = firstDateTime
+                  ? `${firstDateTime} - ${sessionLabel || "Session"}`
+                  : sessionLabel || "Session";
                 const isEditing = editingSessionId === sessionId;
                 const isDeletePrompt = deleteSessionId === sessionId;
                 const isSaving = savingSessionId === sessionId;
                 const isDeleting = deletingSessionId === sessionId;
                 return (
                   <div key={sessionId} className="session-stack-entry">
-                    {index > 0 ? <LaneRule variant="dots" className="lane-rule-inline" /> : null}
                     <DroppableContainer
                       id={`session:${sessionId}`}
                     >
@@ -1475,16 +1533,13 @@ export default function Dashboard({
                           >
                             <div className="session-header-top">
                               <div className="session-header-text">
-                                <h3>{sessionLabel || "Session"}</h3>
+                                <h3>{sessionTitle}</h3>
                                 <p className="helper session-meta">
                                   <span>
                                     {group.games.length}{" "}
                                     {group.games.length === 1 ? "game" : "games"}
                                   </span>
                                   <span>Avg {formatAverage(scores)}</span>
-                                  {collapsed && firstDateTime ? (
-                                    <span>{firstDateTime}</span>
-                                  ) : null}
                                 </p>
                               </div>
                               <div className="session-actions-inline">
@@ -1704,15 +1759,18 @@ export default function Dashboard({
                 const firstDateTime = firstGame
                   ? new Date(
                       firstGame.played_at || firstGame.created_at
-                    ).toLocaleString()
+                    ).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric"
+                    })
                   : null;
+                const sessionTitle = firstDateTime
+                  ? `${firstDateTime} - Sessionless games`
+                  : "Sessionless games";
                 return (
                   <DroppableContainer id={`session:${sessionId}`}>
                     {({ setNodeRef, isOver }) => (
                       <>
-                        {visibleSessions.length > 0 ? (
-                          <LaneRule variant="dots" className="lane-rule-inline" />
-                        ) : null}
                         <div
                           ref={setNodeRef}
                           className={`session-group session-drop-target${
@@ -1734,7 +1792,7 @@ export default function Dashboard({
                           >
                             <div className="session-header-top">
                               <div className="session-header-text">
-                                <h3>Sessionless games</h3>
+                                <h3>{sessionTitle}</h3>
                                 <p className="helper session-meta">
                                   <span>
                                     {sessionGroups.sessionless.length}{" "}
@@ -1743,9 +1801,6 @@ export default function Dashboard({
                                       : "games"}
                                   </span>
                                   <span>Avg {formatAverage(scores)}</span>
-                                  {collapsed && firstDateTime ? (
-                                    <span>{firstDateTime}</span>
-                                  ) : null}
                                 </p>
                               </div>
                               <button
