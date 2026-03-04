@@ -22,6 +22,7 @@ import ChatPanel from "./ChatPanel";
 import { authFetch } from "../lib/authClient";
 
 type JobStatus = "queued" | "processing" | "logged" | "error";
+type SessionMode = "auto" | "new" | "existing";
 
 type StatusResponse = {
   jobId: string;
@@ -76,14 +77,6 @@ type GameListItem = {
     started_at?: string | null;
     created_at?: string | null;
   } | null;
-};
-
-type SessionItem = {
-  id: string;
-  name?: string | null;
-  description?: string | null;
-  started_at?: string | null;
-  created_at?: string | null;
 };
 
 const POLL_INTERVAL_MS = 3000;
@@ -187,8 +180,10 @@ export default function Dashboard({
   const [games, setGames] = useState<GameListItem[]>([]);
   const [isGamesLoading, setIsGamesLoading] = useState<boolean>(true);
   const [gamesTotal, setGamesTotal] = useState<number | null>(null);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [creatingSession, setCreatingSession] = useState<boolean>(false);
+  const [sessionMode, setSessionMode] = useState<SessionMode>("new");
+  const [selectedExistingSessionId, setSelectedExistingSessionId] = useState<
+    string | null
+  >(null);
   const [pendingBatch, setPendingBatch] = useState<{
     jobIds: string[];
     loggedGameIds: string[];
@@ -1024,53 +1019,23 @@ export default function Dashboard({
       };
     });
   }, [sessionGroups]);
-  const handleSessionChange = (sessionId: string | null) => {
-    setSelectedSessionId(sessionId);
+  const handleExistingSessionChange = (sessionId: string | null) => {
+    setSelectedExistingSessionId(sessionId);
   };
   useEffect(() => {
-    if (selectedSessionId === "new") {
-      return;
-    }
     if (sessionOptions.length === 0) {
-      setSelectedSessionId("new");
+      setSelectedExistingSessionId(null);
+      setSessionMode((current) => (current === "existing" ? "new" : current));
       return;
     }
     if (
-      selectedSessionId &&
-      sessionOptions.some((option) => option.id === selectedSessionId)
+      selectedExistingSessionId &&
+      sessionOptions.some((option) => option.id === selectedExistingSessionId)
     ) {
       return;
     }
-    setSelectedSessionId("new");
-  }, [selectedSessionId, sessionOptions]);
-  const handleCreateSession = useCallback(async () => {
-    if (creatingSession) {
-      return null;
-    }
-    setCreatingSession(true);
-    setGameError("");
-    try {
-      const response = await authFetch("/api/sessions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
-      });
-      if (!response.ok) {
-        const payload = (await response.json()) as { error?: string };
-        throw new Error(payload.error || "Failed to create session.");
-      }
-      const payload = (await response.json()) as { session: SessionItem };
-      const created = payload.session;
-      return created.id;
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to create session.";
-      setGameError(message);
-      return null;
-    } finally {
-      setCreatingSession(false);
-    }
-  }, [creatingSession]);
+    setSelectedExistingSessionId(sessionOptions[0]?.id ?? null);
+  }, [selectedExistingSessionId, sessionOptions]);
   const gameNumberMap = useMemo(() => {
     const ordered = [...games].sort((a, b) => {
       const aTime = a.played_at
@@ -1421,9 +1386,10 @@ export default function Dashboard({
           pendingJobsCount={pendingJobs.length}
           sessions={sessionOptions}
           isSessionsLoading={isGamesLoading}
-          selectedSessionId={selectedSessionId}
-          onSessionChange={handleSessionChange}
-          onCreateSession={handleCreateSession}
+          sessionMode={sessionMode}
+          onSessionModeChange={setSessionMode}
+          selectedExistingSessionId={selectedExistingSessionId}
+          onExistingSessionChange={handleExistingSessionChange}
         />
         {reviewGameIds.length > 0 ? (
           <div className="status-stack">

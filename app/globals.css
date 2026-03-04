@@ -423,6 +423,26 @@ textarea:focus {
   gap: 12px;
 }
 
+.session-mode-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.session-mode-option {
+  padding: 10px 14px;
+}
+
+.session-mode-option.active {
+  border-color: var(--wood-dark);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.session-mode-helper {
+  margin-top: 8px;
+}
+
 
 button {
   border: 1px solid var(--wood-dark);

@@ -116,6 +116,17 @@ function toUtcIsoFromExif(value, offsetMinutes) {
   return new Date(baseUtc - offsetMinutes * 60000).toISOString();
 }
 
+function normalizeOptionalTimestamp(value) {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(String(value).trim());
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
 function normalizeOptionalUuid(value) {
   if (!value) {
     return null;
@@ -338,6 +349,7 @@ async function processJob() {
     playerNames.length > 0 ? playerNames.join(", ") : String(playerName || "");
   const userId = normalizeOptionalUuid(job.user_id);
   const sessionId = normalizeOptionalUuid(job.session_id);
+  const capturedAtHint = normalizeOptionalTimestamp(job.captured_at_hint);
   if (job.user_id && !userId) {
     console.warn(`Job ${job.id} has invalid user_id:`, job.user_id);
   }
@@ -412,10 +424,9 @@ async function processJob() {
   const jobOffset = Number.isFinite(parsedOffset) ? parsedOffset : null;
   const fallbackOffsetMinutes =
     jobOffset !== null ? -jobOffset : null;
-  const capturedAt = await extractCapturedAtFromExif(
-    buffer,
-    fallbackOffsetMinutes
-  );
+  const capturedAt =
+    (await extractCapturedAtFromExif(buffer, fallbackOffsetMinutes)) ||
+    capturedAtHint;
   const extractedName =
     typeof extraction?.playerName === "string"
       ? extraction.playerName.trim()

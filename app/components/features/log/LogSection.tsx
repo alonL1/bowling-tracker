@@ -8,6 +8,8 @@ import { useGames } from "../../providers/GamesProvider";
 import { useJobs } from "../../providers/JobsProvider";
 import type { PendingJob } from "../../types/app";
 
+type SessionMode = "auto" | "new" | "existing";
+
 const formatJobMessage = (job: PendingJob, isDebug: boolean) => {
   if (isDebug) {
     const statusLabel = job.status ? ` Status: ${job.status}.` : "";
@@ -35,7 +37,7 @@ const formatJobMessage = (job: PendingJob, isDebug: boolean) => {
 
 export default function LogSection() {
   const router = useRouter();
-  const { games, isGamesLoading, gameError, setGameError, createSession, loadGames } =
+  const { games, isGamesLoading, gameError, setGameError, loadGames } =
     useGames();
   const {
     pendingJobs,
@@ -43,7 +45,10 @@ export default function LogSection() {
     recentlyLoggedGameIds,
     clearRecentlyLoggedGameIds
   } = useJobs();
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionMode, setSessionMode] = useState<SessionMode>("new");
+  const [selectedExistingSessionId, setSelectedExistingSessionId] = useState<
+    string | null
+  >(null);
   const [isHelpExpanded, setIsHelpExpanded] = useState(false);
   const isDebug = process.env.CHAT_DEBUG === "true";
 
@@ -123,29 +128,19 @@ export default function LogSection() {
   }, [sessionGroups]);
 
   useEffect(() => {
-    if (selectedSessionId === "new") {
-      return;
-    }
     if (sessionOptions.length === 0) {
-      setSelectedSessionId("new");
+      setSelectedExistingSessionId(null);
+      setSessionMode((current) => (current === "existing" ? "new" : current));
       return;
     }
     if (
-      selectedSessionId &&
-      sessionOptions.some((option) => option.id === selectedSessionId)
+      selectedExistingSessionId &&
+      sessionOptions.some((option) => option.id === selectedExistingSessionId)
     ) {
       return;
     }
-    setSelectedSessionId("new");
-  }, [selectedSessionId, sessionOptions]);
-
-  const handleCreateSession = async () => {
-    const created = await createSession();
-    if (!created) {
-      return null;
-    }
-    return created.id;
-  };
+    setSelectedExistingSessionId(sessionOptions[0]?.id ?? null);
+  }, [selectedExistingSessionId, sessionOptions]);
 
   const handleReviewRecentlyLogged = () => {
     if (recentlyLoggedGameIds.length === 0) {
@@ -191,8 +186,8 @@ export default function LogSection() {
         {isHelpExpanded ? (
           <div className="collapsible-help">
             <p className="helper">
-              Either add games to a new session or select a previous session to add
-              games to.
+              Choose Auto Session, New Session, or add games to an existing
+              session.
             </p>
             <p className="helper">
               Upload scoreboard images, then wait for the worker to finish.
@@ -214,9 +209,10 @@ export default function LogSection() {
           pendingJobsCount={pendingJobs.length}
           sessions={sessionOptions}
           isSessionsLoading={isGamesLoading}
-          selectedSessionId={selectedSessionId}
-          onSessionChange={setSelectedSessionId}
-          onCreateSession={handleCreateSession}
+          sessionMode={sessionMode}
+          onSessionModeChange={setSessionMode}
+          selectedExistingSessionId={selectedExistingSessionId}
+          onExistingSessionChange={setSelectedExistingSessionId}
         />
       </div>
 
