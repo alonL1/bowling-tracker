@@ -9,7 +9,7 @@ app.use(express.json({ limit: "1mb" }));
 const PORT = process.env.PORT || 8080;
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "scoreboards-temp";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
-const DEFAULT_MAX_JOBS_PER_RUN = 20;
+const DEFAULT_MAX_JOBS_PER_RUN = 6;
 const DEFAULT_MAX_RUN_DURATION_MS = 240000;
 
 function requireEnv(value, name) {

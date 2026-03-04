@@ -740,6 +740,13 @@ export default function Dashboard({
     }
   };
 
+  const handleGameCardClick = async (gameId: string) => {
+    if (expandedGameIds[gameId]) {
+      return;
+    }
+    await toggleExpand(gameId);
+  };
+
   const activeGameLabel = "all games";
   const displayGames = games;
   const toggleSession = (sessionId: string) => {
@@ -1123,7 +1130,9 @@ export default function Dashboard({
           className={`game-card draggable${isDragging ? " dragging" : ""}${
             isTouchReady ? " touch-ready" : ""
           }`}
-          onClick={() => toggleExpand(game.id)}
+          onClick={() => {
+            void handleGameCardClick(game.id);
+          }}
           onTouchStartCapture={() => scheduleTouchHold(game.id)}
           onTouchMoveCapture={() => {
             if (

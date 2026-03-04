@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { getUserIdFromRequest } from "../utils/auth";
 
 const DEFAULT_BUCKET = "scoreboards-temp";
+const DEFAULT_WORKER_TRIGGER_COUNT = 3;
+const DEFAULT_TARGET_JOBS_PER_TRIGGER = 6;
 
 export const runtime = "nodejs";
 
@@ -465,9 +467,16 @@ export async function POST(request: Request) {
   if (workerUrl && jobs.length > 0) {
     const runUrl = `${workerUrl.replace(/\/$/, "")}/run`;
     const headers = workerToken ? { "X-Worker-Token": workerToken } : undefined;
-    fetch(runUrl, { method: "POST", headers }).catch((error) => {
-      console.warn("Immediate worker trigger failed:", error);
-    });
+    const triggerCount = Math.min(
+      DEFAULT_WORKER_TRIGGER_COUNT,
+      Math.max(1, Math.ceil(jobs.length / DEFAULT_TARGET_JOBS_PER_TRIGGER))
+    );
+
+    for (let index = 0; index < triggerCount; index += 1) {
+      fetch(runUrl, { method: "POST", headers }).catch((error) => {
+        console.warn("Immediate worker trigger failed:", error);
+      });
+    }
   }
 
   return NextResponse.json({

@@ -290,7 +290,6 @@ export default function GameReview({
           </div>
         </div>
       </div>
-      <LaneRule variant="dots" className="lane-rule-inline" />
 
       <div className="score-grid edit-score-grid">
         <div className="score-row score-header">
