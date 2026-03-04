@@ -465,10 +465,8 @@ export async function POST(request: Request) {
   if (workerUrl && jobs.length > 0) {
     const runUrl = `${workerUrl.replace(/\/$/, "")}/run`;
     const headers = workerToken ? { "X-Worker-Token": workerToken } : undefined;
-    jobs.forEach(() => {
-      fetch(runUrl, { method: "POST", headers }).catch((error) => {
-        console.warn("Immediate worker trigger failed:", error);
-      });
+    fetch(runUrl, { method: "POST", headers }).catch((error) => {
+      console.warn("Immediate worker trigger failed:", error);
     });
   }
 

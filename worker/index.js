@@ -9,11 +9,21 @@ app.use(express.json({ limit: "1mb" }));
 const PORT = process.env.PORT || 8080;
 const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "scoreboards-temp";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
+const DEFAULT_MAX_JOBS_PER_RUN = 20;
+const DEFAULT_MAX_RUN_DURATION_MS = 240000;
 
 function requireEnv(value, name) {
   if (!value) {
     throw new Error(`Missing required env var: ${name}`);
   }
+}
+
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
 }
 
 function cleanJson(text) {
@@ -592,6 +602,59 @@ async function processJob() {
   return { status: "logged", jobId: job.id, gameId };
 }
 
+async function processJobBatch() {
+  const maxJobsPerRun = parsePositiveInteger(
+    process.env.MAX_JOBS_PER_RUN,
+    DEFAULT_MAX_JOBS_PER_RUN
+  );
+  const maxRunDurationMs = parsePositiveInteger(
+    process.env.MAX_RUN_DURATION_MS,
+    DEFAULT_MAX_RUN_DURATION_MS
+  );
+  const startedAt = Date.now();
+  const results = [];
+
+  for (let index = 0; index < maxJobsPerRun; index += 1) {
+    if (Date.now() - startedAt >= maxRunDurationMs) {
+      console.log(
+        `Stopping batch after ${results.length} job(s): hit ${maxRunDurationMs}ms budget.`
+      );
+      break;
+    }
+
+    const result = await processJob();
+    if (result.status === "empty") {
+      break;
+    }
+    results.push(result);
+  }
+
+  if (results.length === 0) {
+    return {
+      status: "empty",
+      processedCount: 0,
+      loggedCount: 0,
+      errorCount: 0,
+      results
+    };
+  }
+
+  const loggedCount = results.filter((result) => result.status === "logged").length;
+  const errorCount = results.filter((result) => result.status === "error").length;
+
+  console.log(
+    `Batch complete: processed ${results.length} job(s), logged ${loggedCount}, errors ${errorCount}.`
+  );
+
+  return {
+    status: "processed",
+    processedCount: results.length,
+    loggedCount,
+    errorCount,
+    results
+  };
+}
+
 app.all("/run", async (req, res) => {
   const expectedToken = process.env.WORKER_AUTH_TOKEN;
   if (expectedToken) {
@@ -602,7 +665,7 @@ app.all("/run", async (req, res) => {
   }
 
   try {
-    const result = await processJob();
+    const result = await processJobBatch();
     if (result.status === "empty") {
       return res.status(204).send();
     }
