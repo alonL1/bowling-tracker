@@ -23,7 +23,7 @@ html {
 
 body {
   min-height: 100vh;
-  font-family: var(--font-space), "Space Grotesk", "Segoe UI", sans-serif;
+  font-family: var(--font-roboto), "Roboto", "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--bg-base);
 }

@@ -1,10 +1,11 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import { Space_Grotesk } from "next/font/google";
+import { Roboto } from "next/font/google";
 
-const spaceGrotesk = Space_Grotesk({
+const roboto = Roboto({
   subsets: ["latin"],
-  variable: "--font-space",
+  weight: ["400", "500", "700"],
+  variable: "--font-roboto",
   display: "swap"
 });
 
@@ -19,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={spaceGrotesk.variable}>
+    <html lang="en" className={roboto.variable}>
       <body>
         <div className="page">{children}</div>
       </body>
