@@ -1362,7 +1362,7 @@ export default function Dashboard({
           <p className="helper">
             Upload a scoreboard image, then wait for the worker to finish. <br />
             To add multiple games at once simply select multiple images. <br />
-            If have different names throughout the scoresheets, write them out comma seperated
+            If have different names throughout the scoreboards, write them out comma separated
           </p>
         </div>
         <UploadForm

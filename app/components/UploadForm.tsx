@@ -252,7 +252,7 @@ export default function UploadForm({
   onExistingSessionChange,
   modeSelectorVisible = true,
   existingSessionSelectorVisible = true,
-  nameLabel = "Your name(s) on the scoresheet",
+  nameLabel = "Your name(s) on the scoreboard",
   namePlaceholder = "Alexander, Alex, Xander",
   imageLabel = "Scoreboard image(s)",
   submitHelperText = null,
