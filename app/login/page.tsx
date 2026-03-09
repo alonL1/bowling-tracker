@@ -248,7 +248,7 @@ export default function LoginPage() {
           <p className="eyebrow">Bowling Tracker</p>
           <h1 className="screen-title">Sign in to your bowling account.</h1>
           <p className="screen-subtitle">
-            Keep your games private, track sessions, and chat with your stats.
+            Keep your games private, track sessions, and chat with an AI pin about your stats.
           </p>
         </header>
         <LaneRule variant="arrows" />

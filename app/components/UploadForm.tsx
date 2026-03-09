@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import exifr from "exifr";
-import { authFetch, getAccessToken, supabase } from "../lib/authClient";
+import {
+  authFetch,
+  getAccessToken,
+  getCurrentUser,
+  supabase
+} from "../lib/authClient";
 
 type SubmitState = "idle" | "submitting" | "queued" | "error";
 type SessionMode = "auto" | "new" | "existing";
@@ -32,6 +37,13 @@ type UploadFormProps = {
   onSessionModeChange?: (mode: SessionMode) => void;
   selectedExistingSessionId?: string | null;
   onExistingSessionChange?: (sessionId: string | null) => void;
+  modeSelectorVisible?: boolean;
+  existingSessionSelectorVisible?: boolean;
+  nameLabel?: string;
+  namePlaceholder?: string;
+  imageLabel?: string;
+  submitHelperText?: string | null;
+  className?: string;
 };
 
 type DerivedImage = {
@@ -43,10 +55,14 @@ type DerivedImage = {
 type StorageItemPayload = {
   storageKey: string;
   capturedAtHint: string;
+  fileSizeBytes: number;
   autoGroupIndex?: number;
 };
 
 const AUTO_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
+const MAX_IMAGES_PER_REQUEST = 100;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_TOTAL_BYTES_PER_REQUEST = 500 * 1024 * 1024;
 
 function parseOffsetMinutes(value: unknown) {
   if (value === null || value === undefined) {
@@ -233,7 +249,14 @@ export default function UploadForm({
   sessionMode = "new",
   onSessionModeChange,
   selectedExistingSessionId = null,
-  onExistingSessionChange
+  onExistingSessionChange,
+  modeSelectorVisible = true,
+  existingSessionSelectorVisible = true,
+  nameLabel = "Your name(s) on the scoresheet",
+  namePlaceholder = "Alexander, Alex, Xander",
+  imageLabel = "Scoreboard image(s)",
+  submitHelperText = null,
+  className = ""
 }: UploadFormProps) {
   const [status, setStatus] = useState<SubmitState>("idle");
   const [message, setMessage] = useState<string>("");
@@ -305,6 +328,32 @@ export default function UploadForm({
       return;
     }
 
+    if (images.length > MAX_IMAGES_PER_REQUEST) {
+      const errorMessage = `Please select no more than ${MAX_IMAGES_PER_REQUEST} images at once.`;
+      setStatus("error");
+      setMessage(errorMessage);
+      onError?.(errorMessage);
+      return;
+    }
+
+    const oversizedImage = images.find((image) => image.size > MAX_IMAGE_BYTES);
+    if (oversizedImage) {
+      const errorMessage = `Each image must be 8 MB or smaller. "${oversizedImage.name}" is too large.`;
+      setStatus("error");
+      setMessage(errorMessage);
+      onError?.(errorMessage);
+      return;
+    }
+
+    const totalBytes = images.reduce((sum, image) => sum + image.size, 0);
+    if (totalBytes > MAX_TOTAL_BYTES_PER_REQUEST) {
+      const errorMessage = "This upload is too large. Keep total selected image size at or below 500 MB.";
+      setStatus("error");
+      setMessage(errorMessage);
+      onError?.(errorMessage);
+      return;
+    }
+
     if (sessionMode === "existing" && !selectedExistingSessionId) {
       const errorMessage = "Please choose an existing session.";
       setStatus("error");
@@ -318,6 +367,11 @@ export default function UploadForm({
         throw new Error("Supabase client not configured.");
       }
       await getAccessToken();
+      const currentUser = await getCurrentUser();
+      const currentUserId = currentUser?.id;
+      if (!currentUserId) {
+        throw new Error("Unable to resolve current user session.");
+      }
 
       const normalizedNames = nameList.join(", ");
       const uploadErrors: string[] = [];
@@ -348,7 +402,7 @@ export default function UploadForm({
 
       for (const image of derivedImages) {
         const extension = getExtension(image.file);
-        const storageKey = `${crypto.randomUUID()}.${extension}`;
+        const storageKey = `${currentUserId}/${crypto.randomUUID()}.${extension}`;
         const { error: uploadError } = await supabase.storage
           .from(bucket)
           .upload(storageKey, image.file, {
@@ -362,6 +416,7 @@ export default function UploadForm({
         storageItems.push({
           storageKey,
           capturedAtHint: image.capturedAtHint,
+          fileSizeBytes: image.file.size,
           ...(sessionMode === "auto" && image.autoGroupIndex !== null
             ? { autoGroupIndex: image.autoGroupIndex }
             : {})
@@ -437,93 +492,101 @@ export default function UploadForm({
     }
   };
 
+  const showModeSelector = modeSelectorVisible;
+  const showExistingSelector =
+    existingSessionSelectorVisible && sessionMode === "existing";
+
   return (
-    <form className="form-grid" onSubmit={handleSubmit}>
-      <div className="session-row">
-        <div>
-          <label>Session</label>
-          <div className="session-mode-group" role="group" aria-label="Session mode">
-            <button
-              type="button"
-              className={`button-secondary session-mode-option${
-                sessionMode === "auto" ? " active" : ""
-              }`}
-              aria-pressed={sessionMode === "auto"}
-              onClick={() => onSessionModeChange?.("auto")}
-            >
-              Auto Session
-            </button>
-            <button
-              type="button"
-              className={`button-secondary session-mode-option${
-                sessionMode === "new" ? " active" : ""
-              }`}
-              aria-pressed={sessionMode === "new"}
-              onClick={() => onSessionModeChange?.("new")}
-            >
-              New Session
-            </button>
-            <button
-              type="button"
-              className={`button-secondary session-mode-option${
-                sessionMode === "existing" ? " active" : ""
-              }`}
-              aria-pressed={sessionMode === "existing"}
-              onClick={() => onSessionModeChange?.("existing")}
-              disabled={!canChooseExisting}
-            >
-              Existing Session
-            </button>
-          </div>
-          {!isSessionsLoading && sessions.length === 0 ? (
-            <p className="helper session-mode-helper">No existing sessions yet.</p>
+    <form className={`form-grid ${className}`.trim()} onSubmit={handleSubmit}>
+      {showModeSelector || showExistingSelector ? (
+        <div className="session-row">
+          {showModeSelector ? (
+            <div>
+              <label>Session</label>
+              <div className="session-mode-group" role="group" aria-label="Session mode">
+                <button
+                  type="button"
+                  className={`button-secondary session-mode-option${
+                    sessionMode === "auto" ? " active" : ""
+                  }`}
+                  aria-pressed={sessionMode === "auto"}
+                  onClick={() => onSessionModeChange?.("auto")}
+                >
+                  Auto Session
+                </button>
+                <button
+                  type="button"
+                  className={`button-secondary session-mode-option${
+                    sessionMode === "new" ? " active" : ""
+                  }`}
+                  aria-pressed={sessionMode === "new"}
+                  onClick={() => onSessionModeChange?.("new")}
+                >
+                  New Session
+                </button>
+                <button
+                  type="button"
+                  className={`button-secondary session-mode-option${
+                    sessionMode === "existing" ? " active" : ""
+                  }`}
+                  aria-pressed={sessionMode === "existing"}
+                  onClick={() => onSessionModeChange?.("existing")}
+                  disabled={!canChooseExisting}
+                >
+                  Existing Session
+                </button>
+              </div>
+              {!isSessionsLoading && sessions.length === 0 ? (
+                <p className="helper session-mode-helper">No existing sessions yet.</p>
+              ) : null}
+              {sessionMode === "auto" ? (
+                <p className="helper session-mode-helper">
+                  We&apos;ll group these images into sessions based on photo timestamps.
+                </p>
+              ) : null}
+            </div>
           ) : null}
-          {sessionMode === "auto" ? (
-            <p className="helper session-mode-helper">
-              We&apos;ll group these images into sessions based on photo timestamps.
-            </p>
+          {showExistingSelector ? (
+            <div>
+              <label htmlFor="existingSessionSelect">Choose existing session</label>
+              <select
+                id="existingSessionSelect"
+                value={selectedExistingSessionId ?? ""}
+                onChange={(event) =>
+                  onExistingSessionChange?.(event.target.value || null)
+                }
+              >
+                {isSessionsLoading ? (
+                  <option value="">Loading sessions...</option>
+                ) : sessions.length === 0 ? (
+                  <option value="">No existing sessions</option>
+                ) : (
+                  <>
+                    <option value="">Choose a session</option>
+                    {sessions.map((session) => (
+                      <option key={session.id} value={session.id}>
+                        {session.label}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+            </div>
           ) : null}
         </div>
-        {sessionMode === "existing" ? (
-          <div>
-            <label htmlFor="existingSessionSelect">Choose existing session</label>
-            <select
-              id="existingSessionSelect"
-              value={selectedExistingSessionId ?? ""}
-              onChange={(event) =>
-                onExistingSessionChange?.(event.target.value || null)
-              }
-            >
-              {isSessionsLoading ? (
-                <option value="">Loading sessions...</option>
-              ) : sessions.length === 0 ? (
-                <option value="">No existing sessions</option>
-              ) : (
-                <>
-                  <option value="">Choose a session</option>
-                  {sessions.map((session) => (
-                    <option key={session.id} value={session.id}>
-                      {session.label}
-                    </option>
-                  ))}
-                </>
-              )}
-            </select>
-          </div>
-        ) : null}
-      </div>
+      ) : null}
       <div>
-        <label htmlFor="playerName">Your name(s) on the sheet</label>
+        <label htmlFor="playerName">{nameLabel}</label>
         <input
           id="playerName"
           name="playerName"
           type="text"
-          placeholder="Alexander, Alex, Xander"
+          placeholder={namePlaceholder}
           required
         />
       </div>
       <div>
-        <label htmlFor="image">Scoreboard image(s)</label>
+        <label htmlFor="image">{imageLabel}</label>
         <input
           id="image"
           name="image"
@@ -538,8 +601,8 @@ export default function UploadForm({
           type="submit"
           disabled={
             status === "submitting" ||
-            isSessionsLoading ||
-            (sessionMode === "existing" && !selectedExistingSessionId)
+            (sessionMode === "existing" &&
+              (isSessionsLoading || !selectedExistingSessionId))
           }
         >
           <span className="button-content">
@@ -549,6 +612,9 @@ export default function UploadForm({
             {status === "submitting" ? "Adding..." : "Add to Log"}
           </span>
         </button>
+        {submitHelperText ? (
+          <p className="helper upload-submit-helper">{submitHelperText}</p>
+        ) : null}
       </div>
       {status !== "idle" && message ? (
         <div className={`status ${status === "error" ? "error" : ""}`}>

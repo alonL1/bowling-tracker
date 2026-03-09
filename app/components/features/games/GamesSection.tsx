@@ -30,12 +30,9 @@ export default function GamesSection() {
   }, [router, searchParams]);
 
   return (
-    <section className="screen">
+    <section className="screen sessions-screen">
       <header className="screen-header">
         <h1 className="screen-title">Sessions</h1>
-        <p className="screen-subtitle">
-          Review, edit, and organize your bowling sessions and games.
-        </p>
       </header>
       <LaneRule variant="arrows" />
       <Dashboard
