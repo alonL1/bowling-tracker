@@ -4,7 +4,6 @@ html {
 
 :root {
   --nav-height: clamp(96px, 13.5vh, 118px);
-  --scroll-bottom-gap: clamp(20px, 5vh, 40px);
   --bg-base: #030a12;
   --bg-alt: #1e232c;
   --wood-mid: #083a62;
@@ -41,10 +40,7 @@ a {
 
 .page {
   min-height: 100vh;
-  padding: 0 0
-    calc(
-      var(--nav-height) + env(safe-area-inset-bottom) + var(--scroll-bottom-gap)
-    );
+  padding: 0 0 calc(var(--nav-height) + env(safe-area-inset-bottom));
 }
 
 .container {
@@ -243,7 +239,7 @@ a {
 .record-menu-actions {
   display: grid;
   gap: clamp(14px, 3.8vw, 20px);
-  margin-top: clamp(58px, 12vh, 112px);
+  margin-top: clamp(24px, 6vh, 56px);
   transform: translateY(0);
   transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
