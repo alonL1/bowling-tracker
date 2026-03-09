@@ -54,6 +54,7 @@ type GameDetail = {
     frame_number: number;
     is_strike: boolean;
     is_spare: boolean;
+    frame_score?: number | null;
     shots?: Array<{
       id: string;
       shot_number: number;
@@ -123,47 +124,180 @@ function toSymbol(pins: number | null) {
   return String(pins);
 }
 
-function buildScoreRows(game: GameDetail) {
-  const row1: string[] = [];
-  const row2: string[] = [];
-  const row3: string[] = [];
-  let showRow3 = false;
+function getShotPins(
+  frame: NonNullable<GameDetail["frames"]>[number] | undefined,
+  shotNumber: number
+) {
+  if (!frame?.shots) {
+    return null;
+  }
+  return frame.shots.find((shot) => shot.shot_number === shotNumber)?.pins ?? null;
+}
 
-  for (let frameNumber = 1; frameNumber <= 10; frameNumber += 1) {
-    const frame = game.frames?.find((item) => item.frame_number === frameNumber);
-    const shots = frame?.shots || [];
-    const shot1 = shots.find((shot) => shot.shot_number === 1)?.pins ?? null;
-    const shot2 = shots.find((shot) => shot.shot_number === 2)?.pins ?? null;
-    const shot3 = shots.find((shot) => shot.shot_number === 3)?.pins ?? null;
+function getFrameRolls(
+  frame: NonNullable<GameDetail["frames"]>[number] | undefined,
+  frameNumber: number
+) {
+  const shot1 = getShotPins(frame, 1);
+  const shot2 = getShotPins(frame, 2);
+  const shot3 = getShotPins(frame, 3);
 
-    if (frameNumber < 10) {
-      if (shot1 === 10) {
-        row1.push("X");
-        row2.push("");
-      } else {
-        row1.push(toSymbol(shot1));
-        if (shot1 !== null && shot2 !== null && shot1 + shot2 === 10) {
-          row2.push("/");
-        } else {
-          row2.push(toSymbol(shot2));
-        }
+  if (frameNumber < 10) {
+    if (shot1 === 10) {
+      return [10];
+    }
+    return [shot1, shot2];
+  }
+
+  return [shot1, shot2, shot3];
+}
+
+function collectNextRolls(
+  framesByNumber: Map<number, NonNullable<GameDetail["frames"]>[number]>,
+  fromFrame: number,
+  needed: number
+) {
+  const rolls: number[] = [];
+
+  for (let frameNumber = fromFrame; frameNumber <= 10; frameNumber += 1) {
+    const frame = framesByNumber.get(frameNumber);
+    const frameRolls = getFrameRolls(frame, frameNumber);
+    for (const roll of frameRolls) {
+      if (typeof roll !== "number") {
+        continue;
       }
-      row3.push("");
-    } else {
-      row1.push(shot1 === 10 ? "X" : toSymbol(shot1));
-      if (shot1 !== null && shot1 !== 10 && shot2 !== null && shot1 + shot2 === 10) {
-        row2.push("/");
-      } else {
-        row2.push(shot2 === 10 ? "X" : toSymbol(shot2));
+      rolls.push(roll);
+      if (rolls.length === needed) {
+        return rolls;
       }
-      if (shot3 !== null && shot3 !== undefined) {
-        showRow3 = true;
-      }
-      row3.push(shot3 === 10 ? "X" : toSymbol(shot3));
     }
   }
 
-  return { row1, row2, row3, showRow3 };
+  return null;
+}
+
+function computeRunningTotals(
+  framesByNumber: Map<number, NonNullable<GameDetail["frames"]>[number]>
+) {
+  const frameScores: Array<number | null> = Array(10).fill(null);
+
+  for (let frameNumber = 1; frameNumber <= 10; frameNumber += 1) {
+    const frame = framesByNumber.get(frameNumber);
+    const shot1 = getShotPins(frame, 1);
+    const shot2 = getShotPins(frame, 2);
+    const shot3 = getShotPins(frame, 3);
+
+    if (frameNumber < 10) {
+      if (shot1 === null || shot1 === undefined) {
+        continue;
+      }
+      if (shot1 === 10) {
+        const bonus = collectNextRolls(framesByNumber, frameNumber + 1, 2);
+        if (!bonus) {
+          continue;
+        }
+        frameScores[frameNumber - 1] = 10 + bonus[0] + bonus[1];
+        continue;
+      }
+      if (shot2 === null || shot2 === undefined) {
+        continue;
+      }
+      if (shot1 + shot2 === 10) {
+        const bonus = collectNextRolls(framesByNumber, frameNumber + 1, 1);
+        if (!bonus) {
+          continue;
+        }
+        frameScores[frameNumber - 1] = 10 + bonus[0];
+      } else {
+        frameScores[frameNumber - 1] = shot1 + shot2;
+      }
+      continue;
+    }
+
+    if (shot1 === null || shot1 === undefined || shot2 === null || shot2 === undefined) {
+      continue;
+    }
+    if (shot1 === 10 || shot1 + shot2 === 10) {
+      if (shot3 === null || shot3 === undefined) {
+        continue;
+      }
+      frameScores[frameNumber - 1] = shot1 + shot2 + shot3;
+    } else {
+      frameScores[frameNumber - 1] = shot1 + shot2;
+    }
+  }
+
+  const running: Array<number | null> = Array(10).fill(null);
+  let cumulative = 0;
+  let blocked = false;
+
+  for (let index = 0; index < frameScores.length; index += 1) {
+    if (blocked || frameScores[index] === null) {
+      blocked = true;
+      running[index] = null;
+      continue;
+    }
+    cumulative += frameScores[index] ?? 0;
+    running[index] = cumulative;
+  }
+
+  return running;
+}
+
+function buildFrameGrid(game: GameDetail) {
+  const framesByNumber = new Map<number, NonNullable<GameDetail["frames"]>[number]>();
+  (game.frames ?? []).forEach((frame) => {
+    framesByNumber.set(frame.frame_number, frame);
+  });
+  const fallbackRunning = computeRunningTotals(framesByNumber);
+
+  return Array.from({ length: 10 }, (_, index) => {
+    const frameNumber = index + 1;
+    const frame = framesByNumber.get(frameNumber);
+    const shot1 = getShotPins(frame, 1);
+    const shot2 = getShotPins(frame, 2);
+    const shot3 = getShotPins(frame, 3);
+    let mark = "";
+
+    if (frameNumber < 10) {
+      if (shot1 === 10) {
+        mark = "X";
+      } else {
+        const first = toSymbol(shot1);
+        const second =
+          shot1 !== null && shot2 !== null && shot1 + shot2 === 10
+            ? "/"
+            : toSymbol(shot2);
+        mark = [first, second].filter(Boolean).join(" ");
+      }
+    } else {
+      const first = shot1 === 10 ? "X" : toSymbol(shot1);
+      const second =
+        shot1 !== null && shot1 !== 10 && shot2 !== null && shot1 + shot2 === 10
+          ? "/"
+          : shot2 === 10
+            ? "X"
+            : toSymbol(shot2);
+      const third =
+        shot3 === null || shot3 === undefined
+          ? ""
+          : shot3 === 10
+            ? "X"
+            : toSymbol(shot3);
+      mark = [first, second, third].filter(Boolean).join(" ");
+    }
+
+    const runningValue =
+      typeof frame?.frame_score === "number"
+        ? frame.frame_score
+        : fallbackRunning[frameNumber - 1];
+
+    return {
+      frameNumber,
+      mark,
+      running: typeof runningValue === "number" ? String(runningValue) : ""
+    };
+  });
 }
 
 export default function Dashboard({
@@ -1198,7 +1332,7 @@ export default function Dashboard({
   ) {
     const expanded = !isOverlay && Boolean(expandedGameIds[game.id]);
     const detail = expandedGames[game.id];
-    const rows = detail ? buildScoreRows(detail) : null;
+    const frameGrid = detail ? buildFrameGrid(detail) : null;
     const gameNumber = getGameNumber(game.id);
     const trimmedName = game.game_name?.trim();
     const gameTitle = titleOverride
@@ -1208,19 +1342,37 @@ export default function Dashboard({
         : gameNumber
           ? `Game ${gameNumber}`
           : "Game";
-    const titleWithScore =
-      game.total_score !== null ? `${gameTitle}: ${game.total_score}` : gameTitle;
+    const gameTitleMatch = gameTitle.match(/^Game\s+(\d+)$/i);
+    const gameBadgeLabel = gameTitleMatch
+      ? `Game\n${gameTitleMatch[1]}`
+      : gameTitle;
+    const gameScore = game.total_score ?? "--";
+    const playedAtText = new Date(game.played_at || game.created_at).toLocaleString(
+      "en-US",
+      {
+        month: "numeric",
+        day: "numeric",
+        year: "2-digit",
+        hour: "numeric",
+        minute: "2-digit"
+      }
+    );
+    const metaText = game.player_name
+      ? `${game.player_name} | ${playedAtText}`
+      : playedAtText;
 
     return (
       <>
         <div className="game-row">
-          <div className="game-meta">
-            <p className="game-title">{titleWithScore}</p>
+          <div className="game-summary">
+            <p className={`game-badge${expanded ? " compact" : ""}`}>
+              {expanded ? gameTitle : gameBadgeLabel}
+            </p>
+            <div className="game-meta">
+              <p className="game-score-value">{gameScore}</p>
+            </div>
             {expanded ? (
-              <p className="helper">
-                {game.player_name ? `${game.player_name} - ` : ""}
-                {new Date(game.played_at || game.created_at).toLocaleString()}
-              </p>
+              <p className="helper game-meta-line">{metaText}</p>
             ) : null}
           </div>
           {!isOverlay ? (
@@ -1299,7 +1451,7 @@ export default function Dashboard({
         </div>
         {expanded && !isOverlay ? (
           <div className="game-score" id={`game-score-${game.id}`}>
-            {detail && rows ? (
+            {detail && frameGrid ? (
               editingGameId === game.id ? (
                 <GameReview
                   game={detail}
@@ -1308,37 +1460,19 @@ export default function Dashboard({
                   onCancel={handleCancelEdit}
                 />
               ) : (
-                <div className="score-grid">
-                  <div className="score-row score-header">
-                    {Array.from({ length: 10 }, (_, index) => (
-                      <div key={`h-${game.id}-${index}`} className="score-cell">
-                        {index + 1}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="score-row">
-                    {rows.row1.map((cell, index) => (
-                      <div key={`r1-${game.id}-${index}`} className="score-cell">
-                        {cell}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="score-row">
-                    {rows.row2.map((cell, index) => (
-                      <div key={`r2-${game.id}-${index}`} className="score-cell">
-                        {cell}
-                      </div>
-                    ))}
-                  </div>
-                  {rows.showRow3 ? (
-                    <div className="score-row">
-                      {rows.row3.map((cell, index) => (
-                        <div key={`r3-${game.id}-${index}`} className="score-cell">
-                          {cell}
-                        </div>
-                      ))}
+                <div className="game-frame-grid">
+                  {frameGrid.map((frame) => (
+                    <div
+                      key={`${game.id}-frame-${frame.frameNumber}`}
+                      className={`game-frame-cell${
+                        frame.frameNumber === 10 ? " tenth" : ""
+                      }`}
+                    >
+                      <div className="game-frame-number">{frame.frameNumber}</div>
+                      <div className="game-frame-mark">{frame.mark}</div>
+                      <div className="game-frame-running">{frame.running}</div>
                     </div>
-                  ) : null}
+                  ))}
                 </div>
               )
             ) : (
@@ -1551,6 +1685,11 @@ export default function Dashboard({
                           </div>
                           {!collapsed ? (
                             <div className="session-body">
+                              <p className="session-guidance">
+                                Tap on a game to see more info.
+                                <br />
+                                Hold down on a game to drag it into a different session.
+                              </p>
                               {isEditing ? (
                                 <div className="session-edit">
                                   <div className="session-edit-fields">
@@ -1709,6 +1848,11 @@ export default function Dashboard({
                           </div>
                           {!collapsed ? (
                             <div className="session-body">
+                              <p className="session-guidance">
+                                Tap on a game to see more info.
+                                <br />
+                                Hold down on a game to drag it into a different session.
+                              </p>
                               <div className="games-list">
                                 {sortedGames.map((game) => (
                                   <DraggableGameCard
