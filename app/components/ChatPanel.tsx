@@ -1,7 +1,7 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState } from "react";
-import LaneRule from "./LaneRule";
 import { authFetch } from "../lib/authClient";
 
 type Message = {
@@ -22,23 +22,25 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Ask me about your scores, strikes, or patterns."
+      content: "Ask me about your scores, strikes, or patterns!"
     }
   ]);
   const [chatStatus, setChatStatus] = useState<"idle" | "loading" | "error">(
     "idle"
   );
   const [showExamples, setShowExamples] = useState<boolean>(false);
+  const [hasCompletedResponse, setHasCompletedResponse] = useState<boolean>(false);
 
   useEffect(() => {
     setMessages([
       {
         role: "assistant",
-        content: "Ask me about your scores, strikes, or patterns."
+        content: "Ask me about your scores, strikes, or patterns!"
       }
     ]);
     setQuestion("");
     setChatStatus("idle");
+    setHasCompletedResponse(false);
   }, [gameId]);
 
   const handleAsk = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -98,6 +100,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
           }
         ]);
         setChatStatus("idle");
+        setHasCompletedResponse(true);
         return;
       }
       if (payload.answer) {
@@ -116,6 +119,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
         ]);
       }
       setChatStatus("idle");
+      setHasCompletedResponse(true);
     } catch (error) {
       setChatStatus("error");
       setMessages((prev) => [
@@ -127,6 +131,7 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
           variant: "error"
         }
       ]);
+      setHasCompletedResponse(true);
     }
   };
 
@@ -230,105 +235,120 @@ export default function ChatPanel({ gameId, gameLabel }: ChatPanelProps) {
     return nodes;
   };
 
+  const pinImageSrc =
+    chatStatus === "loading"
+      ? "/pins/thinking_pin.png"
+      : hasCompletedResponse
+        ? "/pins/idea_pin.png"
+        : "/pins/happy_pin.png";
+
+  const pinImageAlt =
+    chatStatus === "loading"
+      ? "Thinking pin"
+      : hasCompletedResponse
+        ? "Idea pin"
+        : "Happy pin";
+
   return (
     <div className="chat-section">
-      <div className="section-stack">
-        <div className="collapsible-header">
+      <div className="chat-card">
+        <div className="chat-messages">
+          {messages.map((message, index) => {
+            const next = messages[index + 1];
+            const isLast =
+              message.role === "assistant" &&
+              (!next || next.role === "user");
+            return (
+              <div
+                key={`${message.role}-${index}`}
+                className={`message ${message.role} ${message.variant || ""} ${isLast ? "group-end" : ""}`}
+              >
+                {message.meta ? (
+                  <div className="message-meta">{message.meta}</div>
+                ) : null}
+                <div>{renderInlineBold(message.content)}</div>
+                {message.note ? (
+                  <div className="offline-note">
+                    {renderInlineBold(message.note)}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+        <form className="chat-form" onSubmit={handleAsk}>
+          <textarea
+            className="chat-input"
+            placeholder="Type your question or comment here"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            rows={2}
+          />
           <button
-            type="button"
-            className="button-secondary collapsible-toggle"
-            aria-expanded={showExamples}
-            onClick={() => setShowExamples((prev) => !prev)}
+            type="submit"
+            className="chat-submit-button"
+            disabled={chatStatus === "loading" || !question.trim()}
           >
-            <span>{showExamples ? "Hide examples" : "View examples"}</span>
-            <span className="expand-toggle" aria-hidden="true">
-              <svg viewBox="0 0 24 24" width="16" height="16">
-                <path
-                  d="M9 6l6 6-6 6"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+            <span className="chat-submit-text">Ask the Pin</span>
+            <span className="chat-submit-pin">
+              <span className="chat-pin-anchor">
+                <Image
+                  src={pinImageSrc}
+                  alt={pinImageAlt}
+                  width={58}
+                  height={92}
+                  className="chat-pin-image"
+                  priority={false}
                 />
-              </svg>
+              </span>
+              {chatStatus === "loading" ? (
+                <span className="chat-spinner-anchor">
+                  <span className="spinner chat-pin-spinner" aria-hidden="true" />
+                </span>
+              ) : null}
             </span>
           </button>
+        </form>
+      </div>
+
+      <button
+        type="button"
+        className="chat-examples-toggle"
+        aria-expanded={showExamples}
+        onClick={() => setShowExamples((prev) => !prev)}
+      >
+        {showExamples ? "Hide Examples" : "View Examples"}
+      </button>
+
+      {showExamples ? (
+        <div className="examples">
+          <ul>
+            <li>What is my <b>average score</b> across <b>games 1 to 3</b>?</li>
+            <li>How often do I <b>strike</b> on <b>frame 9</b>?</li>
+            <li>List games with my <b>highest score</b> between <b>Jan 7th</b> and <b>March 3rd</b>?</li>
+            <li>What is my <b>average</b> on games played <b>after 7pm</b>?</li>
+            <li>How often do I <b>strike</b> or <b>spare</b>?</li>
+            <li>List all of the games where I <b>scored above 130</b>?</li>
+            <li>What <b>percent</b> of the time do I bowl a <b>7</b> in a frame?</li>
+            <li>Of the times that I bowl a <b>7</b> how often do I <b>convert the spare</b>?</li>
+            <li>How much <b>better</b> have I gotten <b>since day 1?</b></li>
+            <li>On average, what are my <b>top 3</b> best <b>frames</b>?</li>
+            <li>On which <b>frames</b> do I <b>strike most often</b>?</li>
+            <li>How often do I <b>wombat</b>?</li>
+            <li>Whats my <b>average</b> since the <b>new pope</b> was elected?</li>
+            <li>Am I <b>better after 5pm</b> or <b>before</b>?</li>
+            <li>Give me <b>coaching tips</b> based on my <b>last 5 games</b>.</li>
+            <li>What should I focus on to <b>improve my spare conversion</b>?</li>
+            <li>Try anything you want! Feel free to get <b>creative</b> with it!</li>
+          </ul>
         </div>
-        {showExamples ? (
-          <div className="examples">
-            <p className="helper">Examples:</p>
-            <ul>
-              <li>What is my <b>average score</b> across <b>games 1 to 3</b>?</li>
-              <li>How often do I <b>strike</b> on <b>frame 9</b>?</li>
-              <li>List games with my <b>highest score</b> between <b>Jan 7th</b> and <b>March 3rd</b>?</li>
-              <li>What is my <b>average</b> on games played <b>after 7pm</b>?</li>
-              {/* <li>How close am I to <b>Pete Weber</b>?</li> */}
-              <li>How often do I <b>strike</b> or <b>spare</b>?</li>
-              <li>List all of the games where I <b>scored above 130</b>?</li>
-              <li>What <b>percent</b> of the time do I bowl a <b>7</b> in a frame?</li>
-              <li>Of the times that I bowl a <b>7</b> how often do I <b>convert the spare</b>?</li>
-              <li>How much <b>better</b> have I gotten <b>since day 1?</b></li>
-              <li>On average, what are my <b>top 3</b> best <b>frames</b>?</li>
-              <li>On which <b>frames</b> do I <b>strike most often</b>?</li>
-              <li>How often do I <b>wombat</b>?</li>
-              <li>Whats my <b>average</b> since the <b>new pope</b> was elected?</li>
-              <li>Am I <b>better after 5pm</b> or <b>before</b>?</li>
-              <li>Give me <b>coaching tips</b> based on my <b>last 5 games</b>.</li>
-              <li>What should I focus on to <b>improve my spare conversion</b>?</li>
-              <li>Try anything you want! Feel free to get <b>creative</b> with it!</li>
-            </ul>
-          </div>
-        ) : null}
-      </div>
-      <LaneRule variant="dots" className="lane-rule-inline" />
-      <div className="chat-messages">
-        {messages.map((message, index) => {
-          const next = messages[index + 1];
-          const isLast =
-            message.role === "assistant" &&
-            (!next || next.role === "user");
-          return (
-            <div
-              key={`${message.role}-${index}`}
-              className={`message ${message.role} ${message.variant || ""} ${isLast ? "group-end" : ""}`}
-            >
-              {message.meta ? (
-                <div className="message-meta">{message.meta}</div>
-              ) : null}
-              <div>{renderInlineBold(message.content)}</div>
-              {message.note ? (
-                <div className="offline-note">
-                  {renderInlineBold(message.note)}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      <form className="chat-form" onSubmit={handleAsk}>
-        <textarea
-          className="chat-input"
-          placeholder="Ask me anything about your games... Try asking: What's my strike rate on frame 9?"
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          rows={3}
-        />
-        <button type="submit" disabled={chatStatus === "loading"}>
-          <span className="button-content">
-            {chatStatus === "loading" ? (
-              <span className="spinner" aria-hidden="true" />
-            ) : null}
-            {chatStatus === "loading" ? "Thinking..." : "Ask Bowling AI"}
-          </span>
-        </button>
-      </form>
+      ) : null}
     </div>
   );
 }

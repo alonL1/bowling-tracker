@@ -24,7 +24,7 @@ shots in Postgres.
 
 ## API
 
-- `POST /api/submit`: accepts `playerName` and `storageKeys` (JSON) for direct-to-Storage uploads.
+- `POST /api/submit`: accepts `playerName`, `sessionMode`, and `storageItems` (JSON) for direct-to-Storage uploads.
 - `GET /api/status?jobId=...`: returns the job status from `analysis_jobs`.
 - `GET /api/game?jobId=...`: fetches game details with frames + shots.
 - `GET /api/games?limit=...`: lists recent games.
@@ -57,10 +57,12 @@ gcloud run deploy bowling-tracker-worker \
   --source ./worker \
   --region us-central1 \
   --allow-unauthenticated \
+  --max-instances=3 \
   --set-env-vars "SUPABASE_URL=...,SUPABASE_SERVICE_ROLE_KEY=...,SUPABASE_STORAGE_BUCKET=scoreboards-temp,GEMINI_API_KEY=...,GEMINI_MODEL=gemini-flash-latest,WORKER_AUTH_TOKEN=..."
 ```
 
-If you set `WORKER_AUTH_TOKEN`, your scheduler must send it as `X-Worker-Token`.
+`WORKER_AUTH_TOKEN` is required by the worker. Your scheduler must send it as
+`X-Worker-Token`.
 
 ### 3) Schedule it
 
@@ -77,6 +79,46 @@ gcloud scheduler jobs create http bowling-tracker-worker \
 
 If you prefer auth via OIDC, remove `--allow-unauthenticated` and configure an
 OIDC token for the scheduler instead of `X-Worker-Token`.
+
+### 4) Cost and abuse guardrails
+
+- Enforced in `POST /api/submit`:
+  - Max `100` images per request
+  - Max `8 MB` per image
+  - Max `500 MB` total bytes per request
+  - Max `500` images per rolling 24h per user
+  - Max `1 GB` uploaded bytes per rolling 24h per user
+  - Per-user and per-IP rate limits for submit requests
+  - Ownership checks on storage keys (`<userId>/...` prefix + storage owner validation)
+- Worker bounded by:
+  - `MAX_JOBS_PER_RUN` (default `6`)
+  - `MAX_RUN_DURATION_MS` (default `240000`)
+  - Cloud Run `--max-instances=3` (from deploy command above)
+
+Create billing budget alerts in GCP so spend cannot silently grow:
+
+```bash
+gcloud billing budgets create \
+  --billing-account=YOUR_BILLING_ACCOUNT_ID \
+  --display-name="bowling-tracker-budget" \
+  --budget-amount=25USD \
+  --threshold-rule=percent=0.5 \
+  --threshold-rule=percent=0.9 \
+  --threshold-rule=percent=1.0
+```
+
+Recommended Supabase Storage insert policy for path ownership:
+
+```sql
+create policy "users upload into own folder"
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'scoreboards-temp'
+  and split_part(name, '/', 1) = auth.uid()::text
+);
+```
 
 ## Database
 

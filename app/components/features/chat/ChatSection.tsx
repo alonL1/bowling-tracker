@@ -12,9 +12,7 @@ export default function ChatSection() {
         </p>
       </header>
       <LaneRule variant="arrows" />
-      <div className="section-block">
-        <ChatPanel gameLabel="all games" />
-      </div>
+      <ChatPanel gameLabel="all games" />
     </section>
   );
 }

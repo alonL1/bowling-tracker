@@ -46,6 +46,7 @@ create table if not exists analysis_jobs (
   user_id uuid,
   player_name text not null,
   storage_key text not null,
+  file_size_bytes bigint,
   timezone_offset_minutes integer,
   captured_at_hint timestamptz,
   status text not null default 'queued',
@@ -54,6 +55,22 @@ create table if not exists analysis_jobs (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create table if not exists submit_request_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  ip_hash text,
+  image_count integer not null default 0,
+  total_bytes bigint not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_submit_request_logs_user_created_at
+  on submit_request_logs(user_id, created_at desc);
+
+create index if not exists idx_submit_request_logs_ip_created_at
+  on submit_request_logs(ip_hash, created_at desc)
+  where ip_hash is not null;
 
 create table if not exists chat_questions (
   id uuid primary key default gen_random_uuid(),

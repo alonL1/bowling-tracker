@@ -18,6 +18,8 @@ function requireEnv(value, name) {
   }
 }
 
+requireEnv(process.env.WORKER_AUTH_TOKEN, "WORKER_AUTH_TOKEN");
+
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -656,12 +658,9 @@ async function processJobBatch() {
 }
 
 app.all("/run", async (req, res) => {
-  const expectedToken = process.env.WORKER_AUTH_TOKEN;
-  if (expectedToken) {
-    const token = req.header("x-worker-token");
-    if (!token || token !== expectedToken) {
-      return res.status(401).json({ error: "Unauthorized." });
-    }
+  const token = req.header("x-worker-token");
+  if (!token || token !== process.env.WORKER_AUTH_TOKEN) {
+    return res.status(401).json({ error: "Unauthorized." });
   }
 
   try {

@@ -13,6 +13,7 @@ import {
   type DragEndEvent,
   type DragStartEvent
 } from "@dnd-kit/core";
+import { Icon } from "@iconify/react";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import LaneRule from "./LaneRule";
@@ -1235,29 +1236,12 @@ export default function Dashboard({
                   aria-label={`Edit ${gameTitle}`}
                   title={`Edit ${gameTitle}`}
                 >
-                  <svg
+                  <Icon
+                    icon="mdi:pencil"
+                    width="18"
+                    height="18"
                     aria-hidden="true"
-                    viewBox="0 0 24 24"
-                    width="16"
-                    height="16"
-                  >
-                    <path
-                      d="M4 20h4l11-11-4-4L4 16v4z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M13 7l4 4"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  />
                 </button>
               ) : null}
               <button
@@ -1274,21 +1258,12 @@ export default function Dashboard({
                 {deletingGameId === game.id ? (
                   <span className="spinner" aria-hidden="true" />
                 ) : (
-                  <svg
+                  <Icon
+                    icon="mdi:trash-can-outline"
+                    width="18"
+                    height="18"
                     aria-hidden="true"
-                    viewBox="0 0 24 24"
-                    width="16"
-                    height="16"
-                  >
-                    <path
-                      d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  />
                 )}
               </button>
               <button
@@ -1465,22 +1440,24 @@ export default function Dashboard({
                 const firstDateTimeSource =
                   group.session?.started_at ||
                   (firstGame ? firstGame.played_at || firstGame.created_at : null);
-                const firstDateTime = firstDateTimeSource
-                  ? new Date(firstDateTimeSource).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric"
-                    })
+                const firstDate = firstDateTimeSource
+                  ? new Date(firstDateTimeSource)
                   : null;
+                const firstDateMonth = firstDate
+                  ? firstDate.toLocaleDateString("en-US", { month: "short" })
+                  : "--";
+                const firstDateDay = firstDate
+                  ? firstDate.toLocaleDateString("en-US", { day: "numeric" })
+                  : "--";
                 const sessionLabel =
                   group.session?.name?.trim() ||
                   `Session ${sessionGroups.sessionNumberById.get(sessionId) ?? ""}`.trim();
-                const sessionTitle = firstDateTime
-                  ? `${firstDateTime} - ${sessionLabel || "Session"}`
-                  : sessionLabel || "Session";
+                const sessionTitle = sessionLabel || "Session";
                 const isEditing = editingSessionId === sessionId;
                 const isDeletePrompt = deleteSessionId === sessionId;
                 const isSaving = savingSessionId === sessionId;
                 const isDeleting = deletingSessionId === sessionId;
+                const gameLabel = group.games.length === 1 ? "game" : "games";
                 return (
                   <div key={sessionId} className="session-stack-entry">
                     <DroppableContainer
@@ -1507,14 +1484,14 @@ export default function Dashboard({
                             }}
                           >
                             <div className="session-header-top">
+                              <div className="session-date-badge" aria-hidden="true">
+                                <span className="session-date-month">{firstDateMonth}</span>
+                                <span className="session-date-day">{firstDateDay}</span>
+                              </div>
                               <div className="session-header-text">
                                 <h3>{sessionTitle}</h3>
-                                <p className="helper session-meta">
-                                  <span>
-                                    {group.games.length}{" "}
-                                    {group.games.length === 1 ? "game" : "games"}
-                                  </span>
-                                  <span>Avg {formatAverage(scores)}</span>
+                                <p className="session-stats">
+                                  {group.games.length} {gameLabel} | Avg {formatAverage(scores)}
                                 </p>
                               </div>
                               <div className="session-actions-inline">
@@ -1535,29 +1512,12 @@ export default function Dashboard({
                                       title={`Edit ${sessionLabel || "Session"}`}
                                       disabled={isSaving || isDeleting}
                                     >
-                                      <svg
+                                      <Icon
+                                        icon="mdi:pencil"
+                                        width="18"
+                                        height="18"
                                         aria-hidden="true"
-                                        viewBox="0 0 24 24"
-                                        width="16"
-                                        height="16"
-                                      >
-                                        <path
-                                          d="M4 20h4l11-11-4-4L4 16v4z"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeWidth="1.6"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                        />
-                                        <path
-                                          d="M13 7l4 4"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeWidth="1.6"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                        />
-                                      </svg>
+                                      />
                                     </button>
                                     <button
                                       type="button"
@@ -1573,52 +1533,16 @@ export default function Dashboard({
                                       {isDeleting ? (
                                         <span className="spinner" aria-hidden="true" />
                                       ) : (
-                                        <svg
+                                        <Icon
+                                          icon="mdi:trash-can-outline"
+                                          width="18"
+                                          height="18"
                                           aria-hidden="true"
-                                          viewBox="0 0 24 24"
-                                          width="16"
-                                          height="16"
-                                        >
-                                          <path
-                                            d="M6 7h12l-1 13a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 7zm3-4h6l1 2h4v2H4V5h4l1-2zm2 7v8m4-8v8"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="1.6"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                          />
-                                        </svg>
+                                        />
                                       )}
                                     </button>
                                   </>
                                 ) : null}
-                                <button
-                                  type="button"
-                                  className="expand-toggle"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    toggleSession(sessionId);
-                                  }}
-                                  aria-expanded={!collapsed}
-                                  aria-label={`${collapsed ? "Expand" : "Collapse"} ${sessionLabel || "Session"}`}
-                                  title={`${collapsed ? "Expand" : "Collapse"} ${sessionLabel || "Session"}`}
-                                >
-                                  <svg
-                                    aria-hidden="true"
-                                    viewBox="0 0 24 24"
-                                    width="16"
-                                    height="16"
-                                  >
-                                    <path
-                                      d="M9 6l6 6-6 6"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="1.6"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                  </svg>
-                                </button>
                               </div>
                             </div>
                             {group.session?.description ? (
@@ -1731,17 +1655,18 @@ export default function Dashboard({
                   .map((game) => game.total_score)
                   .filter((score): score is number => typeof score === "number");
                 const firstGame = sortedGames[0];
-                const firstDateTime = firstGame
-                  ? new Date(
-                      firstGame.played_at || firstGame.created_at
-                    ).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric"
-                    })
+                const firstDate = firstGame
+                  ? new Date(firstGame.played_at || firstGame.created_at)
                   : null;
-                const sessionTitle = firstDateTime
-                  ? `${firstDateTime} - Sessionless games`
-                  : "Sessionless games";
+                const firstDateMonth = firstDate
+                  ? firstDate.toLocaleDateString("en-US", { month: "short" })
+                  : "--";
+                const firstDateDay = firstDate
+                  ? firstDate.toLocaleDateString("en-US", { day: "numeric" })
+                  : "--";
+                const sessionTitle = "Sessionless games";
+                const gameLabel =
+                  sessionGroups.sessionless.length === 1 ? "game" : "games";
                 return (
                   <DroppableContainer id={`session:${sessionId}`}>
                     {({ setNodeRef, isOver }) => (
@@ -1766,45 +1691,17 @@ export default function Dashboard({
                             }}
                           >
                             <div className="session-header-top">
+                              <div className="session-date-badge" aria-hidden="true">
+                                <span className="session-date-month">{firstDateMonth}</span>
+                                <span className="session-date-day">{firstDateDay}</span>
+                              </div>
                               <div className="session-header-text">
                                 <h3>{sessionTitle}</h3>
-                                <p className="helper session-meta">
-                                  <span>
-                                    {sessionGroups.sessionless.length}{" "}
-                                    {sessionGroups.sessionless.length === 1
-                                      ? "game"
-                                      : "games"}
-                                  </span>
-                                  <span>Avg {formatAverage(scores)}</span>
+                                <p className="session-stats">
+                                  {sessionGroups.sessionless.length} {gameLabel} | Avg{" "}
+                                  {formatAverage(scores)}
                                 </p>
                               </div>
-                              <button
-                                type="button"
-                                className="expand-toggle"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  toggleSession(sessionId);
-                                }}
-                                aria-expanded={!collapsed}
-                                aria-label={`${collapsed ? "Expand" : "Collapse"} Sessionless games`}
-                                title={`${collapsed ? "Expand" : "Collapse"} Sessionless games`}
-                              >
-                                <svg
-                                  aria-hidden="true"
-                                  viewBox="0 0 24 24"
-                                  width="16"
-                                  height="16"
-                                >
-                                  <path
-                                    d="M9 6l6 6-6 6"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="1.6"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                              </button>
                             </div>
                             <p className="helper">
                               These games were not given a session.

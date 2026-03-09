@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@iconify/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "./providers/AuthProvider";
@@ -72,92 +73,55 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             href="/sessions"
             label="Sessions"
             icon={
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path
-                  d="M6 4h9l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M8 11h8M8 15h8"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <Icon
+                icon="material-symbols:menu-book-rounded"
+                width="40"
+                height="40"
+                aria-hidden="true"
+              />
             }
           />
           <NavItem
             href="/chat"
             label="Chat"
             icon={
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path
-                  d="M5 6h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 3v-3H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M8 11h8M8 14h5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <Icon
+                icon="mingcute:chat-3-ai-fill"
+                width="40"
+                height="40"
+                aria-hidden="true"
+              />
             }
           />
           <NavItem
             href="/log"
             label="Record"
             icon={
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path
-                  d="M12 4v10m0-10 4 4m-4-4-4 4M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <Icon
+                icon="ic:baseline-add-circle"
+                width="40"
+                height="40"
+                aria-hidden="true"
+              />
             }
           />
           <NavItem
             href="/friends"
             label="Friends"
             icon={
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path
-                  d="M8.5 11a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm7 0a2.5 2.5 0 1 0-2.5-2.5A2.5 2.5 0 0 0 15.5 11zM3.5 19a5 5 0 0 1 10 0m-1 0a4 4 0 0 1 8 0"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <Icon
+                icon="fa-solid:user-friends"
+                width="40"
+                height="40"
+                aria-hidden="true"
+              />
             }
           />
           <NavItem
             href="/account"
             label="Account"
             icon={
-              <svg viewBox="0 0 24 24" width="20" height="20">
-                <path
-                  d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4zm-7 8a7 7 0 0 1 14 0"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <Icon icon="mdi:account" width="40" height="40" aria-hidden="true" />
             }
           />
         </div>
