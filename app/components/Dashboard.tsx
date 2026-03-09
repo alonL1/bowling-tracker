@@ -1371,9 +1371,6 @@ export default function Dashboard({
             <div className="game-meta">
               <p className="game-score-value">{gameScore}</p>
             </div>
-            {expanded ? (
-              <p className="helper game-meta-line">{metaText}</p>
-            ) : null}
           </div>
           {!isOverlay ? (
             <div className="game-actions-inline">
@@ -1448,6 +1445,7 @@ export default function Dashboard({
               </button>
             </div>
           ) : null}
+          {expanded ? <p className="helper game-meta-line">{metaText}</p> : null}
         </div>
         {expanded && !isOverlay ? (
           <div className="game-score" id={`game-score-${game.id}`}>
@@ -1606,7 +1604,7 @@ export default function Dashboard({
                         >
                           <div
                             ref={registerSessionHeaderRef(sessionId)}
-                            className="session-header"
+                            className={`session-header${collapsed ? "" : " is-expanded"}`}
                             role="button"
                             tabIndex={0}
                             onClick={() => toggleSession(sessionId)}
@@ -1618,19 +1616,38 @@ export default function Dashboard({
                             }}
                           >
                             <div className="session-header-top">
-                              <div className="session-date-badge" aria-hidden="true">
-                                <span className="session-date-month">{firstDateMonth}</span>
-                                <span className="session-date-day">{firstDateDay}</span>
-                              </div>
-                              <div className="session-header-text">
-                                <h3>{sessionTitle}</h3>
-                                <p className="session-stats">
-                                  {group.games.length} {gameLabel} | Avg {formatAverage(scores)}
-                                </p>
-                              </div>
-                              <div className="session-actions-inline">
-                                {!collapsed ? (
-                                  <>
+                              {collapsed ? (
+                                <>
+                                  <div className="session-date-badge" aria-hidden="true">
+                                    <span className="session-date-month">{firstDateMonth}</span>
+                                    <span className="session-date-day">{firstDateDay}</span>
+                                  </div>
+                                  <div className="session-header-text">
+                                    <h3>{sessionTitle}</h3>
+                                    <p className="session-stats">
+                                      {group.games.length} {gameLabel} | Avg{" "}
+                                      {formatAverage(scores)}
+                                    </p>
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="session-header-left">
+                                    <div className="session-title-row">
+                                      <div className="session-date-badge compact" aria-hidden="true">
+                                        <span className="session-date-month">{firstDateMonth}</span>
+                                        <span className="session-date-day">{firstDateDay}</span>
+                                      </div>
+                                      <div className="session-header-text">
+                                        <h3>{sessionTitle}</h3>
+                                      </div>
+                                    </div>
+                                    <p className="session-stats">
+                                      {group.games.length} {gameLabel} | Avg{" "}
+                                      {formatAverage(scores)}
+                                    </p>
+                                  </div>
+                                  <div className="session-actions-inline">
                                     <button
                                       type="button"
                                       className="edit-toggle"
@@ -1675,9 +1692,9 @@ export default function Dashboard({
                                         />
                                       )}
                                     </button>
-                                  </>
-                                ) : null}
-                              </div>
+                                  </div>
+                                </>
+                              )}
                             </div>
                             {group.session?.description ? (
                               <p className="helper">{group.session.description}</p>
@@ -1818,7 +1835,7 @@ export default function Dashboard({
                         >
                           <div
                             ref={registerSessionHeaderRef(sessionId)}
-                            className="session-header"
+                            className={`session-header${collapsed ? "" : " is-expanded"}`}
                             role="button"
                             tabIndex={0}
                             onClick={() => toggleSession(sessionId)}
@@ -1830,17 +1847,37 @@ export default function Dashboard({
                             }}
                           >
                             <div className="session-header-top">
-                              <div className="session-date-badge" aria-hidden="true">
-                                <span className="session-date-month">{firstDateMonth}</span>
-                                <span className="session-date-day">{firstDateDay}</span>
-                              </div>
-                              <div className="session-header-text">
-                                <h3>{sessionTitle}</h3>
-                                <p className="session-stats">
-                                  {sessionGroups.sessionless.length} {gameLabel} | Avg{" "}
-                                  {formatAverage(scores)}
-                                </p>
-                              </div>
+                              {collapsed ? (
+                                <>
+                                  <div className="session-date-badge" aria-hidden="true">
+                                    <span className="session-date-month">{firstDateMonth}</span>
+                                    <span className="session-date-day">{firstDateDay}</span>
+                                  </div>
+                                  <div className="session-header-text">
+                                    <h3>{sessionTitle}</h3>
+                                    <p className="session-stats">
+                                      {sessionGroups.sessionless.length} {gameLabel} | Avg{" "}
+                                      {formatAverage(scores)}
+                                    </p>
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="session-header-left">
+                                  <div className="session-title-row">
+                                    <div className="session-date-badge compact" aria-hidden="true">
+                                      <span className="session-date-month">{firstDateMonth}</span>
+                                      <span className="session-date-day">{firstDateDay}</span>
+                                    </div>
+                                    <div className="session-header-text">
+                                      <h3>{sessionTitle}</h3>
+                                    </div>
+                                  </div>
+                                  <p className="session-stats">
+                                    {sessionGroups.sessionless.length} {gameLabel} | Avg{" "}
+                                    {formatAverage(scores)}
+                                  </p>
+                                </div>
+                              )}
                             </div>
                             <p className="helper">
                               These games were not given a session.
@@ -1896,6 +1933,4 @@ export default function Dashboard({
     </div>
   );
 }
-
-
 

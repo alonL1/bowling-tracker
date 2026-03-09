@@ -915,8 +915,10 @@ button:disabled {
 }
 
 .session-header {
+  --session-badge-size: clamp(50px, 13.68vw, 62px);
+  --session-header-gap: clamp(14px, 5.2vw, 24px);
   display: grid;
-  gap: 0;
+  gap: clamp(4px, 1.1vw, 6px);
   cursor: pointer;
 }
 
@@ -924,7 +926,27 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: clamp(14px, 5.2vw, 24px);
+  gap: var(--session-header-gap);
+}
+
+.session-header.is-expanded .session-header-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: clamp(12px, 3.2vw, 16px);
+}
+
+.session-header-left {
+  display: grid;
+  gap: clamp(2px, 0.8vw, 4px);
+  min-width: 0;
+}
+
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--session-header-gap);
+  min-width: 0;
 }
 
 .session-header-text {
@@ -942,10 +964,10 @@ button:disabled {
 }
 
 .session-date-badge {
-  min-width: clamp(50px, 13.68vw, 62px);
-  width: clamp(50px, 13.68vw, 62px);
-  min-height: clamp(50px, 13.68vw, 62px);
-  height: clamp(50px, 13.68vw, 62px);
+  min-width: var(--session-badge-size);
+  width: var(--session-badge-size);
+  min-height: var(--session-badge-size);
+  height: var(--session-badge-size);
   border-radius: clamp(8px, 2.48vw, 12px);
   background: #083a62;
   display: flex;
@@ -954,6 +976,17 @@ button:disabled {
   justify-content: center;
   gap: 0;
   padding: clamp(2px, 0.7vw, 4px) 0;
+}
+
+.session-header.is-expanded .session-date-badge {
+  width: fit-content;
+  min-width: 0;
+  height: auto;
+  min-height: clamp(30px, 7.2vw, 36px);
+  padding: clamp(4px, 1.2vw, 6px) clamp(10px, 2.8vw, 14px);
+  border-radius: clamp(10px, 2.8vw, 14px);
+  flex-direction: row;
+  gap: clamp(6px, 1.8vw, 10px);
 }
 
 .session-date-month {
@@ -968,10 +1001,16 @@ button:disabled {
   font-weight: 400;
 }
 
+.session-header.is-expanded .session-date-month,
+.session-header.is-expanded .session-date-day {
+  line-height: 1;
+}
+
 .session-actions-inline {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-top: 2px;
 }
 
 .session-meta {
@@ -981,6 +1020,7 @@ button:disabled {
 }
 
 .session-stats {
+  margin: 0;
   color: var(--muted);
   font-size: clamp(14px, 3.98vw, 18px);
   line-height: clamp(18px, 5.97vw, 24px);
@@ -1096,10 +1136,11 @@ button:disabled {
 }
 
 .game-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 8px;
+  align-items: start;
   padding-left: clamp(6px, 1.8vw, 10px);
 }
 
@@ -1159,8 +1200,7 @@ button:disabled {
 
 .game-meta-line {
   grid-column: 1 / -1;
-  margin-top: 8px;
-  margin-left: clamp(2px, 0.8vw, 4px);
+  margin: 0;
   font-size: clamp(14px, 3.98vw, 16px);
   line-height: 1.2;
 }
@@ -1190,7 +1230,6 @@ button:disabled {
   display: flex;
   gap: 10px;
   align-items: flex-start;
-  margin-left: auto;
   flex-shrink: 0;
   padding-top: 2px;
 }
