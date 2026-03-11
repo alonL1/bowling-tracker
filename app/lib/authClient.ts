@@ -46,12 +46,16 @@ async function ensureClientSession(): Promise<SessionSnapshot> {
   if (!supabase) {
     throw new Error("Supabase client not configured.");
   }
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (sessionData.session?.user && sessionData.session.access_token) {
-    return {
-      user: sessionData.session.user,
-      accessToken: sessionData.session.access_token
-    };
+
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (!userError && userData.user) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData.session?.access_token) {
+      return {
+        user: userData.user,
+        accessToken: sessionData.session.access_token
+      };
+    }
   }
 
   const { data: anonymousData, error: anonymousError } =
@@ -73,7 +77,20 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
   const { accessToken } = await ensureClientSession();
   const headers = new Headers(init?.headers || {});
   headers.set("Authorization", `Bearer ${accessToken}`);
-  return fetch(input, { ...init, headers });
+
+  const response = await fetch(input, { ...init, headers });
+  if (response.status !== 401 || !supabase) {
+    return response;
+  }
+
+  const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError || !refreshed.session?.access_token) {
+    return response;
+  }
+
+  const retryHeaders = new Headers(init?.headers || {});
+  retryHeaders.set("Authorization", `Bearer ${refreshed.session.access_token}`);
+  return fetch(input, { ...init, headers: retryHeaders });
 }
 
 export async function getAccessToken() {
@@ -121,7 +138,7 @@ export async function signOutClient() {
   if (!supabase) {
     throw new Error("Supabase client not configured.");
   }
-  const { error } = await supabase.auth.signOut();
+  const { error } = await supabase.auth.signOut({ scope: "local" });
   if (error) {
     throw error;
   }
@@ -131,8 +148,8 @@ export async function signOutToGuest() {
   if (!supabase) {
     throw new Error("Supabase client not configured.");
   }
-  const { error: signOutError } = await supabase.auth.signOut();
-  if (signOutError) {
+  const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+  if (signOutError && signOutError.status !== 403) {
     throw signOutError;
   }
   const { data: guestData, error: guestError } =

@@ -330,8 +330,15 @@ export default function FriendsSection() {
 
       {invitePanelOpen && inviteLink ? (
         <section className="section-block friends-invite-panel">
-          <h2>Your invite link</h2>
-          <p className="helper">{inviteLink}</p>
+          <button
+            type="button"
+            className="friends-invite-close"
+            onClick={() => setInvitePanelOpen(false)}
+            aria-label="Close invite panel"
+          >
+            <Icon icon="mdi:close" width="20" height="20" aria-hidden="true" />
+          </button>
+          <h2>Send your friends a link</h2>
           <div className="friends-invite-actions">
             <button type="button" onClick={handleCopyInvite}>
               Copy link

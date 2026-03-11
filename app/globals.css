@@ -422,17 +422,43 @@ a {
 }
 
 .friends-invite-panel {
+  position: relative;
+  width: 100%;
+  min-width: 0;
   gap: 12px;
+  overflow: hidden;
+  padding-top: 14px;
 }
 
 .friends-invite-panel h2 {
   margin: 0;
+  font-size: clamp(18px, 4.8vw, 24px);
+  line-height: 1.2;
+  font-weight: 500;
 }
 
 .friends-invite-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  width: 100%;
+}
+
+.friends-invite-actions button {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.friends-invite-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
 }
 
 .friends-tabs {
