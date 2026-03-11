@@ -11,6 +11,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent
 } from "@dnd-kit/core";
 import { Icon } from "@iconify/react";
@@ -83,6 +84,9 @@ type GameListItem = {
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 40;
+const DRAG_SCROLL_EDGE_PX = 160;
+const DRAG_SCROLL_MIN_PX_PER_FRAME = 8;
+const DRAG_SCROLL_MAX_PX_PER_FRAME = 24;
 
 type DashboardProps = {
   showSubmit?: boolean;
@@ -359,6 +363,8 @@ export default function Dashboard({
   );
   const touchHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchHoldCandidateRef = useRef<string | null>(null);
+  const dragAutoScrollVelocityRef = useRef<number>(0);
+  const dragAutoScrollRafRef = useRef<number | null>(null);
   const isDebug = process.env.CHAT_DEBUG === "true";
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -390,6 +396,42 @@ export default function Dashboard({
       touchHoldCandidateRef.current = null;
       setTouchHoldGameId((current) => (gameId ? (current === gameId ? null : current) : null));
     }
+  }, []);
+
+  const stopDragAutoScroll = useCallback(() => {
+    dragAutoScrollVelocityRef.current = 0;
+    if (dragAutoScrollRafRef.current !== null) {
+      window.cancelAnimationFrame(dragAutoScrollRafRef.current);
+      dragAutoScrollRafRef.current = null;
+    }
+  }, []);
+
+  const startDragAutoScrollLoop = useCallback(() => {
+    if (dragAutoScrollRafRef.current !== null) {
+      return;
+    }
+    const tick = () => {
+      const velocity = dragAutoScrollVelocityRef.current;
+      if (velocity === 0) {
+        dragAutoScrollRafRef.current = null;
+        return;
+      }
+      const scroller = document.scrollingElement;
+      if (!scroller) {
+        dragAutoScrollRafRef.current = null;
+        return;
+      }
+      const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      const currentTop = scroller.scrollTop;
+      if ((velocity > 0 && currentTop >= maxTop) || (velocity < 0 && currentTop <= 0)) {
+        dragAutoScrollVelocityRef.current = 0;
+        dragAutoScrollRafRef.current = null;
+        return;
+      }
+      window.scrollBy(0, velocity);
+      dragAutoScrollRafRef.current = window.requestAnimationFrame(tick);
+    };
+    dragAutoScrollRafRef.current = window.requestAnimationFrame(tick);
   }, []);
 
   const parseJsonResponse = useCallback(async <T,>(response: Response) => {
@@ -585,8 +627,9 @@ export default function Dashboard({
       });
       dismissTimersRef.current = {};
       clearTouchHold();
+      stopDragAutoScroll();
     };
-  }, [clearTouchHold]);
+  }, [clearTouchHold, stopDragAutoScroll]);
 
   useEffect(() => {
     const hasActiveJobs = pendingJobs.some(
@@ -1297,13 +1340,65 @@ export default function Dashboard({
 
   const handleDragStart = (event: DragStartEvent) => {
     clearTouchHold();
+    stopDragAutoScroll();
     if (event.active?.data?.current?.type === "game") {
       setActiveDragGameId(String(event.active.id));
     }
   };
 
+  const handleDragMove = (event: DragMoveEvent) => {
+    if (event.active?.data?.current?.type !== "game") {
+      stopDragAutoScroll();
+      return;
+    }
+    const translatedRect = event.active.rect.current.translated;
+    if (!translatedRect) {
+      stopDragAutoScroll();
+      return;
+    }
+
+    const viewportHeight = window.innerHeight;
+    const distanceToTop = translatedRect.top;
+    const distanceToBottom = viewportHeight - translatedRect.bottom;
+    let velocity = 0;
+
+    if (distanceToBottom < DRAG_SCROLL_EDGE_PX) {
+      const edgeProgress = Math.min(
+        1,
+        Math.max(0, (DRAG_SCROLL_EDGE_PX - distanceToBottom) / DRAG_SCROLL_EDGE_PX)
+      );
+      velocity =
+        DRAG_SCROLL_MIN_PX_PER_FRAME +
+        edgeProgress * (DRAG_SCROLL_MAX_PX_PER_FRAME - DRAG_SCROLL_MIN_PX_PER_FRAME);
+    } else if (distanceToTop < DRAG_SCROLL_EDGE_PX) {
+      const edgeProgress = Math.min(
+        1,
+        Math.max(0, (DRAG_SCROLL_EDGE_PX - distanceToTop) / DRAG_SCROLL_EDGE_PX)
+      );
+      velocity =
+        -(
+          DRAG_SCROLL_MIN_PX_PER_FRAME +
+          edgeProgress * (DRAG_SCROLL_MAX_PX_PER_FRAME - DRAG_SCROLL_MIN_PX_PER_FRAME)
+        );
+    }
+
+    dragAutoScrollVelocityRef.current = velocity;
+    if (velocity === 0) {
+      stopDragAutoScroll();
+      return;
+    }
+    startDragAutoScrollLoop();
+  };
+
+  const handleDragCancel = () => {
+    clearTouchHold();
+    setActiveDragGameId(null);
+    stopDragAutoScroll();
+  };
+
   const handleDragEnd = async (event: DragEndEvent) => {
     clearTouchHold();
+    stopDragAutoScroll();
     const { active, over } = event;
     setActiveDragGameId(null);
     if (!over) {
@@ -1556,8 +1651,11 @@ export default function Dashboard({
         ) : (
           <DndContext
             sensors={sensors}
+            autoScroll={false}
             modifiers={[restrictToVerticalAxis]}
             onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
+            onDragCancel={handleDragCancel}
             onDragEnd={handleDragEnd}
           >
             <div className="session-stack">
@@ -1933,4 +2031,3 @@ export default function Dashboard({
     </div>
   );
 }
-

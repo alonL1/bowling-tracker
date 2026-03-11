@@ -244,19 +244,12 @@ a {
 
 .record-menu-screen {
   gap: clamp(20px, 5vw, 28px);
+  margin-top: clamp(-34px, -5vh, -20px);
 }
 
 .record-menu-actions {
   display: grid;
   gap: clamp(14px, 3.8vw, 20px);
-  margin-top: clamp(24px, 6vh, 56px);
-  transform: translateY(0);
-  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
-}
-
-.record-menu-actions.expanded {
-  transform: translateY(clamp(-52px, -8vh, -28px));
 }
 
 .record-option-card {
@@ -272,61 +265,22 @@ a {
 
 .record-option-card h2 {
   margin: 0;
-  font-size: clamp(24px, 5.97vw, 28px);
+  font-size: clamp(22px, 5.3vw, 25px);
   line-height: 1;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .record-option-card p {
   margin: 0;
   color: var(--muted);
-  font-size: clamp(16px, 3.98vw, 20px);
-  line-height: 1.2;
+  font-size: clamp(15px, 3.7vw, 17px);
+  line-height: 1.25;
 }
 
 .record-option-card-compact {
-  min-height: 74px;
-  align-content: center;
-}
-
-.record-more-toggle {
-  width: 100%;
-  min-height: 57px;
-  justify-content: flex-start;
-  text-align: left;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  background: var(--panel);
-  color: var(--muted);
-  font-size: clamp(24px, 5.97vw, 28px);
-  font-weight: 600;
-  line-height: 1;
-  padding: clamp(14px, 3.8vw, 18px) clamp(18px, 5vw, 26px);
-}
-
-.record-extra-options {
-  display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  transform: translateY(-8px);
-  transition: grid-template-rows 0.32s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.2s ease,
-    transform 0.28s ease;
-  pointer-events: none;
-}
-
-.record-extra-options.expanded {
-  grid-template-rows: 1fr;
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-.record-extra-options-inner {
-  min-height: 0;
-  overflow: hidden;
-  display: grid;
-  gap: clamp(14px, 3.8vw, 20px);
+  min-height: 94px;
+  align-content: start;
+  gap: clamp(8px, 2.6vw, 12px);
 }
 
 .record-upload-screen {

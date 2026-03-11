@@ -3,7 +3,7 @@ import RecordUploadSection from "../../../components/features/log/RecordUploadSe
 export default function AddExistingSessionPage() {
   return (
     <RecordUploadSection
-      title="Add Games to an Existing Session"
+      title="Add to Existing Session"
       mode="existing"
       submitHelperText="All of these games will be added to the selected session."
     />

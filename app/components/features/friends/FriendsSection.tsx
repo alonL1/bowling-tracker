@@ -119,7 +119,7 @@ function formatMetricValue(metric: LeaderboardMetric, value: number) {
 
 export default function FriendsSection() {
   const router = useRouter();
-  const { isGuest, loading: authLoading } = useAuth();
+  const { user, isGuest, loading: authLoading } = useAuth();
 
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState("");
@@ -135,7 +135,7 @@ export default function FriendsSection() {
   const [leaderboardError, setLeaderboardError] = useState("");
 
   const loadLeaderboard = useCallback(async () => {
-    if (isGuest) {
+    if (!user || isGuest) {
       setLeaderboardRows([]);
       setSelfUserId("");
       setLeaderboardError("Sign in to compare stats with friends.");
@@ -164,7 +164,7 @@ export default function FriendsSection() {
     } finally {
       setLeaderboardLoading(false);
     }
-  }, [isGuest]);
+  }, [isGuest, user]);
 
   useEffect(() => {
     if (authLoading) {
