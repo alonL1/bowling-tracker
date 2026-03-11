@@ -84,9 +84,9 @@ type GameListItem = {
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLLS = 40;
-const DRAG_SCROLL_EDGE_PX = 160;
-const DRAG_SCROLL_MIN_PX_PER_FRAME = 8;
-const DRAG_SCROLL_MAX_PX_PER_FRAME = 24;
+const DRAG_SCROLL_EDGE_PX = 220;
+const DRAG_SCROLL_MIN_PX_PER_SECOND = 1400;
+const DRAG_SCROLL_MAX_PX_PER_SECOND = 5200;
 
 type DashboardProps = {
   showSubmit?: boolean;
@@ -365,6 +365,7 @@ export default function Dashboard({
   const touchHoldCandidateRef = useRef<string | null>(null);
   const dragAutoScrollVelocityRef = useRef<number>(0);
   const dragAutoScrollRafRef = useRef<number | null>(null);
+  const dragAutoScrollLastTimestampRef = useRef<number | null>(null);
   const isDebug = process.env.CHAT_DEBUG === "true";
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -400,6 +401,7 @@ export default function Dashboard({
 
   const stopDragAutoScroll = useCallback(() => {
     dragAutoScrollVelocityRef.current = 0;
+    dragAutoScrollLastTimestampRef.current = null;
     if (dragAutoScrollRafRef.current !== null) {
       window.cancelAnimationFrame(dragAutoScrollRafRef.current);
       dragAutoScrollRafRef.current = null;
@@ -410,25 +412,37 @@ export default function Dashboard({
     if (dragAutoScrollRafRef.current !== null) {
       return;
     }
-    const tick = () => {
+    const tick = (timestamp: number) => {
       const velocity = dragAutoScrollVelocityRef.current;
       if (velocity === 0) {
+        dragAutoScrollLastTimestampRef.current = null;
         dragAutoScrollRafRef.current = null;
         return;
       }
       const scroller = document.scrollingElement;
       if (!scroller) {
+        dragAutoScrollLastTimestampRef.current = null;
         dragAutoScrollRafRef.current = null;
         return;
       }
+      const previousTimestamp =
+        dragAutoScrollLastTimestampRef.current ?? timestamp;
+      const deltaSeconds = Math.min(
+        0.2,
+        Math.max(0.001, (timestamp - previousTimestamp) / 1000)
+      );
+      dragAutoScrollLastTimestampRef.current = timestamp;
       const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
       const currentTop = scroller.scrollTop;
       if ((velocity > 0 && currentTop >= maxTop) || (velocity < 0 && currentTop <= 0)) {
         dragAutoScrollVelocityRef.current = 0;
+        dragAutoScrollLastTimestampRef.current = null;
         dragAutoScrollRafRef.current = null;
         return;
       }
-      window.scrollBy(0, velocity);
+      const step = velocity * deltaSeconds;
+      const nextTop = Math.min(maxTop, Math.max(0, currentTop + step));
+      scroller.scrollTop = nextTop;
       dragAutoScrollRafRef.current = window.requestAnimationFrame(tick);
     };
     dragAutoScrollRafRef.current = window.requestAnimationFrame(tick);
@@ -1351,15 +1365,37 @@ export default function Dashboard({
       stopDragAutoScroll();
       return;
     }
-    const translatedRect = event.active.rect.current.translated;
-    if (!translatedRect) {
+
+    const getClientYFromEvent = (activatorEvent: Event): number | null => {
+      if ("touches" in activatorEvent) {
+        const touchEvent = activatorEvent as TouchEvent;
+        const touch = touchEvent.touches[0] ?? touchEvent.changedTouches[0];
+        return touch?.clientY ?? null;
+      }
+      if ("clientY" in activatorEvent) {
+        return (activatorEvent as MouseEvent).clientY;
+      }
+      return null;
+    };
+
+    const pointerY =
+      getClientYFromEvent(event.activatorEvent) ??
+      (() => {
+        const translatedRect = event.active.rect.current.translated;
+        if (!translatedRect) {
+          return null;
+        }
+        return (translatedRect.top + translatedRect.bottom) / 2;
+      })();
+
+    if (pointerY === null) {
       stopDragAutoScroll();
       return;
     }
 
     const viewportHeight = window.innerHeight;
-    const distanceToTop = translatedRect.top;
-    const distanceToBottom = viewportHeight - translatedRect.bottom;
+    const distanceToTop = pointerY;
+    const distanceToBottom = viewportHeight - pointerY;
     let velocity = 0;
 
     if (distanceToBottom < DRAG_SCROLL_EDGE_PX) {
@@ -1368,8 +1404,8 @@ export default function Dashboard({
         Math.max(0, (DRAG_SCROLL_EDGE_PX - distanceToBottom) / DRAG_SCROLL_EDGE_PX)
       );
       velocity =
-        DRAG_SCROLL_MIN_PX_PER_FRAME +
-        edgeProgress * (DRAG_SCROLL_MAX_PX_PER_FRAME - DRAG_SCROLL_MIN_PX_PER_FRAME);
+        DRAG_SCROLL_MIN_PX_PER_SECOND +
+        edgeProgress * (DRAG_SCROLL_MAX_PX_PER_SECOND - DRAG_SCROLL_MIN_PX_PER_SECOND);
     } else if (distanceToTop < DRAG_SCROLL_EDGE_PX) {
       const edgeProgress = Math.min(
         1,
@@ -1377,8 +1413,8 @@ export default function Dashboard({
       );
       velocity =
         -(
-          DRAG_SCROLL_MIN_PX_PER_FRAME +
-          edgeProgress * (DRAG_SCROLL_MAX_PX_PER_FRAME - DRAG_SCROLL_MIN_PX_PER_FRAME)
+          DRAG_SCROLL_MIN_PX_PER_SECOND +
+          edgeProgress * (DRAG_SCROLL_MAX_PX_PER_SECOND - DRAG_SCROLL_MIN_PX_PER_SECOND)
         );
     }
 
