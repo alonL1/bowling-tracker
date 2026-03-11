@@ -1,0 +1,102 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import { getUserFromRequest } from "../../../utils/auth";
+
+export const runtime = "nodejs";
+
+function getEmailPrefix(email?: string | null) {
+  if (!email) {
+    return "Bowler";
+  }
+  const [prefix] = email.split("@");
+  const trimmed = prefix?.trim();
+  return trimmed || "Bowler";
+}
+
+export async function GET(
+  request: Request,
+  { params }: { params: { token: string } }
+) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return NextResponse.json(
+      { error: "Missing Supabase configuration." },
+      { status: 500 }
+    );
+  }
+
+  const token = typeof params.token === "string" ? params.token.trim() : "";
+  if (!token) {
+    return NextResponse.json(
+      { valid: false, error: "Invite token is required." },
+      { status: 400 }
+    );
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { persistSession: false }
+  });
+
+  const { data: link, error: linkError } = await supabase
+    .from("friend_invite_links")
+    .select("inviter_user_id")
+    .eq("token", token)
+    .maybeSingle();
+
+  if (linkError) {
+    return NextResponse.json(
+      { valid: false, error: linkError.message || "Failed to load invite." },
+      { status: 500 }
+    );
+  }
+
+  if (!link?.inviter_user_id) {
+    return NextResponse.json(
+      { valid: false, error: "Invite link is invalid." },
+      { status: 404 }
+    );
+  }
+
+  const inviterUserId = link.inviter_user_id as string;
+  const { data: inviterUserData } = await supabase.auth.admin.getUserById(
+    inviterUserId
+  );
+  const inviterDisplayName = getEmailPrefix(inviterUserData.user?.email);
+
+  const viewer = await getUserFromRequest(request);
+  const authRequired = !viewer.userId || viewer.isGuest;
+  const selfInvite = Boolean(viewer.userId && viewer.userId === inviterUserId);
+
+  let alreadyFriends = false;
+  if (!authRequired && viewer.userId && !selfInvite) {
+    const { count, error: friendshipError } = await supabase
+      .from("friendships")
+      .select("id", { head: true, count: "exact" })
+      .eq("user_id", viewer.userId)
+      .eq("friend_user_id", inviterUserId);
+    if (friendshipError) {
+      return NextResponse.json(
+        {
+          valid: false,
+          error: friendshipError.message || "Failed to check friendship."
+        },
+        { status: 500 }
+      );
+    }
+    alreadyFriends = (count ?? 0) > 0;
+  }
+
+  return NextResponse.json({
+    valid: true,
+    inviter: {
+      userId: inviterUserId,
+      displayName: inviterDisplayName
+    },
+    authRequired,
+    selfInvite,
+    alreadyFriends,
+    canAccept: !authRequired && !selfInvite && !alreadyFriends
+  });
+}

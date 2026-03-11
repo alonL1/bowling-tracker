@@ -21,6 +21,21 @@ type TransferPrompt = {
   guestUserId: string;
 };
 
+function getSafeNextPath() {
+  if (typeof window === "undefined") {
+    return "/";
+  }
+  const raw = new URLSearchParams(window.location.search).get("next") ?? "";
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) {
+    return "/";
+  }
+  if (trimmed.startsWith("/login")) {
+    return "/";
+  }
+  return trimmed || "/";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
@@ -82,7 +97,7 @@ export default function LoginPage() {
       return;
     }
     if (user && !isGuestUser(user)) {
-      router.replace("/");
+      router.replace(getSafeNextPath());
     }
   }, [authLoading, authBusy, transferBusy, transferPrompt, user, router]);
 
@@ -146,7 +161,7 @@ export default function LoginPage() {
           }
 
           if (!hasGuestData) {
-            router.replace("/");
+            router.replace(getSafeNextPath());
             return;
           }
 
@@ -159,7 +174,7 @@ export default function LoginPage() {
           );
           return;
         }
-        router.replace("/");
+        router.replace(getSafeNextPath());
         return;
       }
 
@@ -185,7 +200,7 @@ export default function LoginPage() {
     }
     setTransferPrompt(null);
     setTransferError("");
-    router.replace("/");
+    router.replace(getSafeNextPath());
   };
 
   const handleSaveLogs = async () => {
@@ -207,7 +222,7 @@ export default function LoginPage() {
         throw new Error(payload.error || "Failed to move guest logs.");
       }
       setTransferPrompt(null);
-      router.replace("/");
+      router.replace(getSafeNextPath());
     } catch (error) {
       setTransferError(
         error instanceof Error ? error.message : "Failed to move guest logs."

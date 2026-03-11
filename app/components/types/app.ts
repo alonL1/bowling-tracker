@@ -66,3 +66,56 @@ export type QueuedJob = {
   jobId: string;
   message: string;
 };
+
+export type LeaderboardMetric =
+  | "bestGame"
+  | "bestAverage"
+  | "bestSession"
+  | "mostGames"
+  | "mostSessions"
+  | "SessionScore"
+  | "TotalPoints"
+  | "SessionLength"
+  | "StrikeRate"
+  | "SpareRate"
+  | "TotalStrikes"
+  | "TotalSpares"
+  | "MostNines";
+
+export type LeaderboardRow = {
+  userId: string;
+  displayName: string;
+  metrics: {
+    bestGame: number;
+    bestAverage: number;
+    bestSession: number;
+    mostGames: number;
+    mostSessions: number;
+    SessionScore: number;
+    TotalPoints: number;
+    SessionLength: number;
+    StrikeRate: number;
+    SpareRate: number;
+    TotalStrikes: number;
+    TotalSpares: number;
+    MostNines: number;
+  };
+};
+
+export type InviteLinkResponse = {
+  token: string;
+  inviteUrl: string;
+};
+
+export type InviteLookupResponse = {
+  valid: boolean;
+  error?: string;
+  inviter?: {
+    userId: string;
+    displayName: string;
+  };
+  authRequired?: boolean;
+  selfInvite?: boolean;
+  alreadyFriends?: boolean;
+  canAccept?: boolean;
+};

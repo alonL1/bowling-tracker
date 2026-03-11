@@ -401,6 +401,129 @@ a {
   margin-top: 4px;
 }
 
+.friends-screen {
+  gap: clamp(14px, 4vw, 22px);
+}
+
+.friends-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.friends-invite-button {
+  flex-shrink: 0;
+  min-height: 46px;
+  border-radius: 10px;
+  background: var(--wood-mid);
+  color: var(--ink);
+  padding: 10px 16px;
+}
+
+.friends-invite-panel {
+  gap: 12px;
+}
+
+.friends-invite-panel h2 {
+  margin: 0;
+}
+
+.friends-invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.friends-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.friends-tab {
+  white-space: nowrap;
+  min-height: 40px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.friends-tab.active {
+  background: var(--wood-mid);
+  color: var(--ink);
+}
+
+.friends-metric-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.friends-metric-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(16px, 4.4vw, 20px);
+  line-height: 1.35;
+}
+
+.friends-rank-value {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(28px, 8.5vw, 44px);
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.friends-leaderboard {
+  padding-top: 8px;
+}
+
+.friends-list {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.friends-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-base) 18%, transparent);
+}
+
+.friends-row-rank {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.friends-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.friends-row-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .collapsible-header {
   display: flex;
   justify-content: flex-start;
