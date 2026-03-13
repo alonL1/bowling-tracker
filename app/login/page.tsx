@@ -236,10 +236,10 @@ export default function LoginPage() {
 
   if (authLoading) {
     return (
-      <main className="container">
-        <div className="loading-row">
-          <span className="spinner spinner-muted" aria-hidden="true" />
-          <span className="helper">Loading account...</span>
+      <main className="container loading-shell">
+        <div className="loading-row loading-row-prominent">
+          <span className="spinner spinner-muted spinner-large" aria-hidden="true" />
+          <span className="helper helper-large">Loading account...</span>
         </div>
       </main>
     );
@@ -247,10 +247,10 @@ export default function LoginPage() {
 
   if (user && !isGuest && !transferPrompt) {
     return (
-      <main className="container">
-        <div className="loading-row">
-          <span className="spinner spinner-muted" aria-hidden="true" />
-          <span className="helper">Redirecting to sessions...</span>
+      <main className="container loading-shell">
+        <div className="loading-row loading-row-prominent">
+          <span className="spinner spinner-muted spinner-large" aria-hidden="true" />
+          <span className="helper helper-large">Redirecting to sessions...</span>
         </div>
       </main>
     );

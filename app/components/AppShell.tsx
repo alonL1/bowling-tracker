@@ -41,14 +41,17 @@ function NavItem({
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname() ?? "";
   const { user, loading, error } = useAuth();
+  const isChatPage = pathname === "/chat";
+  const mainClassName = isChatPage ? "container container-chat" : "container";
 
   if (loading) {
     return (
-      <main className="container">
-        <div className="loading-row">
-          <span className="spinner spinner-muted" aria-hidden="true" />
-          <span className="helper">Loading account...</span>
+      <main className="container loading-shell">
+        <div className="loading-row loading-row-prominent">
+          <span className="spinner spinner-muted spinner-large" aria-hidden="true" />
+          <span className="helper helper-large">Loading account...</span>
         </div>
       </main>
     );
@@ -56,17 +59,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   if (!user) {
     return (
-      <main className="container">
-        <div className="loading-row">
-          <span className="spinner spinner-muted" aria-hidden="true" />
-          <span className="helper">Starting guest session...</span>
+      <main className="container loading-shell">
+        <div className="loading-row loading-row-prominent">
+          <span className="spinner spinner-muted spinner-large" aria-hidden="true" />
+          <span className="helper helper-large">Starting guest session...</span>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="container">
+    <main className={mainClassName}>
       <nav className="top-nav">
         <div className="nav-links">
           <NavItem
@@ -75,8 +78,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             icon={
               <Icon
                 icon="material-symbols:menu-book-rounded"
-                width="40"
-                height="40"
+                width="36"
+                height="36"
                 aria-hidden="true"
               />
             }
@@ -87,8 +90,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             icon={
               <Icon
                 icon="mingcute:chat-3-ai-fill"
-                width="40"
-                height="40"
+                width="36"
+                height="36"
                 aria-hidden="true"
               />
             }
@@ -99,8 +102,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             icon={
               <Icon
                 icon="ic:baseline-add-circle"
-                width="40"
-                height="40"
+                width="36"
+                height="36"
                 aria-hidden="true"
               />
             }
@@ -111,8 +114,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             icon={
               <Icon
                 icon="fa-solid:user-friends"
-                width="40"
-                height="40"
+                width="36"
+                height="36"
                 aria-hidden="true"
               />
             }
@@ -121,7 +124,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             href="/account"
             label="Account"
             icon={
-              <Icon icon="mdi:account" width="40" height="40" aria-hidden="true" />
+              <Icon icon="mdi:account" width="36" height="36" aria-hidden="true" />
             }
           />
         </div>
