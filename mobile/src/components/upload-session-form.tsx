@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
+import { File as ExpoFile } from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -51,6 +52,20 @@ type PendingJob = {
   gameId?: string;
 };
 
+type RecentLoggedGame = {
+  id: string;
+  label: string;
+};
+
+async function getUploadBody(asset: ImagePicker.ImagePickerAsset) {
+  if (asset.file) {
+    return asset.file;
+  }
+
+  const file = new ExpoFile(asset.uri);
+  return file.arrayBuffer();
+}
+
 export default function UploadSessionForm({
   title,
   playerLabel,
@@ -67,7 +82,7 @@ export default function UploadSessionForm({
   const [selectedAssets, setSelectedAssets] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [pendingJobs, setPendingJobs] = useState<PendingJob[]>([]);
-  const [recentGameIds, setRecentGameIds] = useState<string[]>([]);
+  const [recentLoggedGames, setRecentLoggedGames] = useState<RecentLoggedGame[]>([]);
   const [statusMessage, setStatusMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -116,7 +131,7 @@ export default function UploadSessionForm({
       }
 
       setPendingJobs([]);
-      setRecentGameIds([]);
+      setRecentLoggedGames([]);
       setStatusMessage('');
 
       const autoGroupMap = sessionMode === 'auto' ? buildAutoGroupMap(selectedAssets) : new Map();
@@ -131,9 +146,15 @@ export default function UploadSessionForm({
         const asset = selectedAssets[index];
         const filename = sanitizeFilename(asset.fileName ?? undefined, index);
         const storageKey = `${user.id}/${Date.now()}-${index}-${filename}`;
-        const response = await fetch(asset.uri);
-        const blob = await response.blob();
-        const upload = await supabase.storage.from(DEFAULT_BUCKET).upload(storageKey, blob, {
+
+        let uploadBody: ArrayBuffer | File;
+        try {
+          uploadBody = await getUploadBody(asset);
+        } catch {
+          continue;
+        }
+
+        const upload = await supabase.storage.from(DEFAULT_BUCKET).upload(storageKey, uploadBody, {
           contentType: asset.mimeType ?? 'image/jpeg',
           upsert: false,
         });
@@ -221,7 +242,27 @@ export default function UploadSessionForm({
       ]);
 
       const reviewIds = Array.from(completedGameIds);
-      setRecentGameIds(reviewIds);
+      const refreshedGames = await queryClient.fetchQuery({
+        queryKey: queryKeys.games,
+        queryFn: fetchGames,
+      });
+      const refreshedGrouping = buildSessionGroups(refreshedGames.games);
+      const sessionTitleByGameId = new Map<string, string>();
+
+      refreshedGrouping.groups.forEach((sessionGroup) => {
+        sessionGroup.games.forEach((game) => {
+          sessionTitleByGameId.set(game.id, sessionGroup.title);
+        });
+      });
+
+      setRecentLoggedGames(
+        reviewIds.map((gameId) => ({
+          id: gameId,
+          label: `${sessionTitleByGameId.get(gameId) || 'Session'}, ${
+            refreshedGrouping.gameTitleMap.get(gameId) || 'Game'
+          }`,
+        })),
+      );
       setStatusMessage(
         reviewIds.length > 0
           ? 'Processing finished. Review the logged games below.'
@@ -358,21 +399,21 @@ export default function UploadSessionForm({
         </SurfaceCard>
       ) : null}
 
-      {recentGameIds.length > 0 ? (
+      {recentLoggedGames.length > 0 ? (
         <SurfaceCard style={styles.jobsCard}>
           <Text style={styles.jobsTitle}>Review logged games</Text>
           <View style={styles.jobsList}>
-            {recentGameIds.map((gameId) => (
+            {recentLoggedGames.map((game) => (
               <Pressable
-                key={gameId}
+                key={game.id}
                 onPress={() => {
                   router.push({
                     pathname: '/games/[gameId]',
-                    params: { gameId },
+                    params: { gameId: game.id },
                   });
                 }}
                 style={({ pressed }) => [styles.reviewButton, pressed && styles.pressed]}>
-                <Text style={styles.reviewButtonText}>{gameId.slice(0, 8)}...</Text>
+                <Text style={styles.reviewButtonText}>{game.label}</Text>
               </Pressable>
             ))}
           </View>

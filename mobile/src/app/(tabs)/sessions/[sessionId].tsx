@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
+import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import CenteredState from '@/components/centered-state';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
@@ -73,6 +74,9 @@ export default function SessionDetailScreen() {
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [moveGameId, setMoveGameId] = useState<string | null>(null);
+  const [moveDeletingSession, setMoveDeletingSession] = useState(false);
+  const [pendingMoveTargetId, setPendingMoveTargetId] = useState<string | null>(null);
+  const [pendingDeleteMoveTargetId, setPendingDeleteMoveTargetId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -106,6 +110,9 @@ export default function SessionDetailScreen() {
   });
 
   const moveMutation = useMutation({
+    onMutate: (targetSessionId: string) => {
+      setPendingMoveTargetId(targetSessionId);
+    },
     mutationFn: async (targetSessionId: string) => {
       if (!moveGameId) {
         throw new Error('Game was not selected.');
@@ -126,6 +133,43 @@ export default function SessionDetailScreen() {
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to move game.');
+    },
+    onSettled: () => {
+      setPendingMoveTargetId(null);
+    },
+  });
+
+  const moveSessionMutation = useMutation({
+    onMutate: (targetSessionId: string) => {
+      setPendingDeleteMoveTargetId(targetSessionId);
+    },
+    mutationFn: async (targetSessionId: string) => {
+      if (!group?.sessionId || group.isSessionless) {
+        throw new Error('Session was not found.');
+      }
+
+      const nextSessionId =
+        targetSessionId === NEW_SESSION_TARGET
+          ? (await createSession('', '')).session.id
+          : targetSessionId;
+
+      await Promise.all(group.games.map((game) => moveGameToSession(game.id, nextSessionId)));
+      return deleteSession(group.sessionId, 'delete_games');
+    },
+    onSuccess: async () => {
+      setMoveDeletingSession(false);
+      setError('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+      ]);
+      router.back();
+    },
+    onError: (nextError) => {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to move games out of session.');
+    },
+    onSettled: () => {
+      setPendingDeleteMoveTargetId(null);
     },
   });
 
@@ -155,19 +199,8 @@ export default function SessionDetailScreen() {
     Alert.alert('Delete Session', 'Choose how to handle the games in this session.', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Move to sessionless',
-        onPress: async () => {
-          try {
-            await deleteSession(group.sessionId as string, 'sessionless');
-            await Promise.all([
-              queryClient.invalidateQueries({ queryKey: queryKeys.games }),
-              queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-            ]);
-            router.back();
-          } catch (nextError) {
-            setError(nextError instanceof Error ? nextError.message : 'Failed to delete session.');
-          }
-        },
+        text: 'Move to different session',
+        onPress: () => setMoveDeletingSession(true),
       },
       {
         text: 'Delete games too',
@@ -295,6 +328,53 @@ export default function SessionDetailScreen() {
       <Modal
         transparent
         animationType="fade"
+        visible={moveDeletingSession}
+        onRequestClose={() => setMoveDeletingSession(false)}>
+        <View style={styles.modalBackdrop}>
+          <SurfaceCard style={styles.modalCard} tone="raised">
+            <Text style={styles.modalTitle}>Move games before deleting</Text>
+            <ScrollView style={styles.targetList} contentContainerStyle={styles.targetListContent}>
+              <Pressable
+                onPress={() => moveSessionMutation.mutate(NEW_SESSION_TARGET)}
+                disabled={moveSessionMutation.isPending}
+                style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
+                <View style={styles.targetButtonInner}>
+                  <Text style={[styles.targetButtonText, styles.targetButtonTextAccent]}>
+                    New Session
+                  </Text>
+                  {moveSessionMutation.isPending && pendingDeleteMoveTargetId === NEW_SESSION_TARGET ? (
+                    <BowlingBallSpinner size={16} holeColor={palette.field} />
+                  ) : null}
+                </View>
+              </Pressable>
+              {moveTargets.map((target) => (
+                <Pressable
+                  key={target.sessionId}
+                  onPress={() => moveSessionMutation.mutate(target.sessionId as string)}
+                  disabled={moveSessionMutation.isPending}
+                  style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
+                  <View style={styles.targetButtonInner}>
+                    <Text style={styles.targetButtonText}>{target.title}</Text>
+                    {moveSessionMutation.isPending &&
+                    pendingDeleteMoveTargetId === target.sessionId ? (
+                      <BowlingBallSpinner size={16} holeColor={palette.field} />
+                    ) : null}
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <ActionButton
+              label="Cancel"
+              onPress={() => setMoveDeletingSession(false)}
+              variant="secondary"
+            />
+          </SurfaceCard>
+        </View>
+      </Modal>
+
+      <Modal
+        transparent
+        animationType="fade"
         visible={Boolean(moveGameId)}
         onRequestClose={() => setMoveGameId(null)}>
         <View style={styles.modalBackdrop}>
@@ -305,9 +385,14 @@ export default function SessionDetailScreen() {
                 onPress={() => moveMutation.mutate(NEW_SESSION_TARGET)}
                 disabled={moveMutation.isPending}
                 style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
-                <Text style={[styles.targetButtonText, styles.targetButtonTextAccent]}>
-                  New Session
-                </Text>
+                <View style={styles.targetButtonInner}>
+                  <Text style={[styles.targetButtonText, styles.targetButtonTextAccent]}>
+                    New Session
+                  </Text>
+                  {moveMutation.isPending && pendingMoveTargetId === NEW_SESSION_TARGET ? (
+                    <BowlingBallSpinner size={16} holeColor={palette.field} />
+                  ) : null}
+                </View>
               </Pressable>
               {moveTargets.map((target) => (
                 <Pressable
@@ -315,7 +400,12 @@ export default function SessionDetailScreen() {
                   onPress={() => moveMutation.mutate(target.sessionId as string)}
                   disabled={moveMutation.isPending}
                   style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
-                  <Text style={styles.targetButtonText}>{target.title}</Text>
+                  <View style={styles.targetButtonInner}>
+                    <Text style={styles.targetButtonText}>{target.title}</Text>
+                    {moveMutation.isPending && pendingMoveTargetId === target.sessionId ? (
+                      <BowlingBallSpinner size={16} holeColor={palette.field} />
+                    ) : null}
+                  </View>
                 </Pressable>
               ))}
             </ScrollView>
@@ -473,6 +563,11 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     paddingHorizontal: spacing.md,
     paddingVertical: 14,
+  },
+  targetButtonInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   targetButtonText: {
     color: palette.text,

@@ -35,16 +35,12 @@ export default function AccountScreen() {
   };
 
   return (
-    <ScreenShell
-      title="Account"
-      subtitle={
-        isGuest
-          ? 'Use a guest session now, or sign in to keep your logs across devices.'
-          : 'This mobile app is connected to the same Bowling Tracker account as the web app.'
-      }>
+    <ScreenShell title="Account">
       <SurfaceCard style={styles.summaryCard}>
         <Text style={styles.summaryEyebrow}>{isGuest ? 'Guest Session' : 'Signed In'}</Text>
-        <Text style={styles.summaryTitle}>{isGuest ? 'Explore before you commit' : user?.email || 'Account'}</Text>
+        <Text style={[styles.summaryTitle, !isGuest && styles.summaryEmail]}>
+          {isGuest ? 'Explore before you commit' : user?.email || 'Account'}
+        </Text>
         <Text style={styles.summaryDescription}>
           {isGuest
             ? 'Guest sessions let you browse your stats and uploads before creating an account.'
@@ -52,39 +48,34 @@ export default function AccountScreen() {
         </Text>
       </SurfaceCard>
 
-      <SurfaceCard style={styles.actionsCard} tone="raised">
-        <Text style={styles.actionsTitle}>{isGuest ? 'Ready to save your progress?' : 'Session actions'}</Text>
-        <Text style={styles.actionsDescription}>
-          {isGuest
-            ? 'Create an account to keep your logs and sync the same Bowling Tracker data on every device.'
-            : 'You can sign out at any time. The app will drop back into a guest session so you can keep using it.'}
-        </Text>
-
-        {isGuest ? (
+      {isGuest ? (
+        <SurfaceCard style={styles.actionsCard} tone="raised">
+          <Text style={styles.actionsTitle}>Ready to save your progress?</Text>
+          <Text style={styles.actionsDescription}>
+            Create an account to keep your logs and sync the same Bowling Tracker data on every device.
+          </Text>
           <ActionButton
             label="Sign in / Create account"
             onPress={() => router.push('/login')}
             variant="primary"
           />
-        ) : (
+        </SurfaceCard>
+      ) : (
+        <View style={styles.actions}>
           <ActionButton
-            label={busy ? 'Signing out...' : 'Sign out to guest session'}
+            label={busy ? 'Signing out...' : 'Sign out'}
             onPress={handleSignOut}
             disabled={busy}
             variant="secondary"
           />
-        )}
-      </SurfaceCard>
+        </View>
+      )}
 
       {isGuest ? (
         <InfoBanner text="Guest mode is active. If you sign in later, the app can move your guest logs into that account." />
       ) : null}
 
       {error ? <InfoBanner text={error} tone="error" /> : null}
-
-      <View style={styles.actions}>
-        {!isGuest ? <Text style={styles.footerNote}>Signing out keeps the app usable by immediately starting a fresh guest session.</Text> : null}
-      </View>
     </ScreenShell>
   );
 }
@@ -110,6 +101,10 @@ const styles = StyleSheet.create({
     lineHeight: 34,
     fontWeight: '600',
     fontFamily: fontFamilySans,
+  },
+  summaryEmail: {
+    fontSize: 22,
+    lineHeight: 28,
   },
   summaryDescription: {
     color: palette.muted,
@@ -137,11 +132,5 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: spacing.sm,
-  },
-  footerNote: {
-    color: palette.muted,
-    fontSize: 14,
-    lineHeight: 20,
-    fontFamily: fontFamilySans,
   },
 });
