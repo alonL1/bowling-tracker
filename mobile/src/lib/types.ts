@@ -100,3 +100,78 @@ export type InviteLookupResponse = {
   alreadyFriends?: boolean;
   canAccept?: boolean;
 };
+
+export type LiveSessionGameStatus = 'queued' | 'processing' | 'ready' | 'error';
+
+export type LiveFrame = {
+  frame: number;
+  shots: [number | null, number | null, number | null];
+};
+
+export type LivePlayer = {
+  playerName: string;
+  totalScore: number | null;
+  frames: LiveFrame[];
+};
+
+export type LiveExtraction = {
+  players: LivePlayer[];
+};
+
+export type LiveSessionPlayerOption = {
+  key: string;
+  label: string;
+};
+
+export type LiveSessionGame = {
+  id: string;
+  capture_order: number;
+  status: LiveSessionGameStatus;
+  captured_at_hint?: string | null;
+  captured_at?: string | null;
+  last_error?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  extraction?: LiveExtraction | null;
+};
+
+export type LiveSession = {
+  id: string;
+  sessionId: string;
+  sessionNumber: number;
+  name?: string | null;
+  description?: string | null;
+  startedAt?: string | null;
+  createdAt?: string | null;
+  selectedPlayerKeys: string[];
+  playerOptions: LiveSessionPlayerOption[];
+  games: LiveSessionGame[];
+};
+
+export type LiveSessionResponse = {
+  liveSession: LiveSession | null;
+  nextSessionNumber: number;
+};
+
+export type LiveSessionCaptureResponse = {
+  ok: boolean;
+  jobId: string;
+  liveSessionId: string;
+  liveGameId: string;
+  sessionId: string;
+};
+
+export type LiveSessionEndResponse = {
+  ok: boolean;
+  sessionId: string;
+  loggedGameCount: number;
+};
+
+export type LiveSessionStats = {
+  averageLabel: string;
+  strikeRateLabel: string;
+  spareRateLabel: string;
+  spareConversionRateLabel: string;
+  bestFrameLabel: string;
+  worstFrameLabel: string;
+};

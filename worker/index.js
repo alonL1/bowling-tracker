@@ -219,7 +219,189 @@ function parsePlayerNames(value) {
     .filter(Boolean);
 }
 
-function buildPrompt(playerNames) {
+function normalizePlayerKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function clampPins(value, maxPins) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  const rounded = Math.max(0, Math.min(10, Math.trunc(value)));
+  return Math.min(rounded, Math.max(0, maxPins));
+}
+
+function normalizeLiveFrameShots(frameNumber, shots) {
+  const shot1 = clampPins(shots[0] ?? null, 10);
+  const shot2Raw = shots[1] ?? null;
+  const shot3Raw = shots[2] ?? null;
+
+  if (frameNumber < 10) {
+    if (shot1 === 10) {
+      return [10, null, null];
+    }
+    const shot2 = clampPins(shot2Raw, shot1 === null ? 10 : 10 - shot1);
+    return [shot1, shot2, null];
+  }
+
+  if (shot1 === 10) {
+    const shot2 = clampPins(shot2Raw, 10);
+    const shot3 = clampPins(
+      shot3Raw,
+      shot2 !== null && shot2 < 10 ? 10 - shot2 : 10
+    );
+    return [shot1, shot2, shot3];
+  }
+
+  const shot2 = clampPins(shot2Raw, shot1 === null ? 10 : 10 - shot1);
+  const canHaveThird =
+    shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10;
+  const shot3 = canHaveThird ? clampPins(shot3Raw, 10) : null;
+  return [shot1, shot2, shot3];
+}
+
+function getLiveRollsForFrame(frame) {
+  if (frame.frame < 10) {
+    if (frame.shots[0] === 10) {
+      return [10];
+    }
+    return [frame.shots[0], frame.shots[1]];
+  }
+  return [frame.shots[0], frame.shots[1], frame.shots[2]];
+}
+
+function collectNextLiveRolls(frames, fromFrame, needed) {
+  const rolls = [];
+  for (let frameNumber = fromFrame; frameNumber <= 10; frameNumber += 1) {
+    const frame = frames.find((entry) => entry.frame === frameNumber);
+    if (!frame) {
+      continue;
+    }
+    for (const roll of getLiveRollsForFrame(frame)) {
+      if (typeof roll !== "number") {
+        continue;
+      }
+      rolls.push(roll);
+      if (rolls.length === needed) {
+        return rolls;
+      }
+    }
+  }
+  return null;
+}
+
+function computeLiveFrameScores(frames) {
+  return Array.from({ length: 10 }, (_, index) => {
+    const frameNumber = index + 1;
+    const frame = frames.find((entry) => entry.frame === frameNumber);
+    if (!frame) {
+      return null;
+    }
+    const [shot1, shot2, shot3] = frame.shots;
+
+    if (frameNumber < 10) {
+      if (shot1 === null) {
+        return null;
+      }
+      if (shot1 === 10) {
+        const bonus = collectNextLiveRolls(frames, frameNumber + 1, 2);
+        if (!bonus) {
+          return null;
+        }
+        return 10 + bonus[0] + bonus[1];
+      }
+      if (shot2 === null) {
+        return null;
+      }
+      if (shot1 + shot2 === 10) {
+        const bonus = collectNextLiveRolls(frames, frameNumber + 1, 1);
+        if (!bonus) {
+          return null;
+        }
+        return 10 + bonus[0];
+      }
+      return shot1 + shot2;
+    }
+
+    if (shot1 === null || shot2 === null) {
+      return null;
+    }
+    if (shot1 === 10 || shot1 + shot2 === 10) {
+      if (shot3 === null) {
+        return null;
+      }
+      return shot1 + shot2 + shot3;
+    }
+    return shot1 + shot2;
+  });
+}
+
+function computeLiveTotalScore(frames) {
+  const frameScores = computeLiveFrameScores(frames);
+  if (frameScores.some((score) => score === null)) {
+    return null;
+  }
+  return frameScores.reduce((sum, score) => sum + (score ?? 0), 0);
+}
+
+function normalizeLivePlayers(players) {
+  return (Array.isArray(players) ? players : [])
+    .map((player, playerIndex) => {
+      const sourceName =
+        typeof player?.playerName === "string" ? player.playerName.trim() : "";
+      const playerName = sourceName || `Player ${playerIndex + 1}`;
+      const frameMap = new Map();
+
+      (Array.isArray(player?.frames) ? player.frames : []).forEach((frame, frameIndex) => {
+        const frameNumber =
+          typeof frame?.frame === "number" && Number.isFinite(frame.frame)
+            ? Math.max(1, Math.min(10, Math.trunc(frame.frame)))
+            : frameIndex + 1;
+        frameMap.set(frameNumber, frame);
+      });
+
+      const normalizedFrames = Array.from({ length: 10 }, (_, index) => {
+        const frameNumber = index + 1;
+        const frame = frameMap.get(frameNumber);
+        return {
+          frame: frameNumber,
+          shots: normalizeLiveFrameShots(
+            frameNumber,
+            Array.isArray(frame?.shots) ? frame.shots.map(toNullableNumber) : []
+          )
+        };
+      });
+
+      return {
+        playerName,
+        playerKey: normalizePlayerKey(playerName),
+        totalScore: toNullableNumber(player?.totalScore) ?? computeLiveTotalScore(normalizedFrames),
+        frames: normalizedFrames
+      };
+    })
+    .filter((player) => player.playerName.trim().length > 0);
+}
+
+function serializeLivePlayers(players) {
+  return {
+    players: players.map((player) => ({
+      playerName: player.playerName,
+      totalScore: player.totalScore,
+      frames: player.frames.map((frame) => ({
+        frame: frame.frame,
+        shots: [...frame.shots]
+      }))
+    }))
+  };
+}
+
+function buildStandardPrompt(playerNames) {
   const nameList = Array.isArray(playerNames)
     ? playerNames.filter(Boolean)
     : parsePlayerNames(playerNames);
@@ -275,6 +457,41 @@ Return ONLY the JSON object. Do not include conversational text or markdown code
 `;
 }
 
+function buildLivePrompt() {
+  return `// SYSTEM INSTRUCTIONS
+You are a precision OCR agent specializing in bowling scoreboards.
+Extract the full scoreboard for every visible player row, not just one player.
+
+// CONTEXT & SCHEMA
+<schema>
+{
+  "players": [
+    {
+      "playerName": string,
+      "totalScore": number | null,
+      "frames": [
+        { "frame": number, "shots": [number|null, number|null, number|null] }
+      ]
+    }
+  ]
+}
+</schema>
+
+// EXTRACTION RULES
+<rules>
+1. Include every clearly visible player row exactly once.
+2. Convert "X" to 10, "/" to the pins needed for a spare, and "-" or "G" to 0.
+3. Return up to 3 shots for frame 10 and up to 2 shots for frames 1-9.
+4. Use the board's cumulative totals to resolve ambiguous frame marks whenever possible.
+5. If a shot is unreadable, return null for that shot instead of inventing a value.
+6. If a player row is partially visible but clearly belongs to the scoreboard, include it anyway.
+</rules>
+
+// TASK
+Analyze the image and return ONLY the JSON object. Do not include markdown or commentary.
+`;
+}
+
 function resolveThinkingConfig(mode) {
   if (!mode) {
     return null;
@@ -302,7 +519,26 @@ function resolveThinkingConfig(mode) {
   return null;
 }
 
-async function setJobError(supabase, jobId, gameId, message) {
+async function setLiveSessionGameStatus(
+  supabase,
+  liveSessionGameId,
+  status,
+  extras = {}
+) {
+  if (!liveSessionGameId) {
+    return;
+  }
+  await supabase
+    .from("live_session_games")
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+      ...extras
+    })
+    .eq("id", liveSessionGameId);
+}
+
+async function setJobError(supabase, jobId, gameId, liveSessionGameId, message) {
   console.error(`Job ${jobId} failed: ${message}`);
   const jobUpdate = {
     status: "error",
@@ -322,6 +558,12 @@ async function setJobError(supabase, jobId, gameId, message) {
       .from("games")
       .update({ status: "error" })
       .eq("id", gameId);
+  }
+
+  if (liveSessionGameId) {
+    await setLiveSessionGameStatus(supabase, liveSessionGameId, "error", {
+      last_error: message
+    });
   }
 }
 
@@ -355,12 +597,14 @@ async function processJob() {
   }
 
   const job = jobs[0];
+  const jobType = job.job_type === "live_session" ? "live_session" : "standard";
   const playerName = job.player_name;
   const playerNames = parsePlayerNames(playerName);
   const playerLabel =
     playerNames.length > 0 ? playerNames.join(", ") : String(playerName || "");
   const userId = normalizeOptionalUuid(job.user_id);
   const sessionId = normalizeOptionalUuid(job.session_id);
+  const liveSessionGameId = normalizeOptionalUuid(job.live_session_game_id);
   const capturedAtHint = normalizeOptionalTimestamp(job.captured_at_hint);
   if (job.user_id && !userId) {
     console.warn(`Job ${job.id} has invalid user_id:`, job.user_id);
@@ -368,11 +612,30 @@ async function processJob() {
   if (job.session_id && !sessionId) {
     console.warn(`Job ${job.id} has invalid session_id:`, job.session_id);
   }
-  if (!playerName) {
-    await setJobError(supabase, job.id, null, "Job missing player name.");
+  if (jobType === "live_session" && liveSessionGameId) {
+    await setLiveSessionGameStatus(supabase, liveSessionGameId, "processing", {
+      last_error: null
+    });
+  }
+  if (jobType !== "live_session" && !playerName) {
+    await setJobError(supabase, job.id, null, null, "Job missing player name.");
     return { status: "error", jobId: job.id };
   }
-  console.log(`Claimed job ${job.id} for ${playerLabel}.`);
+  if (jobType === "live_session" && !liveSessionGameId) {
+    await setJobError(
+      supabase,
+      job.id,
+      null,
+      null,
+      "Live-session job missing live_session_game_id."
+    );
+    return { status: "error", jobId: job.id };
+  }
+  console.log(
+    jobType === "live_session"
+      ? `Claimed live-session job ${job.id}.`
+      : `Claimed job ${job.id} for ${playerLabel}.`
+  );
 
   const { data: imageData, error: downloadError } = await supabase.storage
     .from(BUCKET)
@@ -383,6 +646,7 @@ async function processJob() {
       supabase,
       job.id,
       null,
+      liveSessionGameId,
       downloadError?.message || "Failed to download image."
     );
     return { status: "error", jobId: job.id };
@@ -405,9 +669,13 @@ async function processJob() {
 
   let extraction;
   try {
-    // prompt for scoreboard extraction
     const result = await model.generateContent([
-      { text: buildPrompt(playerNames.length > 0 ? playerNames : playerName) },
+      {
+        text:
+          jobType === "live_session"
+            ? buildLivePrompt()
+            : buildStandardPrompt(playerNames.length > 0 ? playerNames : playerName)
+      },
       {
         inlineData: {
           mimeType: imageData.type || "image/jpeg",
@@ -423,13 +691,13 @@ async function processJob() {
       supabase,
       job.id,
       null,
+      liveSessionGameId,
       error instanceof Error ? error.message : "Gemini extraction failed."
     );
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
     return { status: "error", jobId: job.id };
   }
 
-  const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
   const rawOffset = job.timezone_offset_minutes;
   const parsedOffset =
     typeof rawOffset === "string" ? Number.parseInt(rawOffset, 10) : rawOffset;
@@ -439,6 +707,58 @@ async function processJob() {
   const capturedAt =
     (await extractCapturedAtFromExif(buffer, fallbackOffsetMinutes)) ||
     capturedAtHint;
+
+  if (jobType === "live_session") {
+    const normalizedPlayers = normalizeLivePlayers(extraction?.players);
+    if (normalizedPlayers.length === 0) {
+      await setJobError(
+        supabase,
+        job.id,
+        null,
+        liveSessionGameId,
+        "Live-session extraction did not return any player rows."
+      );
+      await supabase.storage.from(BUCKET).remove([job.storage_key]);
+      return { status: "error", jobId: job.id };
+    }
+
+    const { error: liveGameUpdateError } = await supabase
+      .from("live_session_games")
+      .update({
+        status: "ready",
+        extraction: serializeLivePlayers(normalizedPlayers),
+        captured_at: capturedAt,
+        last_error: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", liveSessionGameId);
+
+    if (liveGameUpdateError) {
+      await setJobError(
+        supabase,
+        job.id,
+        null,
+        liveSessionGameId,
+        liveGameUpdateError.message || "Failed to update live session game."
+      );
+      await supabase.storage.from(BUCKET).remove([job.storage_key]);
+      return { status: "error", jobId: job.id };
+    }
+
+    await supabase
+      .from("analysis_jobs")
+      .update({
+        status: "logged",
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", job.id);
+
+    await supabase.storage.from(BUCKET).remove([job.storage_key]);
+    console.log(`Live-session job ${job.id} complete for ${liveSessionGameId}.`);
+    return { status: "logged", jobId: job.id, liveSessionGameId };
+  }
+
+  const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
   const extractedName =
     typeof extraction?.playerName === "string"
       ? extraction.playerName.trim()
@@ -467,6 +787,7 @@ async function processJob() {
     await setJobError(
       supabase,
       job.id,
+      null,
       null,
       createError?.message || "Failed to create game."
     );
@@ -535,7 +856,7 @@ async function processJob() {
 
     if (frameError) {
       await removeGame(supabase, gameId);
-      await setJobError(supabase, job.id, null, frameError.message);
+      await setJobError(supabase, job.id, null, null, frameError.message);
       await supabase.storage.from(BUCKET).remove([job.storage_key]);
       return { status: "error", jobId: job.id };
     }
@@ -567,7 +888,7 @@ async function processJob() {
     const { error: shotError } = await supabase.from("shots").insert(shotRows);
     if (shotError) {
       await removeGame(supabase, gameId);
-      await setJobError(supabase, job.id, null, shotError.message);
+      await setJobError(supabase, job.id, null, null, shotError.message);
       await supabase.storage.from(BUCKET).remove([job.storage_key]);
       return { status: "error", jobId: job.id };
     }
@@ -584,7 +905,7 @@ async function processJob() {
 
   if (gameUpdateError) {
     await removeGame(supabase, gameId);
-    await setJobError(supabase, job.id, null, gameUpdateError.message);
+    await setJobError(supabase, job.id, null, null, gameUpdateError.message);
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
     return { status: "error", jobId: job.id };
   }

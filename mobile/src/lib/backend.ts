@@ -5,6 +5,10 @@ import type {
   InviteLinkResponse,
   InviteLookupResponse,
   LeaderboardRow,
+  LivePlayer,
+  LiveSessionCaptureResponse,
+  LiveSessionEndResponse,
+  LiveSessionResponse,
   SessionItem,
   SessionMode,
   StatusResponse,
@@ -14,6 +18,7 @@ export const queryKeys = {
   games: ['games'] as const,
   game: (gameId: string) => ['game', gameId] as const,
   sessions: ['sessions'] as const,
+  liveSession: ['live-session'] as const,
   leaderboard: ['leaderboard'] as const,
   inviteLookup: (token: string) => ['invite-lookup', token] as const,
 };
@@ -179,4 +184,60 @@ export async function submitGames(payload: {
 
 export async function fetchStatus(jobId: string) {
   return apiJson<StatusResponse>(`/api/status?jobId=${encodeURIComponent(jobId)}`);
+}
+
+export async function fetchLiveSession() {
+  return apiJson<LiveSessionResponse>('/api/live-session');
+}
+
+export async function updateLiveSession(payload: {
+  selectedPlayerKeys?: string[];
+  name?: string;
+  description?: string;
+}) {
+  return apiJson<LiveSessionResponse>('/api/live-session', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function queueLiveSessionCapture(payload: {
+  storageKey: string;
+  capturedAtHint?: string | null;
+  timezoneOffsetMinutes: number;
+  name?: string;
+  description?: string;
+}) {
+  return apiJson<LiveSessionCaptureResponse>('/api/live-session/capture', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateLiveSessionGame(payload: {
+  liveGameId: string;
+  players: LivePlayer[];
+  capturedAt?: string | null;
+}) {
+  return apiJson<{ ok: boolean }>('/api/live-session/game', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteLiveSessionGame(liveGameId: string) {
+  return apiJson<{ ok: boolean; deletedSession?: boolean }>('/api/live-session/game', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ liveGameId }),
+  });
+}
+
+export async function endLiveSession() {
+  return apiJson<LiveSessionEndResponse>('/api/live-session/end', {
+    method: 'POST',
+  });
 }

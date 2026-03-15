@@ -1,0 +1,174 @@
+import React, { useMemo, useState } from 'react';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+
+import BowlingBallSpinner from '@/components/bowling-ball-spinner';
+import IconAction from '@/components/icon-action';
+import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
+import StackBadge from '@/components/stack-badge';
+import { palette, spacing } from '@/constants/palette';
+import { fontFamilySans } from '@/constants/typography';
+import { getLiveGameScoreLabel, getResolvedPlayersForGame } from '@/lib/live-session';
+import type { LiveSessionGame } from '@/lib/types';
+
+type LiveSessionGameCardProps = {
+  game: LiveSessionGame;
+  selectedPlayerKeys: string[];
+  onEdit: (game: LiveSessionGame) => void;
+  onDelete: (gameId: string) => void;
+  deleting?: boolean;
+};
+
+function formatCapturedAt(value?: string | null) {
+  if (!value) {
+    return 'Scoreboard captured';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Scoreboard captured';
+  }
+
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+export default function LiveSessionGameCard({
+  game,
+  selectedPlayerKeys,
+  onEdit,
+  onDelete,
+  deleting = false,
+}: LiveSessionGameCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const players = useMemo(() => getResolvedPlayersForGame(game), [game]);
+  const badgeLines = useMemo(() => ['Game', String(game.capture_order)], [game.capture_order]);
+  const scoreLabel = useMemo(
+    () => getLiveGameScoreLabel(game, selectedPlayerKeys),
+    [game, selectedPlayerKeys],
+  );
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.row}>
+        <Pressable
+          onPress={() => setExpanded((current) => !current)}
+          style={({ pressed }) => [styles.summaryPressable, pressed && styles.pressed]}>
+          <View style={styles.summary}>
+            <StackBadge lines={badgeLines} />
+            <View style={styles.scoreBlock}>
+              <Text style={styles.scoreValue}>{scoreLabel}</Text>
+            </View>
+          </View>
+        </Pressable>
+
+        <View style={styles.actions}>
+          <IconAction
+            accessibilityLabel="Edit live game"
+            onPress={() => onEdit(game)}
+            icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
+          />
+          <IconAction
+            accessibilityLabel="Delete live game"
+            onPress={() => {
+              Alert.alert('Delete game', 'Remove this scoreboard from the live session?', [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: () => onDelete(game.id),
+                },
+              ]);
+            }}
+            icon={
+              deleting ? (
+                <BowlingBallSpinner size={18} holeColor={palette.field} />
+              ) : (
+                <MaterialIcons name="delete" size={22} color={palette.text} />
+              )
+            }
+          />
+          <IconAction
+            accessibilityLabel={expanded ? 'Collapse live game' : 'Expand live game'}
+            onPress={() => setExpanded((current) => !current)}
+            icon={
+              <Ionicons
+                name={expanded ? 'chevron-down' : 'chevron-forward'}
+                size={22}
+                color={palette.text}
+              />
+            }
+          />
+        </View>
+      </View>
+
+      {expanded ? (
+        <View style={styles.expandedBody}>
+          <Text style={styles.metaLine}>{formatCapturedAt(game.captured_at || game.captured_at_hint)}</Text>
+          <MultiPlayerFrameGrid players={players} selectedPlayerKeys={selectedPlayerKeys} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    paddingHorizontal: 2,
+    paddingVertical: 6,
+    gap: 10,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  summaryPressable: {
+    flex: 1,
+    minWidth: 0,
+  },
+  summary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    minWidth: 0,
+    paddingLeft: 6,
+  },
+  scoreBlock: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 52,
+    justifyContent: 'center',
+  },
+  scoreValue: {
+    color: palette.text,
+    fontSize: 30,
+    lineHeight: 30,
+    fontWeight: '400',
+    fontFamily: fontFamilySans,
+  },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  expandedBody: {
+    gap: 8,
+    paddingLeft: 6,
+  },
+  metaLine: {
+    color: palette.muted,
+    fontSize: 15,
+    lineHeight: 19,
+    fontFamily: fontFamilySans,
+  },
+  pressed: {
+    opacity: 0.92,
+  },
+});
