@@ -1,6 +1,5 @@
 import { File as ExpoFile } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -124,7 +123,6 @@ function StatsTile({ label, value }: StatsTileProps) {
 
 export default function LiveSessionScreen() {
   const router = useRouter();
-  const tabBarHeight = useBottomTabBarHeight();
   const queryClient = useQueryClient();
   const { user, loading: authLoading } = useAuth();
 
@@ -434,7 +432,7 @@ export default function LiveSessionScreen() {
       <View style={styles.page}>
         <ScrollView
           style={styles.scroll}
-          contentContainerStyle={[styles.content, { paddingBottom: tabBarHeight + 138 }]}
+          contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}>
           <Pressable
             onPress={() => router.back()}
@@ -577,7 +575,18 @@ export default function LiveSessionScreen() {
           )}
         </ScrollView>
 
-        <View style={[styles.endDock, { bottom: tabBarHeight }]}>
+        <View style={styles.endDock}>
+          {!hasSelectedPlayers ? (
+            <Text style={styles.dockNote}>Choose at least one player before ending the session.</Text>
+          ) : hasUnfinishedGames ? (
+            <Text style={styles.dockNote}>Wait for all scoreboards to finish processing.</Text>
+          ) : hasFailedGames ? (
+            <Text style={styles.dockNote}>Remove or fix failed scoreboards before ending the session.</Text>
+          ) : selectedPlayerKeys.length > 1 ? (
+            <Text style={styles.dockNote}>
+              Multiple selected names will log {projectedLoggedGameCount} games from {readyGames.length} scoreboards.
+            </Text>
+          ) : null}
           <ActionButton
             label={endSessionMutation.isPending ? 'Ending session...' : 'End Session'}
             onPress={handleEndSession}
@@ -591,17 +600,6 @@ export default function LiveSessionScreen() {
               projectedLoggedGameCount === 0
             }
           />
-          {!hasSelectedPlayers ? (
-            <Text style={styles.dockNote}>Choose at least one player before ending the session.</Text>
-          ) : hasUnfinishedGames ? (
-            <Text style={styles.dockNote}>Wait for all scoreboards to finish processing.</Text>
-          ) : hasFailedGames ? (
-            <Text style={styles.dockNote}>Remove or fix failed scoreboards before ending the session.</Text>
-          ) : selectedPlayerKeys.length > 1 ? (
-            <Text style={styles.dockNote}>
-              Multiple selected names will log {projectedLoggedGameCount} games from {readyGames.length} scoreboards.
-            </Text>
-          ) : null}
         </View>
       </View>
 
@@ -679,6 +677,7 @@ const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: palette.background,
+    position: 'relative',
   },
   scroll: {
     flex: 1,
@@ -687,6 +686,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     paddingTop: 18,
+    paddingBottom: 132,
     gap: spacing.md,
   },
   centeredWrap: {
@@ -873,6 +873,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
+    bottom: 0,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
