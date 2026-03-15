@@ -33,8 +33,6 @@ export default function SessionsScreen() {
   return (
     <ScreenShell
       title="Sessions"
-      contentStyle={styles.shellContent}
-      bodyStyle={styles.body}
       refreshControl={
         <RefreshControl
           refreshing={gamesQuery.isRefetching}
@@ -81,13 +79,6 @@ export default function SessionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  shellContent: {
-    paddingTop: 20,
-    gap: 18,
-  },
-  body: {
-    gap: 14,
-  },
   list: {
     gap: 10,
   },

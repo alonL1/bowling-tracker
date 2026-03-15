@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
@@ -97,12 +98,12 @@ export default function SessionGameCard({
             <IconAction
               accessibilityLabel="Edit game"
               onPress={() => setEditOpen(true)}
-              icon={<Ionicons name="create-outline" size={22} color={palette.text} />}
+              icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
             />
             <IconAction
               accessibilityLabel="Delete game"
               onPress={handleDelete}
-              icon={<Ionicons name="trash-outline" size={22} color={palette.text} />}
+              icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
             />
             <IconAction
               accessibilityLabel={expanded ? 'Collapse game' : 'Expand game'}

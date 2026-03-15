@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,9 +23,9 @@ import SessionGameCard from '@/components/session-game-card';
 import StackBadge from '@/components/stack-badge';
 import SurfaceCard from '@/components/surface-card';
 import {
+  createSession,
   deleteSession,
   fetchGames,
-  fetchSessions,
   moveGameToSession,
   queryKeys,
   updateSession,
@@ -32,6 +33,8 @@ import {
 import { buildSessionGroups } from '@/lib/bowling';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+
+const NEW_SESSION_TARGET = '__new-session__';
 
 function formatGameMeta(playerName: string, playedAt?: string | null, createdAt?: string | null) {
   const dateSource = playedAt || createdAt;
@@ -58,10 +61,6 @@ export default function SessionDetailScreen() {
   const gamesQuery = useQuery({
     queryKey: queryKeys.games,
     queryFn: fetchGames,
-  });
-  const sessionsQuery = useQuery({
-    queryKey: queryKeys.sessions,
-    queryFn: fetchSessions,
   });
 
   const grouping = useMemo(
@@ -107,9 +106,13 @@ export default function SessionDetailScreen() {
   });
 
   const moveMutation = useMutation({
-    mutationFn: async (targetSessionId: string | null) => {
+    mutationFn: async (targetSessionId: string) => {
       if (!moveGameId) {
         throw new Error('Game was not selected.');
+      }
+      if (targetSessionId === NEW_SESSION_TARGET) {
+        const created = await createSession('', '');
+        return moveGameToSession(moveGameId, created.session.id);
       }
       return moveGameToSession(moveGameId, targetSessionId);
     },
@@ -140,8 +143,9 @@ export default function SessionDetailScreen() {
     );
   }
 
-  const actualSessions = sessionsQuery.data?.sessions ?? [];
-  const moveTargets = actualSessions.filter((session) => session.id !== group.sessionId);
+  const moveTargets = grouping.groups.filter(
+    (target) => !target.isSessionless && target.sessionId !== group.sessionId,
+  );
 
   const handleDeleteSession = () => {
     if (!group.sessionId || group.isSessionless) {
@@ -190,12 +194,31 @@ export default function SessionDetailScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}>
-        <Pressable
-          onPress={() => router.back()}
-          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
-          <Ionicons name="chevron-back" size={16} color={palette.muted} />
-          <Text style={styles.backText}>Back</Text>
-        </Pressable>
+        <View style={styles.topBar}>
+          <Pressable
+            onPress={() => router.back()}
+            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+            <Ionicons name="chevron-back" size={16} color={palette.muted} />
+            <Text style={styles.backText}>Back</Text>
+          </Pressable>
+
+          {!group.isSessionless ? (
+            <View style={styles.topBarActions}>
+              <IconAction
+                accessibilityLabel="Edit session"
+                onPress={() => setEditing(true)}
+                style={styles.topBarActionButton}
+                icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
+              />
+              <IconAction
+                accessibilityLabel="Delete session"
+                onPress={handleDeleteSession}
+                style={styles.topBarActionButton}
+                icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
+              />
+            </View>
+          ) : null}
+        </View>
 
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
@@ -213,21 +236,6 @@ export default function SessionDetailScreen() {
               </View>
             </View>
           </View>
-
-          {!group.isSessionless ? (
-            <View style={styles.headerActions}>
-              <IconAction
-                accessibilityLabel="Edit session"
-                onPress={() => setEditing(true)}
-                icon={<Ionicons name="create-outline" size={22} color={palette.text} />}
-              />
-              <IconAction
-                accessibilityLabel="Delete session"
-                onPress={handleDeleteSession}
-                icon={<Ionicons name="trash-outline" size={22} color={palette.text} />}
-              />
-            </View>
-          ) : null}
         </View>
 
         {error ? <InfoBanner tone="error" text={error} /> : null}
@@ -294,20 +302,20 @@ export default function SessionDetailScreen() {
             <Text style={styles.modalTitle}>Move game</Text>
             <ScrollView style={styles.targetList} contentContainerStyle={styles.targetListContent}>
               <Pressable
-                onPress={() => moveMutation.mutate(null)}
+                onPress={() => moveMutation.mutate(NEW_SESSION_TARGET)}
                 disabled={moveMutation.isPending}
                 style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
-                <Text style={styles.targetButtonText}>Sessionless games</Text>
+                <Text style={[styles.targetButtonText, styles.targetButtonTextAccent]}>
+                  New Session
+                </Text>
               </Pressable>
               {moveTargets.map((target) => (
                 <Pressable
-                  key={target.id}
-                  onPress={() => moveMutation.mutate(target.id)}
+                  key={target.sessionId}
+                  onPress={() => moveMutation.mutate(target.sessionId as string)}
                   disabled={moveMutation.isPending}
                   style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
-                  <Text style={styles.targetButtonText}>
-                    {target.name?.trim() || 'Unnamed session'}
-                  </Text>
+                  <Text style={styles.targetButtonText}>{target.title}</Text>
                 </Pressable>
               ))}
             </ScrollView>
@@ -343,6 +351,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
   },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
   backButton: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -357,9 +371,6 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilySans,
   },
   headerTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
     gap: spacing.md,
   },
   headerLeft: {
@@ -394,11 +405,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontFamily: fontFamilySans,
   },
-  headerActions: {
+  topBarActions: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 6,
     flexShrink: 0,
+  },
+  topBarActionButton: {
+    marginTop: -6,
   },
   description: {
     color: palette.muted,
@@ -466,6 +480,9 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: '600',
     fontFamily: fontFamilySans,
+  },
+  targetButtonTextAccent: {
+    color: palette.userChat,
   },
   pressed: {
     opacity: 0.9,

@@ -17,13 +17,14 @@ import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import InfoBanner from '@/components/info-banner';
 import SurfaceCard from '@/components/surface-card';
 import {
-  fetchSessions,
+  fetchGames,
   fetchStatus,
   queryKeys,
   submitGames,
 } from '@/lib/backend';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { buildSessionGroups } from '@/lib/bowling';
 import { supabase } from '@/lib/supabase';
 import type { SessionMode } from '@/lib/types';
 import { buildAutoGroupMap, sanitizeFilename } from '@/lib/upload';
@@ -71,12 +72,21 @@ export default function UploadSessionForm({
   const [error, setError] = useState('');
 
   const sessionsQuery = useQuery({
-    queryKey: queryKeys.sessions,
-    queryFn: fetchSessions,
+    queryKey: queryKeys.games,
+    queryFn: fetchGames,
     enabled: requireExistingSession,
   });
 
-  const sessionOptions = sessionsQuery.data?.sessions ?? [];
+  const sessionOptions = useMemo(
+    () =>
+      buildSessionGroups(sessionsQuery.data?.games ?? []).groups
+        .filter((group) => !group.isSessionless && Boolean(group.sessionId))
+        .map((group) => ({
+          id: group.sessionId as string,
+          title: group.title,
+        })),
+    [sessionsQuery.data?.games],
+  );
 
   React.useEffect(() => {
     if (!requireExistingSession) {
@@ -304,7 +314,7 @@ export default function UploadSessionForm({
                     pressed && styles.pressed,
                   ]}>
                   <Text style={[styles.sessionOptionText, selectedSessionId === session.id && styles.sessionOptionTextActive]}>
-                    {session.name?.trim() || 'Unnamed session'}
+                    {session.title}
                   </Text>
                 </Pressable>
               ))}

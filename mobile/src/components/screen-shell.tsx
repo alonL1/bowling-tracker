@@ -88,8 +88,8 @@ const styles = StyleSheet.create({
   },
   title: {
     color: palette.text,
-    fontSize: 44,
-    lineHeight: 52,
+    fontSize: 40,
+    lineHeight: 46,
     fontWeight: '500',
     fontFamily: fontFamilySans,
   },

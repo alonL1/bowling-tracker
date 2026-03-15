@@ -45,6 +45,11 @@ type StorageObjectRow = {
   metadata?: { size?: number | string } | null;
 };
 
+type RequestFormData = {
+  get(name: string): string | File | null;
+  getAll(name: string): Array<string | File>;
+};
+
 function normalizeOptionalUuid(value?: string | null) {
   if (!value) {
     return null;
@@ -172,7 +177,7 @@ export async function POST(request: Request) {
         ? payload.timezoneOffsetMinutes
         : null;
   } else {
-    const formData = await request.formData();
+    const formData = (await request.formData()) as unknown as RequestFormData;
     playerName =
       typeof formData.get("playerName") === "string"
         ? String(formData.get("playerName"))

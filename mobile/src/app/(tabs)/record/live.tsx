@@ -1,8 +1,8 @@
 import React from 'react';
+import { Text, StyleSheet } from 'react-native';
 
 import DetailShell from '@/components/detail-shell';
 import SurfaceCard from '@/components/surface-card';
-import { Text, StyleSheet } from 'react-native';
 import { palette, spacing } from '@/constants/palette';
 
 export default function LiveSessionScreen() {

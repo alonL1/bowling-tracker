@@ -1,7 +1,9 @@
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -61,6 +63,7 @@ const PIN_IMAGES = {
 
 const MIN_INPUT_HEIGHT = 48;
 const MAX_INPUT_HEIGHT = 132;
+const HEADER_SPINNER_SIZE = 34;
 
 function renderInlineMessageContent(content: string) {
   const parts = content.split(/(\*\*.*?\*\*)/g);
@@ -102,10 +105,13 @@ function renderMessageContent(content: string, isUser: boolean) {
 }
 
 export default function ChatScreen() {
+  const tabBarHeight = useBottomTabBarHeight();
   const scrollRef = useRef<ScrollView | null>(null);
+  const inputRef = useRef<TextInput | null>(null);
   const [question, setQuestion] = useState('');
   const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
   const [inputContentHeight, setInputContentHeight] = useState(MIN_INPUT_HEIGHT);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
@@ -123,6 +129,24 @@ export default function ChatScreen() {
     return () => clearTimeout(timeout);
   }, [messages, showExamples]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    const showSubscription = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const handleAsk = async () => {
     if (!question.trim() || chatStatus === 'loading') {
       return;
@@ -130,6 +154,7 @@ export default function ChatScreen() {
 
     const userQuestion = question.trim();
     setQuestion('');
+    inputRef.current?.clear();
     setInputHeight(MIN_INPUT_HEIGHT);
     setInputContentHeight(MIN_INPUT_HEIGHT);
     setMessages((prev) => [...prev, { role: 'user', content: userQuestion }]);
@@ -186,6 +211,9 @@ export default function ChatScreen() {
   }, [chatStatus, hasCompletedResponse]);
 
   const inputCanScroll = inputContentHeight > MAX_INPUT_HEIGHT;
+  const androidComposerLift =
+    Platform.OS === 'android' ? Math.max(0, keyboardHeight - tabBarHeight) : 0;
+  const keyboardOpen = Platform.OS === 'android' && keyboardHeight > 0;
   const handleInputKeyPress = (event: {
     nativeEvent: { key?: string };
     preventDefault?: () => void;
@@ -214,7 +242,7 @@ export default function ChatScreen() {
               </View>
               <View style={styles.spinnerSlot}>
                 {chatStatus === 'loading' ? (
-                  <BowlingBallSpinner size={18} holeColor={palette.surface} />
+                  <BowlingBallSpinner size={HEADER_SPINNER_SIZE} holeColor={palette.surface} />
                 ) : null}
               </View>
             </View>
@@ -224,6 +252,7 @@ export default function ChatScreen() {
             ref={scrollRef}
             style={styles.viewport}
             contentContainerStyle={styles.messagesContent}
+            keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}>
             {messages.map((message, index) => (
               <View
@@ -248,9 +277,15 @@ export default function ChatScreen() {
             ))}
           </ScrollView>
 
-          <View style={styles.composerDock}>
+          <View
+            style={[
+              styles.composerDock,
+              keyboardOpen && styles.composerDockKeyboardOpen,
+              androidComposerLift > 0 && { marginBottom: androidComposerLift },
+            ]}>
             <View style={styles.composerRow}>
               <TextInput
+                ref={inputRef}
                 multiline
                 scrollEnabled={inputCanScroll}
                 placeholder="Type here"
@@ -286,7 +321,9 @@ export default function ChatScreen() {
                 <Ionicons name="arrow-up" size={22} color={palette.text} />
               </Pressable>
             </View>
-            <ActionButton label="View Examples" onPress={() => setShowExamples(true)} variant="secondary" />
+            {!keyboardOpen ? (
+              <ActionButton label="View Examples" onPress={() => setShowExamples(true)} variant="secondary" />
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -355,11 +392,11 @@ const styles = StyleSheet.create({
   spinnerSlot: {
     position: 'absolute',
     right: '50%',
-    marginRight: -56,
+    marginRight: -66,
     top: '50%',
-    marginTop: -10,
-    width: 22,
-    height: 22,
+    marginTop: -(HEADER_SPINNER_SIZE / 2),
+    width: HEADER_SPINNER_SIZE,
+    height: HEADER_SPINNER_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -439,6 +476,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     gap: spacing.sm,
     backgroundColor: palette.nav,
+  },
+  composerDockKeyboardOpen: {
+    paddingBottom: spacing.sm,
   },
   composerRow: {
     flexDirection: 'row',

@@ -13,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
-import BowlingBallSpinner from '@/components/bowling-ball-spinner';
+import CenteredState from '@/components/centered-state';
 import InfoBanner from '@/components/info-banner';
 import SurfaceCard from '@/components/surface-card';
 import { claimGuest } from '@/lib/backend';
@@ -59,14 +59,7 @@ export default function LoginScreen() {
   const title = mode === 'signIn' ? 'Sign In' : 'Create Account';
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.loadingWrap}>
-          <BowlingBallSpinner size={48} />
-          <Text style={styles.loadingText}>Loading account...</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <CenteredState title="Loading account..." loading />;
   }
 
   if (user && !isGuest && !transferPrompt) {
@@ -319,20 +312,6 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
-  },
-  loadingWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.xl,
-  },
-  loadingText: {
-    color: palette.text,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '600',
-    fontFamily: fontFamilySans,
   },
   content: {
     paddingHorizontal: spacing.lg,

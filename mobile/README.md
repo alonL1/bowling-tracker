@@ -1,56 +1,104 @@
-# Welcome to your Expo app 👋
+# Bowling Tracker Mobile
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+This Expo app now targets a **development build** workflow instead of Expo Go.
 
-## Get started
+## Prerequisites
 
-1. Install dependencies
+- Node.js + npm
+- an Expo account
+- EAS access via `eas-cli`
+- Android device for the first build
+
+## Environment strategy
+
+The mobile app reads these public values:
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+- `EXPO_PUBLIC_API_BASE_URL`
+
+The source of truth should be EAS environments:
+
+- `preview`
+- `production`
+
+Pull one into `mobile/.env.local` before starting Metro:
+
+```bash
+npm run env:pull:preview
+```
+
+or:
+
+```bash
+npm run env:pull:production
+```
+
+## One-time setup
+
+1. Install dependencies:
 
    ```bash
    npm install
    ```
 
-2. Start the app
+2. Log into Expo:
 
    ```bash
-   npx expo start
+   npx eas login
    ```
 
-In the output, you'll find options to open the app in a
+3. Connect the project to EAS:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+   ```bash
+   npx eas init
+   ```
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+4. Create EAS environments named `preview` and `production`, each with:
 
-## Get a fresh project
+   - `EXPO_PUBLIC_SUPABASE_URL`
+   - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
+   - `EXPO_PUBLIC_API_BASE_URL`
 
-When you're ready, run:
+5. Build the Android dev client:
 
-```bash
-npm run reset-project
-```
+   ```bash
+   npm run build:android:development
+   ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+6. Install the generated APK on your phone.
 
-### Other setup steps
+The installed app is the separate development variant:
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+- app name: `Bowling Tracker Dev`
+- Android package: `com.alonl.bowlingtracker.dev`
+- iOS bundle identifier reserved for later: `com.alonl.bowlingtracker.dev`
 
-## Learn more
+## Daily workflow
 
-To learn more about developing your project with Expo, look at the following resources:
+1. Pull the backend environment you want:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+   ```bash
+   npm run env:pull:preview
+   ```
 
-## Join the community
+   or:
 
-Join our community of developers creating universal apps.
+   ```bash
+   npm run env:pull:production
+   ```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+2. Start Metro for the dev client:
+
+   ```bash
+   npm run start:dev-client
+   ```
+
+3. Open `Bowling Tracker Dev` on your phone or scan the QR code from Metro.
+
+## Notes
+
+- The dev client can live on the phone beside a future production build.
+- Rebuild the native app only when native config or native dependencies change.
+- Normal UI and API work continues through Metro once the dev client is installed.
+- iPhone support is prepared in the config, but this repo is currently set up to build Android first.

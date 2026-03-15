@@ -4,11 +4,15 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
+    "start:dev-client": "cross-env APP_VARIANT=development expo start --dev-client --tunnel",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "env:pull:preview": "eas env:pull --environment preview --path .env.local --non-interactive",
+    "env:pull:production": "eas env:pull --environment production --path .env.local --non-interactive",
+    "build:android:development": "cross-env APP_VARIANT=development eas build --platform android --profile development"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -20,6 +24,7 @@
     "expo": "~55.0.6",
     "expo-clipboard": "^55.0.8",
     "expo-constants": "~55.0.7",
+    "expo-dev-client": "~55.0.16",
     "expo-device": "~55.0.9",
     "expo-file-system": "^55.0.10",
     "expo-font": "~55.0.4",
@@ -45,7 +50,10 @@
     "react-native-worklets": "0.7.2"
   },
   "devDependencies": {
+    "@expo/ngrok": "^4.1.0",
     "@types/react": "~19.2.2",
+    "cross-env": "^10.1.0",
+    "eas-cli": "^18.3.0",
     "typescript": "~5.9.2"
   },
   "private": true

@@ -34,7 +34,7 @@ export default function RecordScreen() {
   const router = useRouter();
 
   return (
-    <ScreenShell title="Record" subtitle="Record new games and add them to your personal log.">
+    <ScreenShell title="Record">
       <View style={styles.list}>
         {OPTIONS.map((option) => (
           <Pressable

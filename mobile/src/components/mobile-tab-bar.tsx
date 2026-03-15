@@ -1,9 +1,11 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { CommonActions } from '@react-navigation/native';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
+  Keyboard,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -129,9 +131,29 @@ export default function MobileTabBar({
   navigation,
 }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSubscription = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   return (
-    <View style={[styles.container, { paddingBottom: 10 + insets.bottom }]}>
+    <View
+      pointerEvents={keyboardVisible ? 'none' : 'auto'}
+      style={[
+        styles.container,
+        { paddingBottom: 10 + insets.bottom },
+        keyboardVisible && styles.containerHidden,
+      ]}>
       <View style={styles.row}>
         {state.routes.map((route, index) => {
           const descriptor = descriptors[route.key];
@@ -191,6 +213,9 @@ const styles = StyleSheet.create({
     backgroundColor: palette.nav,
     paddingTop: 8,
     paddingHorizontal: 8,
+  },
+  containerHidden: {
+    opacity: 0,
   },
   row: {
     flexDirection: 'row',
