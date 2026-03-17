@@ -4,8 +4,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Alert,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -71,6 +71,7 @@ export default function SessionDetailScreen() {
   const group = grouping.groups.find((entry) => entry.key === sessionId);
 
   const [editing, setEditing] = useState(false);
+  const [deleteOptionsOpen, setDeleteOptionsOpen] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [moveGameId, setMoveGameId] = useState<string | null>(null);
@@ -88,6 +89,14 @@ export default function SessionDetailScreen() {
     setDraftName(group.session?.name?.trim() || '');
     setDraftDescription(group.session?.description?.trim() || '');
   }, [group]);
+
+  const leaveSessionDetail = () => {
+    if (Platform.OS === 'web') {
+      router.replace('/sessions' as never);
+      return;
+    }
+    router.back();
+  };
 
   const updateMutation = useMutation({
     mutationFn: async () => {
@@ -163,7 +172,7 @@ export default function SessionDetailScreen() {
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
       ]);
-      router.back();
+      leaveSessionDetail();
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to move games out of session.');
@@ -196,29 +205,7 @@ export default function SessionDetailScreen() {
       return;
     }
 
-    Alert.alert('Delete Session', 'Choose how to handle the games in this session.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Move to different session',
-        onPress: () => setMoveDeletingSession(true),
-      },
-      {
-        text: 'Delete games too',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteSession(group.sessionId as string, 'delete_games');
-            await Promise.all([
-              queryClient.invalidateQueries({ queryKey: queryKeys.games }),
-              queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-            ]);
-            router.back();
-          } catch (nextError) {
-            setError(nextError instanceof Error ? nextError.message : 'Failed to delete session.');
-          }
-        },
-      },
-    ]);
+    setDeleteOptionsOpen(true);
   };
 
   return (
@@ -229,7 +216,7 @@ export default function SessionDetailScreen() {
         showsVerticalScrollIndicator={false}>
         <View style={styles.topBar}>
           <Pressable
-            onPress={() => router.back()}
+            onPress={leaveSessionDetail}
             style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
             <Ionicons name="chevron-back" size={16} color={palette.muted} />
             <Text style={styles.backText}>Back</Text>
@@ -319,6 +306,48 @@ export default function SessionDetailScreen() {
             <ActionButton
               label="Cancel"
               onPress={() => setEditing(false)}
+              variant="secondary"
+            />
+          </SurfaceCard>
+        </View>
+      </Modal>
+
+      <Modal
+        transparent
+        animationType="fade"
+        visible={deleteOptionsOpen}
+        onRequestClose={() => setDeleteOptionsOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <SurfaceCard style={styles.modalCard} tone="raised">
+            <Text style={styles.modalTitle}>Delete Session</Text>
+            <Text style={styles.modalBody}>Choose how to handle the games in this session.</Text>
+            <ActionButton
+              label="Move to different session"
+              onPress={() => {
+                setDeleteOptionsOpen(false);
+                setMoveDeletingSession(true);
+              }}
+            />
+            <ActionButton
+              label="Delete games too"
+              variant="danger"
+              onPress={async () => {
+                try {
+                  setDeleteOptionsOpen(false);
+                  await deleteSession(group.sessionId as string, 'delete_games');
+                  await Promise.all([
+                    queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+                    queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+                  ]);
+                  leaveSessionDetail();
+                } catch (nextError) {
+                  setError(nextError instanceof Error ? nextError.message : 'Failed to delete session.');
+                }
+              }}
+            />
+            <ActionButton
+              label="Cancel"
+              onPress={() => setDeleteOptionsOpen(false)}
               variant="secondary"
             />
           </SurfaceCard>
@@ -536,6 +565,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     lineHeight: 30,
     fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  modalBody: {
+    color: palette.muted,
+    fontSize: 15,
+    lineHeight: 21,
     fontFamily: fontFamilySans,
   },
   input: {
