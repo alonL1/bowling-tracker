@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
@@ -9,11 +9,13 @@ import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
 import StackBadge from '@/components/stack-badge';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { confirmAction } from '@/lib/confirm';
 import { getLiveGameScoreLabel, getResolvedPlayersForGame } from '@/lib/live-session';
 import type { LiveSessionGame } from '@/lib/types';
 
 type LiveSessionGameCardProps = {
   game: LiveSessionGame;
+  gameNumber: number;
   selectedPlayerKeys: string[];
   onEdit: (game: LiveSessionGame) => void;
   onDelete: (gameId: string) => void;
@@ -40,6 +42,7 @@ function formatCapturedAt(value?: string | null) {
 
 export default function LiveSessionGameCard({
   game,
+  gameNumber,
   selectedPlayerKeys,
   onEdit,
   onDelete,
@@ -47,7 +50,7 @@ export default function LiveSessionGameCard({
 }: LiveSessionGameCardProps) {
   const [expanded, setExpanded] = useState(false);
   const players = useMemo(() => getResolvedPlayersForGame(game), [game]);
-  const badgeLines = useMemo(() => ['Game', String(game.capture_order)], [game.capture_order]);
+  const badgeLines = useMemo(() => ['Game', String(gameNumber)], [gameNumber]);
   const scoreLabel = useMemo(
     () => getLiveGameScoreLabel(game, selectedPlayerKeys),
     [game, selectedPlayerKeys],
@@ -75,16 +78,15 @@ export default function LiveSessionGameCard({
           />
           <IconAction
             accessibilityLabel="Delete live game"
-            onPress={() => {
-              Alert.alert('Delete game', 'Remove this scoreboard from the live session?', [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: () => onDelete(game.id),
-                },
-              ]);
-            }}
+            onPress={() =>
+              confirmAction({
+                title: 'Delete game',
+                message: 'Remove this scoreboard from the live session?',
+                confirmLabel: 'Delete',
+                destructive: true,
+                onConfirm: () => onDelete(game.id),
+              })
+            }
             icon={
               deleting ? (
                 <BowlingBallSpinner size={18} holeColor={palette.field} />

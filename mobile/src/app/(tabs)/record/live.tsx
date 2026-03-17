@@ -1,12 +1,11 @@
 import { File as ExpoFile } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -40,9 +39,8 @@ import {
   buildProjectedLoggedGameCount,
   canonicalizePlayerLabel,
   getLiveGameScoreLabel,
-  getLiveSessionDescription,
-  getLiveSessionTitle,
 } from '@/lib/live-session';
+import { confirmAction } from '@/lib/confirm';
 import { deriveCapturedAtHint, sanitizeFilename } from '@/lib/upload';
 import { supabase } from '@/lib/supabase';
 import type { LiveSessionGame, LiveSessionResponse } from '@/lib/types';
@@ -127,12 +125,13 @@ export default function LiveSessionScreen() {
   const { user, loading: authLoading } = useAuth();
 
   const [sourceOpen, setSourceOpen] = useState(false);
-  const [sessionEditOpen, setSessionEditOpen] = useState(false);
+  const [endSessionOpen, setEndSessionOpen] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [error, setError] = useState('');
   const [editingGame, setEditingGame] = useState<LiveSessionGame | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
+  const selectionRevisionRef = useRef(0);
 
   const liveSessionQuery = useQuery({
     queryKey: queryKeys.liveSession,
@@ -147,7 +146,6 @@ export default function LiveSessionScreen() {
   });
 
   const liveSession = liveSessionQuery.data?.liveSession ?? null;
-  const nextSessionNumber = liveSessionQuery.data?.nextSessionNumber ?? 1;
 
   useEffect(() => {
     if (!liveSession) {
@@ -184,36 +182,22 @@ export default function LiveSessionScreen() {
   const hasFailedGames = nonReadyGames.some((game) => game.status === 'error');
 
   const selectionMutation = useMutation({
-    mutationFn: async (nextSelectedPlayerKeys: string[]) =>
+    mutationFn: async ({
+      nextSelectedPlayerKeys,
+    }: {
+      nextSelectedPlayerKeys: string[];
+      revision: number;
+    }) =>
       updateLiveSession({ selectedPlayerKeys: nextSelectedPlayerKeys }),
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update selected players.');
       void queryClient.invalidateQueries({ queryKey: queryKeys.liveSession });
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
+      if (variables.revision !== selectionRevisionRef.current) {
+        return;
+      }
       queryClient.setQueryData(queryKeys.liveSession, data);
-    },
-  });
-
-  const sessionMutation = useMutation({
-    mutationFn: async () => {
-      if (!liveSession) {
-        return null;
-      }
-      return updateLiveSession({
-        name: draftName,
-        description: draftDescription,
-      });
-    },
-    onSuccess: (data) => {
-      if (data) {
-        queryClient.setQueryData(queryKeys.liveSession, data);
-      }
-      setSessionEditOpen(false);
-      setError('');
-    },
-    onError: (nextError) => {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to save session details.');
     },
   });
 
@@ -326,9 +310,28 @@ export default function LiveSessionScreen() {
   });
 
   const endSessionMutation = useMutation({
-    mutationFn: endLiveSession,
+    mutationFn: async () => {
+      if (!liveSession) {
+        throw new Error('No active live session was found.');
+      }
+
+      const trimmedName = draftName.trim();
+      const trimmedDescription = draftDescription.trim();
+      const currentName = liveSession.name?.trim() || '';
+      const currentDescription = liveSession.description?.trim() || '';
+
+      if (trimmedName !== currentName || trimmedDescription !== currentDescription) {
+        await updateLiveSession({
+          name: trimmedName,
+          description: trimmedDescription,
+        });
+      }
+
+      return endLiveSession();
+    },
     onSuccess: async (payload) => {
       setError('');
+      setEndSessionOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
@@ -342,7 +345,7 @@ export default function LiveSessionScreen() {
   });
 
   const handleTogglePlayer = (playerKey: string) => {
-    if (!liveSession || selectionMutation.isPending) {
+    if (!liveSession) {
       return;
     }
 
@@ -357,50 +360,18 @@ export default function LiveSessionScreen() {
       })),
     );
 
-    selectionMutation.mutate(nextSelectedPlayerKeys);
-  };
-
-  const handleSaveSessionDetails = () => {
-    if (!liveSession) {
-      setSessionEditOpen(false);
-      setError('');
-      return;
-    }
-    sessionMutation.mutate();
+    selectionRevisionRef.current += 1;
+    selectionMutation.mutate({
+      nextSelectedPlayerKeys,
+      revision: selectionRevisionRef.current,
+    });
   };
 
   const handleEndSession = () => {
     if (!liveSession) {
       return;
     }
-
-    const selectedLabels = playerOptions
-      .filter((option) => selectedPlayerKeys.includes(option.key))
-      .map((option) => canonicalizePlayerLabel(option.label));
-
-    const warningLines = [
-      'Ending this session is final.',
-      '',
-      `Selected names: ${selectedLabels.join(', ') || 'None'}`,
-      `Visible scoreboards: ${readyGames.length}`,
-      `Logged games that will be created: ${projectedLoggedGameCount}`,
-    ];
-
-    if (selectedPlayerKeys.length > 1) {
-      warningLines.push(
-        '',
-        'Multiple selected names can create more logged games than visible scoreboards because each selected row is logged separately.',
-      );
-    }
-
-    Alert.alert('End Session', warningLines.join('\n'), [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'End Session',
-        style: 'destructive',
-        onPress: () => endSessionMutation.mutate(),
-      },
-    ]);
+    setEndSessionOpen(true);
   };
 
   if (authLoading || (liveSessionQuery.isPending && !liveSessionQuery.data)) {
@@ -424,8 +395,9 @@ export default function LiveSessionScreen() {
     );
   }
 
-  const sessionTitle = getLiveSessionTitle(liveSession?.name ?? draftName, liveSession?.sessionNumber ?? nextSessionNumber);
-  const sessionDescription = getLiveSessionDescription(liveSession?.description ?? draftDescription);
+  const selectedLabels = playerOptions
+    .filter((option) => selectedPlayerKeys.includes(option.key))
+    .map((option) => canonicalizePlayerLabel(option.label));
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -443,15 +415,6 @@ export default function LiveSessionScreen() {
 
           <View style={styles.header}>
             <Text style={styles.pageTitle}>Live Session</Text>
-            <View style={styles.sessionTitleRow}>
-              <Text style={styles.sessionTitle}>{sessionTitle}</Text>
-              <IconAction
-                accessibilityLabel="Edit live session details"
-                onPress={() => setSessionEditOpen(true)}
-                icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
-              />
-            </View>
-            <Text style={styles.sessionDescription}>{sessionDescription}</Text>
           </View>
 
           {error ? <InfoBanner tone="error" text={error} /> : null}
@@ -494,6 +457,7 @@ export default function LiveSessionScreen() {
                     <Pressable
                       key={option.key}
                       onPress={() => handleTogglePlayer(option.key)}
+                      hitSlop={8}
                       style={({ pressed }) => [styles.checkboxRow, pressed && styles.pressed]}>
                       <MaterialIcons
                         name={checked ? 'check-box' : 'check-box-outline-blank'}
@@ -522,11 +486,12 @@ export default function LiveSessionScreen() {
 
           {liveSession?.games?.length ? (
             <View style={styles.gameList}>
-              {liveSession.games.map((game) =>
+              {liveSession.games.map((game, index) =>
                 game.status === 'ready' ? (
                   <LiveSessionGameCard
                     key={game.id}
                     game={game}
+                    gameNumber={index + 1}
                     selectedPlayerKeys={selectedPlayerKeys}
                     deleting={deletingGameId === game.id}
                     onEdit={setEditingGame}
@@ -536,7 +501,7 @@ export default function LiveSessionScreen() {
                   <SurfaceCard key={game.id} style={styles.pendingCard}>
                     <View style={styles.pendingCardRow}>
                       <View style={styles.pendingSummary}>
-                        <StackBadge lines={['Game', String(game.capture_order)]} />
+                        <StackBadge lines={['Game', String(index + 1)]} />
                         <View style={styles.pendingTextBlock}>
                           <Text style={styles.pendingTitle}>
                             {game.status === 'error'
@@ -556,7 +521,15 @@ export default function LiveSessionScreen() {
                         ) : null}
                         <IconAction
                           accessibilityLabel="Delete pending live game"
-                          onPress={() => deleteGameMutation.mutate(game.id)}
+                          onPress={() =>
+                            confirmAction({
+                              title: 'Delete game',
+                              message: 'Remove this scoreboard from the live session?',
+                              confirmLabel: 'Delete',
+                              destructive: true,
+                              onConfirm: () => deleteGameMutation.mutate(game.id),
+                            })
+                          }
                           icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
                         />
                       </View>
@@ -626,20 +599,38 @@ export default function LiveSessionScreen() {
       <Modal
         transparent
         animationType="fade"
-        visible={sessionEditOpen}
-        onRequestClose={() => setSessionEditOpen(false)}>
+        visible={endSessionOpen}
+        onRequestClose={() => setEndSessionOpen(false)}>
         <View style={styles.modalBackdrop}>
           <SurfaceCard style={styles.modalCard} tone="raised">
-            <Text style={styles.modalTitle}>Edit Session</Text>
+            <Text style={styles.modalTitle}>End Session</Text>
+            <Text style={styles.modalBody}>Ending this session is final.</Text>
+            <View style={styles.summaryList}>
+              <Text style={styles.summaryLine}>
+                Selected names: {selectedLabels.join(', ') || 'None'}
+              </Text>
+              <Text style={styles.summaryLine}>Visible scoreboards: {readyGames.length}</Text>
+              <Text style={styles.summaryLine}>
+                Logged games that will be created: {projectedLoggedGameCount}
+              </Text>
+            </View>
+            {selectedPlayerKeys.length > 1 ? (
+              <Text style={styles.modalBody}>
+                Multiple selected names can create more logged games than visible scoreboards because each selected row is logged separately.
+              </Text>
+            ) : null}
+            <Text style={styles.modalHint}>
+              Optionally rename the session or add a description before ending it.
+            </Text>
             <TextInput
-              placeholder="Session name"
+              placeholder="Session name (optional)"
               placeholderTextColor={palette.muted}
               style={styles.input}
               value={draftName}
               onChangeText={setDraftName}
             />
             <TextInput
-              placeholder="Description"
+              placeholder="Description (optional)"
               placeholderTextColor={palette.muted}
               style={[styles.input, styles.descriptionInput]}
               multiline
@@ -647,11 +638,11 @@ export default function LiveSessionScreen() {
               onChangeText={setDraftDescription}
             />
             <ActionButton
-              label={sessionMutation.isPending ? 'Saving...' : 'Save'}
-              onPress={handleSaveSessionDetails}
-              disabled={sessionMutation.isPending}
+              label={endSessionMutation.isPending ? 'Ending session...' : 'End Session'}
+              onPress={() => endSessionMutation.mutate()}
+              disabled={endSessionMutation.isPending}
             />
-            <ActionButton label="Cancel" onPress={() => setSessionEditOpen(false)} variant="secondary" />
+            <ActionButton label="Cancel" onPress={() => setEndSessionOpen(false)} variant="secondary" />
           </SurfaceCard>
         </View>
       </Modal>
@@ -717,26 +708,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     fontFamily: fontFamilySans,
   },
-  sessionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  sessionTitle: {
-    flex: 1,
-    color: palette.text,
-    fontSize: 30,
-    lineHeight: 34,
-    fontWeight: '500',
-    fontFamily: fontFamilySans,
-  },
-  sessionDescription: {
-    color: palette.muted,
-    fontSize: 15,
-    lineHeight: 21,
-    fontFamily: fontFamilySans,
-  },
   sectionCard: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.lg,
@@ -762,8 +733,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    minHeight: 46,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: palette.field,
   },
   checkboxLabel: {
+    flex: 1,
     color: palette.text,
     fontSize: 16,
     lineHeight: 20,
@@ -904,6 +881,27 @@ const styles = StyleSheet.create({
     fontSize: 24,
     lineHeight: 30,
     fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  modalBody: {
+    color: palette.muted,
+    fontSize: 15,
+    lineHeight: 21,
+    fontFamily: fontFamilySans,
+  },
+  modalHint: {
+    color: palette.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: fontFamilySans,
+  },
+  summaryList: {
+    gap: 4,
+  },
+  summaryLine: {
+    color: palette.text,
+    fontSize: 14,
+    lineHeight: 20,
     fontFamily: fontFamilySans,
   },
   input: {

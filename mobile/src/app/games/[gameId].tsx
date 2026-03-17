@@ -2,7 +2,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,6 +21,7 @@ import {
   updateGame,
 } from '@/lib/backend';
 import { buildFrameGrid, buildSessionGroups } from '@/lib/bowling';
+import { confirmAction } from '@/lib/confirm';
 import {
   combineLocalDateAndTime,
   toLocalDateInputValue,
@@ -197,22 +197,21 @@ export default function GameDetailScreen() {
   }
 
   const handleDelete = () => {
-    Alert.alert('Delete game', 'This will permanently remove the game.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteGame(game.id);
-            await queryClient.invalidateQueries({ queryKey: queryKeys.games });
-            router.back();
-          } catch (nextError) {
-            setError(nextError instanceof Error ? nextError.message : 'Failed to delete game.');
-          }
-        },
+    confirmAction({
+      title: 'Delete game',
+      message: 'This will permanently remove the game.',
+      confirmLabel: 'Delete',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await deleteGame(game.id);
+          await queryClient.invalidateQueries({ queryKey: queryKeys.games });
+          router.back();
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : 'Failed to delete game.');
+        }
       },
-    ]);
+    });
   };
 
   return (

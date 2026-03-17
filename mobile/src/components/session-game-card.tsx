@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -12,6 +12,7 @@ import InfoBanner from '@/components/info-banner';
 import StackBadge from '@/components/stack-badge';
 import { deleteGame, fetchGameById, queryKeys } from '@/lib/backend';
 import { buildFrameGrid } from '@/lib/bowling';
+import { confirmAction } from '@/lib/confirm';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import type { GameListItem } from '@/lib/types';
@@ -67,14 +68,13 @@ export default function SessionGameCard({
   const badgeLines = useMemo(() => getCollapsedBadgeLines(title), [title]);
 
   const handleDelete = () => {
-    Alert.alert('Delete game', 'This will permanently remove the game.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => deleteMutation.mutate(),
-      },
-    ]);
+    confirmAction({
+      title: 'Delete game',
+      message: 'This will permanently remove the game.',
+      confirmLabel: 'Delete',
+      destructive: true,
+      onConfirm: () => deleteMutation.mutate(),
+    });
   };
 
   return (
