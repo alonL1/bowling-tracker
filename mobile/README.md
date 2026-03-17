@@ -1,23 +1,22 @@
-# Bowling Tracker Mobile
+# Bowling Tracker Mobile + Web Frontend
 
-This Expo app now targets a **development build** workflow instead of Expo Go.
+`mobile/` is now the single source of truth for the Bowling Tracker product UI across:
 
-## Prerequisites
+- Android
+- iPhone
+- browser/web
 
-- Node.js + npm
-- an Expo account
-- EAS access via `eas-cli`
-- Android device for the first build
+The browser app is built from this Expo / React Native codebase and then hosted by the root Next/Vercel deployment.
 
-## Environment strategy
+## Frontend environment
 
-The mobile app reads these public values:
+The Expo frontend reads:
 
 - `EXPO_PUBLIC_SUPABASE_URL`
 - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
 - `EXPO_PUBLIC_API_BASE_URL`
 
-The source of truth should be EAS environments:
+For native dev-client work, the source of truth can still be EAS environments:
 
 - `preview`
 - `production`
@@ -34,7 +33,7 @@ or:
 npm run env:pull:production
 ```
 
-## One-time setup
+## Native workflow
 
 1. Install dependencies:
 
@@ -54,51 +53,46 @@ npm run env:pull:production
    npx eas init
    ```
 
-4. Create EAS environments named `preview` and `production`, each with:
-
-   - `EXPO_PUBLIC_SUPABASE_URL`
-   - `EXPO_PUBLIC_SUPABASE_ANON_KEY`
-   - `EXPO_PUBLIC_API_BASE_URL`
-
-5. Build the Android dev client:
+4. Build the Android dev client:
 
    ```bash
    npm run build:android:development
    ```
 
-6. Install the generated APK on your phone.
+5. Install the generated APK on your phone.
 
-The installed app is the separate development variant:
-
-- app name: `Bowling Tracker Dev`
-- Android package: `com.alonl.bowlingtracker.dev`
-- iOS bundle identifier reserved for later: `com.alonl.bowlingtracker.dev`
-
-## Daily workflow
-
-1. Pull the backend environment you want:
-
-   ```bash
-   npm run env:pull:preview
-   ```
-
-   or:
-
-   ```bash
-   npm run env:pull:production
-   ```
-
-2. Start Metro for the dev client:
+6. Start Metro:
 
    ```bash
    npm run start:dev-client
    ```
 
-3. Open `Bowling Tracker Dev` on your phone or scan the QR code from Metro.
+## Web workflow
+
+### Fast Expo web dev server
+
+```bash
+npm run web
+```
+
+This is the quickest way to iterate on browser UI directly from Expo.
+
+### Production-like Next-hosted browser app
+
+The repo root exports this Expo frontend and serves it through Next. From the repo root:
+
+```bash
+npm run dev
+```
+
+or for production build:
+
+```bash
+npm run build
+```
 
 ## Notes
 
-- The dev client can live on the phone beside a future production build.
-- Rebuild the native app only when native config or native dependencies change.
-- Normal UI and API work continues through Metro once the dev client is installed.
-- iPhone support is prepared in the config, but this repo is currently set up to build Android first.
+- The browser app now runs the same Expo route tree as mobile.
+- Web-specific compatibility should be handled sparingly and only where browser behavior truly differs.
+- Native dev-client flows remain intact; this migration does not change the Android/iPhone development model.

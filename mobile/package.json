@@ -9,6 +9,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "export:web": "expo export --platform web",
     "lint": "expo lint",
     "env:pull:preview": "eas env:pull --environment preview --path .env.local --non-interactive",
     "env:pull:production": "eas env:pull --environment production --path .env.local --non-interactive",

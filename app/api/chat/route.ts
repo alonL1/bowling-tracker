@@ -2079,7 +2079,8 @@ export async function POST(request: Request) {
       const sqlResult = await runSqlMethod(
         supabase,
         supabaseUrl,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+        process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
         apiKey,
         model,
         question,

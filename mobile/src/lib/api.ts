@@ -7,9 +7,25 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, '');
 }
 
+function deriveWebApiBaseUrl(envBase?: string) {
+  if (typeof window === 'undefined') {
+    return envBase ? trimTrailingSlash(envBase) : 'http://localhost:3000';
+  }
+
+  const { origin, hostname, port } = window.location;
+  const isExpoDevHost =
+    (hostname === 'localhost' || hostname === '127.0.0.1') && (port === '8081' || port === '19006');
+
+  if (isExpoDevHost) {
+    return envBase ? trimTrailingSlash(envBase) : 'http://localhost:3000';
+  }
+
+  return trimTrailingSlash(origin);
+}
+
 function deriveDevApiBaseUrl() {
   if (Platform.OS === 'web') {
-    return 'http://localhost:3000';
+    return deriveWebApiBaseUrl();
   }
 
   const hostUri =
@@ -28,6 +44,9 @@ function deriveDevApiBaseUrl() {
 
 export function getApiBaseUrl() {
   const envBase = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
+  if (Platform.OS === 'web') {
+    return deriveWebApiBaseUrl(envBase);
+  }
   if (envBase) {
     return trimTrailingSlash(envBase);
   }

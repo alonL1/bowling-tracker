@@ -3,6 +3,8 @@ node_modules/
 .vercel/
 dist/
 coverage/
+public/expo-web/
+public/favicon.ico
 
 .env
 .env.*
