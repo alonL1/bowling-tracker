@@ -12,21 +12,21 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
   return {
     ...config,
-    name: isDevelopment ? 'Bowling Tracker Dev' : 'Bowling Tracker',
+    name: isDevelopment ? 'PinPoint Dev' : 'PinPoint',
     slug: 'bowling-tracker-mobile',
     version: '1.0.0',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
-    scheme: isDevelopment ? 'bowlingtracker-dev' : 'bowlingtracker',
+    scheme: isDevelopment ? 'pinpoint-dev' : 'pinpoint',
     userInterfaceStyle: 'dark',
     ios: {
       icon: './assets/expo.icon',
       bundleIdentifier: isDevelopment
-        ? 'com.alonl.bowlingtracker.dev'
-        : 'com.alonl.bowlingtracker',
+        ? 'com.alonl.pinpoint.dev'
+        : 'com.alonl.pinpoint',
     },
     android: {
-      package: isDevelopment ? 'com.alonl.bowlingtracker.dev' : 'com.alonl.bowlingtracker',
+      package: isDevelopment ? 'com.alonl.pinpoint.dev' : 'com.alonl.pinpoint',
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
         foregroundImage: './assets/images/android-icon-foreground.png',
@@ -42,6 +42,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     plugins: [
       'expo-router',
       'expo-dev-client',
+      'expo-web-browser',
       [
         'expo-splash-screen',
         {

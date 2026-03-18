@@ -191,7 +191,7 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Bowling Tracker</Text>
+            <Text style={styles.headerTitle}>PinPoint</Text>
             <Text style={styles.headerSubtitle}>
               Sign in to access your sessions, uploads, chat, and friends on mobile.
             </Text>
@@ -221,7 +221,7 @@ export default function LoginScreen() {
               <Text style={styles.cardTitle}>{title}</Text>
               <Text style={styles.cardSubtitle}>
                 {mode === 'signIn'
-                  ? 'Use your Bowling Tracker account to keep everything in sync.'
+                  ? 'Use your PinPoint account to keep everything in sync.'
                   : 'Create an account to save your logs and access them on every device.'}
               </Text>
             </View>

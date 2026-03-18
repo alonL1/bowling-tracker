@@ -24,7 +24,7 @@ export default function RecordScreen() {
 
   const options = [
     {
-      title: hasLiveSession ? 'Resume Live Session' : 'Start a Live Session',
+      title: hasLiveSession ? 'Resume Live Session' : 'Start Live Session',
       description:
         'About to start your bowling session? Select this option to start recording it and see live stats.',
       route: '/record/live',

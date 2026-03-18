@@ -52,7 +52,7 @@ export default function AccountScreen() {
         <SurfaceCard style={styles.actionsCard} tone="raised">
           <Text style={styles.actionsTitle}>Ready to save your progress?</Text>
           <Text style={styles.actionsDescription}>
-            Create an account to keep your logs and sync the same Bowling Tracker data on every device.
+            Create an account to keep your logs and sync the same PinPoint data on every device.
           </Text>
           <ActionButton
             label="Sign in / Create account"

@@ -1,6 +1,6 @@
-# Bowling Tracker Mobile + Web Frontend
+# PinPoint Mobile + Web Frontend
 
-`mobile/` is now the single source of truth for the Bowling Tracker product UI across:
+`mobile/` is now the single source of truth for the PinPoint product UI across:
 
 - Android
 - iPhone
@@ -66,6 +66,25 @@ npm run env:pull:production
    ```bash
    npm run start:dev-client
    ```
+
+## Android Play Store workflow
+
+1. Pull the production frontend env:
+
+   ```bash
+   npm run env:pull:production
+   ```
+
+2. Build the production Android App Bundle:
+
+   ```bash
+   npm run build:android:production
+   ```
+
+This uses the production app identity:
+
+- app name: `PinPoint`
+- Android package: `com.alonl.pinpoint`
 
 ## Web workflow
 

@@ -1,6 +1,6 @@
-# bowling-tracker
+# PinPoint
 
-Bowling Tracker now uses:
+PinPoint now uses:
 
 - an Expo / React Native frontend in `mobile/` for iPhone, Android, and web
 - a Next.js app at the repo root for `/api` routes and server-side backend logic
@@ -93,6 +93,17 @@ npm run env:pull:preview
 npm run build:android:development
 npm run start:dev-client
 ```
+
+### Android Play Store build
+
+From `mobile/`:
+
+```bash
+npm run env:pull:production
+npm run build:android:production
+```
+
+This creates a production Android App Bundle (`.aab`) for the Play Store using the `PinPoint` production app identity (`com.alonl.pinpoint`).
 
 ## Production build
 

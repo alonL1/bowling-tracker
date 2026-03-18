@@ -158,8 +158,8 @@ export default function FriendsScreen() {
     }
     try {
       await Share.share({
-        title: 'Bowling Tracker',
-        message: `Join my Bowling Tracker friends list: ${invitePayload.inviteUrl}`,
+        title: 'PinPoint',
+        message: `Join my PinPoint friends list: ${invitePayload.inviteUrl}`,
         url: invitePayload.inviteUrl,
       });
       setInviteStatus('Invite shared.');
@@ -271,7 +271,7 @@ export default function FriendsScreen() {
             </View>
             <Text style={styles.modalTitle}>Send your friends a link</Text>
             <Text style={styles.modalText}>
-              Share your persistent Bowling Tracker invite link. Anyone who opens it can accept and
+              Share your persistent PinPoint invite link. Anyone who opens it can accept and
               join your leaderboard.
             </Text>
 
