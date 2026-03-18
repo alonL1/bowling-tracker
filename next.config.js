@@ -26,6 +26,10 @@ const nextConfig = {
           destination: expoIndex
         },
         {
+          source: "/privacy",
+          destination: expoIndex
+        },
+        {
           source: "/sessions",
           destination: expoIndex
         },
