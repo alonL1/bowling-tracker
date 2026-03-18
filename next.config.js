@@ -30,6 +30,14 @@ const nextConfig = {
           destination: expoIndex
         },
         {
+          source: "/delete-account",
+          destination: expoIndex
+        },
+        {
+          source: "/delete-data",
+          destination: expoIndex
+        },
+        {
           source: "/sessions",
           destination: expoIndex
         },
