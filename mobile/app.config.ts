@@ -9,6 +9,24 @@ function getAppVariant(): AppVariant {
 export default ({ config }: ConfigContext): ExpoConfig => {
   const appVariant = getAppVariant();
   const isDevelopment = appVariant === 'development';
+  const plugins: ExpoConfig['plugins'] = [
+    'expo-router',
+    'expo-web-browser',
+    [
+      'expo-splash-screen',
+      {
+        backgroundColor: '#208AEF',
+        android: {
+          image: './assets/images/icon.png',
+          imageWidth: 76,
+        },
+      },
+    ],
+  ];
+
+  if (isDevelopment) {
+    plugins.splice(1, 0, 'expo-dev-client');
+  }
 
   return {
     ...config,
@@ -20,18 +38,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     scheme: isDevelopment ? 'pinpoint-dev' : 'pinpoint',
     userInterfaceStyle: 'dark',
     ios: {
-      icon: './assets/expo.icon',
+      icon: './assets/images/icon.png',
       bundleIdentifier: isDevelopment
         ? 'com.alonl.pinpoint.dev'
         : 'com.alonl.pinpoint',
     },
     android: {
+      icon: './assets/images/icon.png',
       package: isDevelopment ? 'com.alonl.pinpoint.dev' : 'com.alonl.pinpoint',
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
-        foregroundImage: './assets/images/android-icon-foreground.png',
-        backgroundImage: './assets/images/android-icon-background.png',
-        monochromeImage: './assets/images/android-icon-monochrome.png',
+        foregroundImage: './assets/images/icon.png',
       },
       predictiveBackGestureEnabled: false,
     },
@@ -39,21 +56,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       output: 'single',
       favicon: './assets/images/favicon.png',
     },
-    plugins: [
-      'expo-router',
-      'expo-dev-client',
-      'expo-web-browser',
-      [
-        'expo-splash-screen',
-        {
-          backgroundColor: '#208AEF',
-          android: {
-            image: './assets/images/splash-icon.png',
-            imageWidth: 76,
-          },
-        },
-      ],
-    ],
+    plugins,
     experiments: {
       typedRoutes: true,
       reactCompiler: true,
