@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +13,7 @@ import {
 
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import FrameGrid from '@/components/frame-grid';
+import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import SurfaceCard from '@/components/surface-card';
 import { fetchGameById, queryKeys, updateGame } from '@/lib/backend';
 import { buildFrameGrid } from '@/lib/bowling';
@@ -161,7 +163,10 @@ export default function GameEditSheet({
 
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
-      <View style={styles.backdrop}>
+      <KeyboardAvoidingView
+        behavior="padding"
+        enabled={Platform.OS === 'ios'}
+        style={styles.backdrop}>
         <SurfaceCard style={styles.sheet} tone="raised">
           <View style={styles.handle} />
           <View style={styles.header}>
@@ -179,7 +184,7 @@ export default function GameEditSheet({
               {gameQuery.error instanceof Error ? gameQuery.error.message : 'Failed to load game.'}
             </Text>
           ) : (
-            <ScrollView
+            <KeyboardAwareScrollView
               style={styles.scroll}
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}>
@@ -259,7 +264,7 @@ export default function GameEditSheet({
                   </SurfaceCard>
                 ))}
               </View>
-            </ScrollView>
+            </KeyboardAwareScrollView>
           )}
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -282,7 +287,7 @@ export default function GameEditSheet({
             </Pressable>
           </View>
         </SurfaceCard>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

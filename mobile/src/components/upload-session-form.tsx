@@ -6,7 +6,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,6 +15,7 @@ import {
 import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import InfoBanner from '@/components/info-banner';
+import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import SurfaceCard from '@/components/surface-card';
 import {
   fetchGames,
@@ -299,7 +299,9 @@ export default function UploadSessionForm({
   }, [pendingJobs]);
 
   return (
-    <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <KeyboardAwareScrollView
+      contentContainerStyle={styles.container}
+      showsVerticalScrollIndicator={false}>
       <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
         <Ionicons name="chevron-back" size={16} color={palette.muted} />
         <Text style={styles.backText}>Back</Text>
@@ -419,7 +421,7 @@ export default function UploadSessionForm({
           </View>
         </SurfaceCard>
       ) : null}
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }
 

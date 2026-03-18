@@ -46,6 +46,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       icon: './assets/images/icon.png',
       package: isDevelopment ? 'com.alonl.pinpoint.dev' : 'com.alonl.pinpoint',
+      softwareKeyboardLayoutMode: 'resize',
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
         foregroundImage: './assets/images/android-adaptive-icon.png',

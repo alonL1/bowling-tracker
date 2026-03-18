@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -10,6 +11,7 @@ import {
 } from 'react-native';
 
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
+import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
 import SurfaceCard from '@/components/surface-card';
 import { palette, radii, spacing } from '@/constants/palette';
@@ -115,7 +117,10 @@ export default function LiveGameEditSheet({
 
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
-      <View style={styles.backdrop}>
+      <KeyboardAvoidingView
+        behavior="padding"
+        enabled={Platform.OS === 'ios'}
+        style={styles.backdrop}>
         <SurfaceCard style={styles.sheet} tone="raised">
           <View style={styles.handle} />
           <View style={styles.header}>
@@ -123,7 +128,7 @@ export default function LiveGameEditSheet({
             <Text style={styles.subtitle}>Adjust player names and frame marks for this scoreboard.</Text>
           </View>
 
-          <ScrollView
+          <KeyboardAwareScrollView
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}>
@@ -210,7 +215,7 @@ export default function LiveGameEditSheet({
                 </SurfaceCard>
               ))}
             </View>
-          </ScrollView>
+          </KeyboardAwareScrollView>
 
           {errorText ? <Text style={styles.errorText}>{errorText}</Text> : null}
 
@@ -245,7 +250,7 @@ export default function LiveGameEditSheet({
             </Pressable>
           </View>
         </SurfaceCard>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

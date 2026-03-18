@@ -4,7 +4,6 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import ActionButton from '@/components/action-button';
 import CenteredState from '@/components/centered-state';
 import InfoBanner from '@/components/info-banner';
+import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import SurfaceCard from '@/components/surface-card';
 import { claimGuest } from '@/lib/backend';
 import { palette, radii, spacing } from '@/constants/palette';
@@ -183,9 +183,10 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
+        enabled={Platform.OS === 'ios'}
         style={styles.keyboardWrap}>
-        <ScrollView
+        <KeyboardAwareScrollView
           style={styles.scroll}
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
@@ -269,7 +270,7 @@ export default function LoginScreen() {
               variant="secondary"
             />
           </SurfaceCard>
-        </ScrollView>
+        </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
 
       <Modal transparent animationType="fade" visible={Boolean(transferPrompt)}>

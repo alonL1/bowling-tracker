@@ -6,7 +6,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -601,7 +603,10 @@ export default function LiveSessionScreen() {
         animationType="fade"
         visible={endSessionOpen}
         onRequestClose={() => setEndSessionOpen(false)}>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView
+          behavior="padding"
+          enabled={Platform.OS === 'ios'}
+          style={styles.modalBackdrop}>
           <SurfaceCard style={styles.modalCard} tone="raised">
             <Text style={styles.modalTitle}>End Session</Text>
             <Text style={styles.modalBody}>Ending this session is final.</Text>
@@ -644,7 +649,7 @@ export default function LiveSessionScreen() {
             />
             <ActionButton label="Cancel" onPress={() => setEndSessionOpen(false)} variant="secondary" />
           </SurfaceCard>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <LiveGameEditSheet

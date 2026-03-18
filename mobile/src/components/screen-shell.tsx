@@ -1,6 +1,5 @@
 import React, { type ReactNode, type ReactElement } from 'react';
 import {
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -10,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 
@@ -34,7 +34,7 @@ export default function ScreenShell({
 }: ScreenShellProps) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <ScrollView
+      <KeyboardAwareScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.content, contentStyle]}
         showsVerticalScrollIndicator={false}
@@ -49,7 +49,7 @@ export default function ScreenShell({
           </View>
         </View>
         <View style={[styles.body, bodyStyle]}>{children}</View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }
