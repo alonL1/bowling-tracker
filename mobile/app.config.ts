@@ -15,9 +15,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     [
       'expo-splash-screen',
       {
-        backgroundColor: '#208AEF',
+        backgroundColor: '#000000',
         android: {
-          image: './assets/images/icon.png',
+          image: './assets/images/splash-icon.png',
           imageWidth: 76,
         },
       },
@@ -48,7 +48,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       package: isDevelopment ? 'com.alonl.pinpoint.dev' : 'com.alonl.pinpoint',
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
-        foregroundImage: './assets/images/icon.png',
+        foregroundImage: './assets/images/android-adaptive-icon.png',
       },
       predictiveBackGestureEnabled: false,
     },
