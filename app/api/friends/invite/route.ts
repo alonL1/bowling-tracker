@@ -7,9 +7,21 @@ export const runtime = "nodejs";
 
 type SupabaseAnyClient = SupabaseClient<any, "public", any>;
 
-function buildInviteUrl(request: Request, token: string) {
-  const url = new URL(request.url);
-  return `${url.origin}/friends/invite/${token}`;
+function getInviteScheme() {
+  const explicitScheme =
+    typeof process.env.MOBILE_APP_SCHEME === "string"
+      ? process.env.MOBILE_APP_SCHEME.trim()
+      : "";
+
+  if (explicitScheme) {
+    return explicitScheme;
+  }
+
+  return process.env.APP_VARIANT === "development" ? "pinpoint-dev" : "pinpoint";
+}
+
+function buildInviteUrl(token: string) {
+  return `${getInviteScheme()}://invite/${token}`;
 }
 
 async function getOrCreateInviteToken(
@@ -95,7 +107,7 @@ export async function POST(request: Request) {
     const token = await getOrCreateInviteToken(supabase, user.userId);
     return NextResponse.json({
       token,
-      inviteUrl: buildInviteUrl(request, token)
+      inviteUrl: buildInviteUrl(token)
     });
   } catch (error) {
     return NextResponse.json(
