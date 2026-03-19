@@ -7,21 +7,20 @@ export const runtime = "nodejs";
 
 type SupabaseAnyClient = SupabaseClient<any, "public", any>;
 
-function getInviteScheme() {
-  const explicitScheme =
-    typeof process.env.MOBILE_APP_SCHEME === "string"
-      ? process.env.MOBILE_APP_SCHEME.trim()
-      : "";
+function getPublicInviteBaseUrl(request: Request) {
+  const explicitBaseUrl =
+    typeof process.env.PUBLIC_WEB_URL === "string" ? process.env.PUBLIC_WEB_URL.trim() : "";
 
-  if (explicitScheme) {
-    return explicitScheme;
+  if (explicitBaseUrl) {
+    return explicitBaseUrl.replace(/\/+$/, "");
   }
 
-  return process.env.APP_VARIANT === "development" ? "pinpoint-dev" : "pinpoint";
+  const url = new URL(request.url);
+  return url.origin;
 }
 
-function buildInviteUrl(token: string) {
-  return `${getInviteScheme()}://invite/${token}`;
+function buildInviteUrl(request: Request, token: string) {
+  return `${getPublicInviteBaseUrl(request)}/invite/${token}`;
 }
 
 async function getOrCreateInviteToken(
@@ -107,7 +106,7 @@ export async function POST(request: Request) {
     const token = await getOrCreateInviteToken(supabase, user.userId);
     return NextResponse.json({
       token,
-      inviteUrl: buildInviteUrl(token)
+      inviteUrl: buildInviteUrl(request, token)
     });
   } catch (error) {
     return NextResponse.json(

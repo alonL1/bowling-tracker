@@ -1,7 +1,8 @@
+import Constants from 'expo-constants';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import CenteredState from '@/components/centered-state';
 import DetailShell from '@/components/detail-shell';
@@ -9,26 +10,55 @@ import { acceptInvite, lookupInvite, queryKeys } from '@/lib/backend';
 import { palette, spacing } from '@/constants/palette';
 import { useAuth } from '@/providers/auth-provider';
 
+function getAppInviteUrl(token: string) {
+  const scheme =
+    typeof Constants.expoConfig?.scheme === 'string' && Constants.expoConfig.scheme.trim()
+      ? Constants.expoConfig.scheme.trim()
+      : typeof window !== 'undefined' && window.location.hostname === 'localhost'
+        ? 'pinpoint-dev'
+        : 'pinpoint';
+  return `${scheme}:///invite/${token}`;
+}
+
 export default function InviteScreen() {
   const router = useRouter();
   const { token } = useLocalSearchParams<{ token: string }>();
   const { loading: authLoading, isGuest } = useAuth();
   const [acceptMessage, setAcceptMessage] = useState('');
   const [acceptError, setAcceptError] = useState('');
+  const [showOpenInAppHint, setShowOpenInAppHint] = useState(false);
+  const isWeb = Platform.OS === 'web';
+  const appInviteUrl = token ? getAppInviteUrl(token) : '';
 
   useEffect(() => {
-    if (authLoading) {
+    if (authLoading || isWeb) {
       return;
     }
     if (isGuest) {
       router.replace(`/login?next=/invite/${token}`);
     }
-  }, [authLoading, isGuest, router, token]);
+  }, [authLoading, isGuest, isWeb, router, token]);
+
+  useEffect(() => {
+    if (!isWeb || !token || !appInviteUrl) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setShowOpenInAppHint(true);
+    }, 1400);
+
+    window.location.assign(appInviteUrl);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [appInviteUrl, isWeb, token]);
 
   const inviteQuery = useQuery({
     queryKey: queryKeys.inviteLookup(token),
     queryFn: () => lookupInvite(token),
-    enabled: Boolean(token) && !authLoading && !isGuest,
+    enabled: Boolean(token) && !authLoading && (isWeb || !isGuest),
   });
 
   const acceptMutation = useMutation({
@@ -42,7 +72,7 @@ export default function InviteScreen() {
     },
   });
 
-  if (authLoading || inviteQuery.isPending) {
+  if ((!isWeb && authLoading) || (!isWeb && inviteQuery.isPending)) {
     return <CenteredState title="Loading invite..." loading />;
   }
 
@@ -51,6 +81,28 @@ export default function InviteScreen() {
       title="Friend Invite"
       subtitle="Accept the invite to add this bowler to your friends leaderboard.">
       <View style={styles.card}>
+        {isWeb ? (
+          <View style={styles.openInAppPanel}>
+            <Text style={styles.bodyText}>
+              {showOpenInAppHint ? 'If the app did not open automatically, use the button below.' : 'Opening invite in PinPoint...'}
+            </Text>
+            <Pressable
+              onPress={() => {
+                if (!appInviteUrl || typeof window === 'undefined') {
+                  return;
+                }
+                window.location.assign(appInviteUrl);
+              }}
+              style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+              <Text style={styles.primaryButtonText}>Open in PinPoint</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {isWeb && inviteQuery.data?.authRequired ? (
+          <Text style={styles.bodyText}>Sign in in the PinPoint app to accept this invite.</Text>
+        ) : null}
+
         {inviteQuery.error ? (
           <Text style={styles.errorText}>
             {inviteQuery.error instanceof Error ? inviteQuery.error.message : 'Failed to load invite.'}
@@ -72,7 +124,7 @@ export default function InviteScreen() {
           <Text style={styles.bodyText}>You are already friends.</Text>
         ) : null}
 
-        {inviteQuery.data?.canAccept ? (
+        {!isWeb && inviteQuery.data?.canAccept ? (
           <Pressable
             onPress={() => acceptMutation.mutate()}
             disabled={acceptMutation.isPending}
@@ -86,9 +138,11 @@ export default function InviteScreen() {
         {acceptMessage ? <Text style={styles.bodyText}>{acceptMessage}</Text> : null}
         {acceptError ? <Text style={styles.errorText}>{acceptError}</Text> : null}
 
-        <Pressable onPress={() => router.replace('/(tabs)/friends')} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
-          <Text style={styles.secondaryButtonText}>Go to Friends</Text>
-        </Pressable>
+        {!isWeb ? (
+          <Pressable onPress={() => router.replace('/(tabs)/friends')} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
+            <Text style={styles.secondaryButtonText}>Go to Friends</Text>
+          </Pressable>
+        ) : null}
       </View>
     </DetailShell>
   );
@@ -101,6 +155,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.lg,
     gap: spacing.md,
+  },
+  openInAppPanel: {
+    gap: spacing.sm,
   },
   bodyText: {
     color: palette.muted,
