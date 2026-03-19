@@ -21,6 +21,7 @@ import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import CenteredState from '@/components/centered-state';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
+import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import SessionGameCard from '@/components/session-game-card';
 import StackBadge from '@/components/stack-badge';
 import SurfaceCard from '@/components/surface-card';
@@ -30,6 +31,8 @@ import {
   type LivePlayerComparisonMetric,
   type LivePlayerComparisonRow,
   canonicalizePlayerLabel,
+  getResolvedPlayersForGame,
+  normalizePlayerKey,
 } from '@/lib/live-session';
 import {
   createSession,
@@ -173,6 +176,15 @@ function formatGameMeta(playerName: string, playedAt?: string | null, createdAt?
   })}`;
 }
 
+function getSelectedSelfPlayerKey(game: {
+  player_name: string;
+  selected_self_player_key?: string | null;
+}) {
+  return typeof game.selected_self_player_key === 'string' && game.selected_self_player_key.trim()
+    ? game.selected_self_player_key.trim()
+    : normalizePlayerKey(game.player_name);
+}
+
 function StatsTile({
   label,
   value,
@@ -216,15 +228,24 @@ export default function SessionDetailScreen() {
   const [activeTab, setActiveTab] = useState<'games' | 'stats'>('games');
   const [selectedComparisonMetric, setSelectedComparisonMetric] =
     useState<LivePlayerComparisonMetric>('average');
+  const [draftSelectedPlayerKeys, setDraftSelectedPlayerKeys] = useState<Record<string, string>>(
+    {},
+  );
 
   useEffect(() => {
     if (!group || group.isSessionless) {
       setDraftName('');
       setDraftDescription('');
+      setDraftSelectedPlayerKeys({});
       return;
     }
     setDraftName(group.session?.name?.trim() || '');
     setDraftDescription(group.session?.description?.trim() || '');
+    setDraftSelectedPlayerKeys(
+      Object.fromEntries(
+        group.games.map((game) => [game.id, getSelectedSelfPlayerKey(game)]),
+      ),
+    );
   }, [group]);
 
   const leaveSessionDetail = () => {
@@ -240,7 +261,18 @@ export default function SessionDetailScreen() {
       if (!group?.sessionId) {
         throw new Error('Session was not found.');
       }
-      return updateSession(group.sessionId, draftName, draftDescription);
+      return updateSession(
+        group.sessionId,
+        draftName,
+        draftDescription,
+        group.games
+          .map((game) => ({
+            gameId: game.id,
+            selectedSelfPlayerKey:
+              draftSelectedPlayerKeys[game.id] || getSelectedSelfPlayerKey(game),
+          }))
+          .filter((entry) => entry.selectedSelfPlayerKey),
+      );
     },
     onSuccess: async () => {
       setEditing(false);
@@ -362,6 +394,16 @@ export default function SessionDetailScreen() {
       return value !== null && value > max ? value : max;
     }, 0);
   }, [comparisonRows, selectedComparisonMetric]);
+  const editableGameSelections = useMemo(
+    () =>
+      group.games.map((game) => ({
+        game,
+        title: grouping.gameTitleMap.get(game.id) || game.game_name?.trim() || 'Game',
+        selectedKey: draftSelectedPlayerKeys[game.id] || getSelectedSelfPlayerKey(game),
+        players: getResolvedPlayersForGame({ extraction: game.scoreboard_extraction }),
+      })),
+    [draftSelectedPlayerKeys, group.games, grouping.gameTitleMap],
+  );
 
   const handleDeleteSession = () => {
     if (!group.sessionId || group.isSessionless) {
@@ -548,21 +590,69 @@ export default function SessionDetailScreen() {
           style={styles.modalBackdrop}>
           <SurfaceCard style={styles.modalCard} tone="raised">
             <Text style={styles.modalTitle}>Edit session</Text>
-            <TextInput
-              placeholder="Session name"
-              placeholderTextColor={palette.muted}
-              style={styles.input}
-              value={draftName}
-              onChangeText={setDraftName}
-            />
-            <TextInput
-              placeholder="Description"
-              placeholderTextColor={palette.muted}
-              style={[styles.input, styles.inputMultiline]}
-              multiline
-              value={draftDescription}
-              onChangeText={setDraftDescription}
-            />
+            <KeyboardAwareScrollView
+              style={styles.editScroll}
+              contentContainerStyle={styles.editScrollContent}
+              showsVerticalScrollIndicator={false}>
+              <TextInput
+                placeholder="Session name"
+                placeholderTextColor={palette.muted}
+                style={styles.input}
+                value={draftName}
+                onChangeText={setDraftName}
+              />
+              <TextInput
+                placeholder="Description"
+                placeholderTextColor={palette.muted}
+                style={[styles.input, styles.inputMultiline]}
+                multiline
+                value={draftDescription}
+                onChangeText={setDraftDescription}
+              />
+              <View style={styles.selectionSection}>
+                <Text style={styles.selectionSectionTitle}>Who are you in each game?</Text>
+                <Text style={styles.selectionSectionBody}>
+                  Choose exactly one player for every logged scoreboard in this session.
+                </Text>
+                <View style={styles.selectionGameList}>
+                  {editableGameSelections.map(({ game, title, selectedKey, players }, index) => (
+                    <SurfaceCard key={game.id} style={styles.selectionGameCard}>
+                      <Text style={styles.selectionGameTitle}>
+                        {title || `Game ${index + 1}`}
+                      </Text>
+                      <View style={styles.selectionOptionList}>
+                        {players.map((player) => {
+                          const checked = player.playerKey === selectedKey;
+                          return (
+                            <Pressable
+                              key={`${game.id}-${player.playerKey}`}
+                              onPress={() =>
+                                setDraftSelectedPlayerKeys((current) => ({
+                                  ...current,
+                                  [game.id]: player.playerKey,
+                                }))
+                              }
+                              style={({ pressed }) => [
+                                styles.selectionOptionRow,
+                                pressed && styles.pressed,
+                              ]}>
+                              <MaterialIcons
+                                name={checked ? 'radio-button-checked' : 'radio-button-unchecked'}
+                                size={22}
+                                color={checked ? palette.accent : palette.muted}
+                              />
+                              <Text style={styles.selectionOptionLabel}>
+                                {canonicalizePlayerLabel(player.playerName)}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </SurfaceCard>
+                  ))}
+                </View>
+              </View>
+            </KeyboardAwareScrollView>
             <ActionButton
               label={updateMutation.isPending ? 'Saving...' : 'Save session'}
               onPress={() => updateMutation.mutate()}
@@ -958,6 +1048,12 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     maxHeight: '80%',
   },
+  editScroll: {
+    maxHeight: 420,
+  },
+  editScrollContent: {
+    gap: spacing.md,
+  },
   modalTitle: {
     color: palette.text,
     fontSize: 24,
@@ -984,6 +1080,51 @@ const styles = StyleSheet.create({
   inputMultiline: {
     minHeight: 96,
     textAlignVertical: 'top',
+  },
+  selectionSection: {
+    gap: spacing.sm,
+  },
+  selectionSectionTitle: {
+    color: palette.text,
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  selectionSectionBody: {
+    color: palette.muted,
+    fontSize: 14,
+    lineHeight: 19,
+    fontFamily: fontFamilySans,
+  },
+  selectionGameList: {
+    gap: spacing.sm,
+  },
+  selectionGameCard: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  selectionGameTitle: {
+    color: palette.text,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  selectionOptionList: {
+    gap: spacing.sm,
+  },
+  selectionOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  selectionOptionLabel: {
+    color: palette.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontFamily: fontFamilySans,
   },
   targetList: {
     maxHeight: 280,

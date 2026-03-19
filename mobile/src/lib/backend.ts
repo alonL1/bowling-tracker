@@ -55,11 +55,16 @@ export async function createSession(name = '', description = '') {
   });
 }
 
-export async function updateSession(sessionId: string, name: string, description: string) {
+export async function updateSession(
+  sessionId: string,
+  name: string,
+  description: string,
+  gameSelections?: Array<{ gameId: string; selectedSelfPlayerKey: string }>,
+) {
   return apiJson<{ session: SessionItem }>('/api/session', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, name, description }),
+    body: JSON.stringify({ sessionId, name, description, gameSelections }),
   });
 }
 

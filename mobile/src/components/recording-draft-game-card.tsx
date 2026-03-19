@@ -7,7 +7,7 @@ import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import IconAction from '@/components/icon-action';
 import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
 import StackBadge from '@/components/stack-badge';
-import { palette, spacing } from '@/constants/palette';
+import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { confirmAction } from '@/lib/confirm';
 import { getLiveGameScoreLabel, getResolvedPlayersForGame } from '@/lib/live-session';
@@ -20,6 +20,8 @@ type RecordingDraftGameCardProps = {
   onEdit: (game: RecordingDraftGame) => void;
   onDelete: (gameId: string) => void;
   deleting?: boolean;
+  onStartDrag?: () => void;
+  dragActive?: boolean;
 };
 
 function formatCapturedAt(value?: string | null) {
@@ -47,6 +49,8 @@ export default function RecordingDraftGameCard({
   onEdit,
   onDelete,
   deleting = false,
+  onStartDrag,
+  dragActive = false,
 }: RecordingDraftGameCardProps) {
   const [expanded, setExpanded] = useState(false);
   const players = useMemo(() => getResolvedPlayersForGame(game), [game]);
@@ -57,7 +61,7 @@ export default function RecordingDraftGameCard({
   );
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, dragActive && styles.cardActive]}>
       <View style={styles.row}>
         <Pressable
           onPress={() => setExpanded((current) => !current)}
@@ -71,6 +75,15 @@ export default function RecordingDraftGameCard({
         </Pressable>
 
         <View style={styles.actions}>
+          {onStartDrag ? (
+            <Pressable
+              accessibilityLabel="Reorder draft game"
+              delayLongPress={140}
+              onLongPress={onStartDrag}
+              style={({ pressed }) => [styles.dragHandleButton, pressed && styles.pressed]}>
+              <MaterialIcons name="drag-indicator" size={22} color={palette.muted} />
+            </Pressable>
+          ) : null}
           <IconAction
             accessibilityLabel="Edit draft game"
             onPress={() => onEdit(game)}
@@ -125,6 +138,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     gap: 10,
   },
+  cardActive: {
+    opacity: 0.95,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -159,6 +175,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     flexShrink: 0,
+  },
+  dragHandleButton: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   expandedBody: {
     gap: 8,

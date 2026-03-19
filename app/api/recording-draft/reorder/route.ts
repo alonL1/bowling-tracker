@@ -66,6 +66,19 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Draft game not found." }, { status: 404 });
   }
 
+  if (payload.targetGroupId) {
+    const { data: targetGroup } = await supabase
+      .from("recording_draft_groups")
+      .select("id")
+      .eq("id", payload.targetGroupId)
+      .eq("draft_id", draft.id)
+      .maybeSingle();
+
+    if (!targetGroup) {
+      return NextResponse.json({ error: "Target draft group not found." }, { status: 404 });
+    }
+  }
+
   const neighborIds = [payload.beforeGameId, payload.afterGameId].filter(
     (value): value is string => typeof value === "string" && value.length > 0
   );
@@ -76,6 +89,7 @@ export async function PATCH(request: Request) {
       : await supabase
           .from("recording_draft_games")
           .select("id,sort_at,captured_at,captured_at_hint,created_at")
+          .eq("draft_id", draft.id)
           .in("id", neighborIds);
 
   const before = (neighbors ?? []).find((entry) => entry.id === payload.beforeGameId);

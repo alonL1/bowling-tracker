@@ -15,6 +15,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import DraggableFlatList, { ScaleDecorator, type RenderItemParams } from 'react-native-draggable-flatlist';
 
 import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
@@ -39,6 +40,7 @@ import {
   updateRecordingDraftGame,
   updateRecordingDraftGroup,
   uploadToRecordingDraft,
+  reorderRecordingDraftGame,
 } from '@/lib/backend';
 import {
   canonicalizePlayerLabel,
@@ -69,6 +71,20 @@ type UploadSessionFormProps = {
   requireExistingSession?: boolean;
 };
 
+type DraftFlatRow =
+  | {
+      key: string;
+      kind: 'header';
+      group: RecordingDraftGroup;
+    }
+  | {
+      key: string;
+      kind: 'game';
+      groupId: string;
+      gameNumber: number;
+      game: RecordingDraftGame;
+    };
+
 function getDraftMode(sessionMode: SessionMode): RecordingDraftMode {
   switch (sessionMode) {
     case 'auto':
@@ -89,6 +105,109 @@ function getPrimaryButtonLabel(mode: RecordingDraftMode, hasTargetSession: boole
 
 function getFinalizeButtonLabel(mode: RecordingDraftMode) {
   return mode === 'add_existing_session' ? 'Add to Session' : 'Add to Log';
+}
+
+function buildDraftFlatRows(groups: RecordingDraftGroup[]) {
+  let gameNumber = 0;
+
+  return groups.flatMap<DraftFlatRow>((group) => [
+    {
+      key: `header-${group.id}`,
+      kind: 'header',
+      group,
+    },
+    ...group.games.map((game) => ({
+      key: `game-${game.id}`,
+      kind: 'game' as const,
+      groupId: group.id,
+      gameNumber: (gameNumber += 1),
+      game,
+    })),
+  ]);
+}
+
+function normalizeDraggedFlatRows(rows: DraftFlatRow[], draggedGameId: string) {
+  const draggedIndex = rows.findIndex(
+    (row) => row.kind === 'game' && row.game.id === draggedGameId,
+  );
+  if (draggedIndex < 0) {
+    return rows;
+  }
+
+  let targetHeaderIndex = -1;
+  for (let index = draggedIndex; index >= 0; index -= 1) {
+    if (rows[index]?.kind === 'header') {
+      targetHeaderIndex = index;
+      break;
+    }
+  }
+
+  if (targetHeaderIndex === -1) {
+    targetHeaderIndex = rows.findIndex((row) => row.kind === 'header');
+  }
+
+  if (targetHeaderIndex === -1 || draggedIndex > targetHeaderIndex) {
+    return rows;
+  }
+
+  const nextRows = [...rows];
+  const [draggedRow] = nextRows.splice(draggedIndex, 1);
+  nextRows.splice(targetHeaderIndex, 0, draggedRow);
+  return nextRows;
+}
+
+function deriveDraftReorderPayload(
+  rows: DraftFlatRow[],
+  draggedGameId: string,
+) {
+  const draggedIndex = rows.findIndex(
+    (row) => row.kind === 'game' && row.game.id === draggedGameId,
+  );
+  if (draggedIndex < 0) {
+    return null;
+  }
+
+  let headerIndex = -1;
+  for (let index = draggedIndex; index >= 0; index -= 1) {
+    if (rows[index]?.kind === 'header') {
+      headerIndex = index;
+      break;
+    }
+  }
+
+  if (headerIndex === -1) {
+    headerIndex = rows.findIndex((row) => row.kind === 'header');
+  }
+
+  const headerRow = headerIndex >= 0 ? rows[headerIndex] : null;
+  if (!headerRow || headerRow.kind !== 'header') {
+    return null;
+  }
+
+  let beforeGameId: string | null = null;
+  for (let index = draggedIndex - 1; index > headerIndex; index -= 1) {
+    const row = rows[index];
+    if (row?.kind === 'game') {
+      beforeGameId = row.game.id;
+      break;
+    }
+  }
+
+  let afterGameId: string | null = null;
+  for (let index = draggedIndex + 1; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (!row || row.kind === 'header') {
+      break;
+    }
+    afterGameId = row.game.id;
+    break;
+  }
+
+  return {
+    targetGroupId: headerRow.group.id,
+    beforeGameId,
+    afterGameId,
+  };
 }
 
 function getProgressSecondaryText(group: {
@@ -156,14 +275,18 @@ function PendingDraftGameCard({
   game,
   onDelete,
   deleting,
+  onStartDrag,
+  dragActive,
 }: {
   gameNumber: number;
   game: RecordingDraftGame;
   onDelete: (gameId: string) => void;
   deleting: boolean;
+  onStartDrag?: () => void;
+  dragActive?: boolean;
 }) {
   return (
-    <View style={styles.pendingCard}>
+    <View style={[styles.pendingCard, dragActive && styles.pendingCardActive]}>
       <View style={styles.pendingCardRow}>
         <View style={styles.pendingSummary}>
           <StackBadge lines={['Game', String(gameNumber)]} />
@@ -175,6 +298,15 @@ function PendingDraftGameCard({
           </View>
         </View>
         <View style={styles.pendingActions}>
+          {onStartDrag ? (
+            <Pressable
+              accessibilityLabel="Reorder draft game"
+              delayLongPress={140}
+              onLongPress={onStartDrag}
+              style={({ pressed }) => [styles.pendingDeleteButton, pressed && styles.pressed]}>
+              <MaterialIcons name="drag-indicator" size={22} color={palette.muted} />
+            </Pressable>
+          ) : null}
           {game.status === 'queued' || game.status === 'processing' ? (
             <BowlingBallSpinner size={22} holeColor={palette.field} />
           ) : null}
@@ -224,6 +356,7 @@ export default function UploadSessionForm({
   const [targetSessionId, setTargetSessionId] = useState<string | null>(null);
   const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const [sessionPickerChoice, setSessionPickerChoice] = useState<string | null>(null);
+  const [flatRows, setFlatRows] = useState<DraftFlatRow[]>([]);
 
   const draftQuery = useQuery({
     queryKey: queryKeys.recordingDraft(mode),
@@ -301,6 +434,14 @@ export default function UploadSessionForm({
   }, [sessionPickerOpen, targetSessionId]);
 
   const sessions = sessionsQuery.data?.sessions ?? [];
+  const groupedFlatRows = useMemo(() => buildDraftFlatRows(groups), [groups]);
+
+  useEffect(() => {
+    if (mode !== 'add_multiple_sessions') {
+      return;
+    }
+    setFlatRows(groupedFlatRows);
+  }, [groupedFlatRows, mode]);
 
   const setDraftCache = (next: { draft: typeof draft }) => {
     queryClient.setQueryData(queryKeys.recordingDraft(mode), next);
@@ -478,6 +619,30 @@ export default function UploadSessionForm({
     },
   });
 
+  const reorderMutation = useMutation({
+    mutationFn: (payload: {
+      gameId: string;
+      targetGroupId?: string | null;
+      beforeGameId?: string | null;
+      afterGameId?: string | null;
+    }) =>
+      reorderRecordingDraftGame({
+        mode,
+        gameId: payload.gameId,
+        targetGroupId: payload.targetGroupId,
+        beforeGameId: payload.beforeGameId,
+        afterGameId: payload.afterGameId,
+      }),
+    onSuccess: (response) => {
+      setError('');
+      setDraftCache(response as { draft: typeof draft });
+    },
+    onError: (nextError) => {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to reorder draft game.');
+      void queryClient.invalidateQueries({ queryKey: queryKeys.recordingDraft(mode) });
+    },
+  });
+
   const chooseTargetSessionMutation = useMutation({
     mutationFn: async (nextTargetSessionId: string) =>
       updateRecordingDraft({
@@ -583,175 +748,264 @@ export default function UploadSessionForm({
     });
   };
 
-  let gameNumber = 0;
+  const renderGroupHeader = (group: RecordingDraftGroup) => (
+    <View style={styles.groupHeader}>
+      <View style={styles.groupHeaderMain}>
+        <StackBadge lines={getGroupDateLines(group)} />
+        <View style={styles.groupHeaderText}>
+          <Text style={styles.groupTitle}>{getGroupTitle(group)}</Text>
+          {group.description ? (
+            <Text style={styles.groupDescription}>{group.description}</Text>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.groupActions}>
+        <Pressable
+          onPress={() => setEditingGroup(group)}
+          style={({ pressed }) => [styles.groupActionButton, pressed && styles.pressed]}>
+          <MaterialIcons name="edit" size={20} color={palette.text} />
+        </Pressable>
+        <Pressable
+          onPress={() =>
+            confirmAction({
+              title: 'Delete draft session',
+              message: 'Remove this grouped session draft and all of its games?',
+              confirmLabel: 'Delete',
+              destructive: true,
+              onConfirm: () => deleteGroupMutation.mutate(group.id),
+            })
+          }
+          style={({ pressed }) => [styles.groupActionButton, pressed && styles.pressed]}>
+          <MaterialIcons name="delete" size={20} color={palette.text} />
+        </Pressable>
+      </View>
+    </View>
+  );
+
+  const topContent = (
+    <>
+      <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+        <Ionicons name="chevron-back" size={16} color={palette.muted} />
+        <Text style={styles.backText}>Back</Text>
+      </Pressable>
+
+      {error ? <InfoBanner tone="error" text={error} /> : null}
+      {draftQuery.error ? (
+        <InfoBanner
+          tone="error"
+          text={draftQuery.error instanceof Error ? draftQuery.error.message : 'Failed to load draft.'}
+        />
+      ) : null}
+
+      <SurfaceCard style={styles.sectionCard}>
+        <Text style={styles.sectionBody}>{helperText}</Text>
+        <ActionButton
+          label={uploadMutation.isPending ? 'Adding games...' : 'Scoreboard Images'}
+          leftIcon={
+            uploadMutation.isPending ? (
+              <BowlingBallSpinner size={18} color={palette.text} holeColor={palette.accent} />
+            ) : (
+              <Ionicons name="images-outline" size={18} color={palette.text} />
+            )
+          }
+          onPress={handlePickImages}
+          disabled={uploadMutation.isPending}
+        />
+      </SurfaceCard>
+
+      {progressVisible && progress ? (
+        <SurfaceCard style={styles.progressCard}>
+          <Text style={styles.progressTitle}>
+            {progress.completed} of {progress.total} processed
+          </Text>
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: progress.total ? `${(progress.completed / progress.total) * 100}%` : '0%' },
+              ]}
+            />
+          </View>
+          <Text style={styles.progressMeta}>{getProgressSecondaryText(progress)}</Text>
+        </SurfaceCard>
+      ) : null}
+
+      {draft ? (
+        <Pressable
+          onPress={handleDiscardDraft}
+          disabled={discardMutation.isPending}
+          style={({ pressed }) => [styles.discardButton, pressed && styles.pressed]}>
+          <Text style={styles.discardText}>
+            {discardMutation.isPending ? 'Discarding draft...' : 'Discard Draft'}
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {draft ? (
+        <SurfaceCard style={styles.sectionCard}>
+          <Text style={styles.sectionBody}>{'Who are you?\n(may select multiple)'}</Text>
+          {playerOptions.length === 0 ? (
+            <Text style={styles.sectionBody}>Add a scoreboard to start extracting player names.</Text>
+          ) : (
+            <View style={styles.checkboxList}>
+              {playerOptions.map((option) => {
+                const checked = selectedPlayerKeys.includes(option.key);
+                return (
+                  <Pressable
+                    key={option.key}
+                    onPress={() => handleTogglePlayer(option.key)}
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.checkboxRow, pressed && styles.pressed]}>
+                    <MaterialIcons
+                      name={checked ? 'check-box' : 'check-box-outline-blank'}
+                      size={22}
+                      color={checked ? palette.accent : palette.muted}
+                    />
+                    <Text style={styles.checkboxLabel}>{canonicalizePlayerLabel(option.label)}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </SurfaceCard>
+      ) : null}
+    </>
+  );
+
+  const renderFlatRow = ({ item, drag, isActive, getIndex }: RenderItemParams<DraftFlatRow>) => {
+    if (item.kind === 'header') {
+      return (
+        <View style={[styles.flatHeaderRow, (getIndex() ?? 0) > 0 && styles.flatHeaderRowSpaced]}>
+          {renderGroupHeader(item.group)}
+        </View>
+      );
+    }
+
+    return (
+      <ScaleDecorator>
+        <View style={styles.flatGameRow}>
+          {item.game.status === 'ready' ? (
+            <RecordingDraftGameCard
+              game={item.game}
+              gameNumber={item.gameNumber}
+              selectedPlayerKeys={selectedPlayerKeys}
+              deleting={deletingGameId === item.game.id}
+              onEdit={setEditingGame}
+              onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+              onStartDrag={drag}
+              dragActive={isActive}
+            />
+          ) : (
+            <PendingDraftGameCard
+              gameNumber={item.gameNumber}
+              game={item.game}
+              deleting={deletingGameId === item.game.id}
+              onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+              onStartDrag={drag}
+              dragActive={isActive}
+            />
+          )}
+        </View>
+      </ScaleDecorator>
+    );
+  };
 
   return (
     <>
-      <KeyboardAwareScrollView
-        contentContainerStyle={styles.container}
-        showsVerticalScrollIndicator={false}>
-        <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
-          <Ionicons name="chevron-back" size={16} color={palette.muted} />
-          <Text style={styles.backText}>Back</Text>
-        </Pressable>
-
-        {error ? <InfoBanner tone="error" text={error} /> : null}
-        {draftQuery.error ? (
-          <InfoBanner
-            tone="error"
-            text={draftQuery.error instanceof Error ? draftQuery.error.message : 'Failed to load draft.'}
-          />
-        ) : null}
-
-        <SurfaceCard style={styles.sectionCard}>
-          <Text style={styles.sectionBody}>{helperText}</Text>
-          <ActionButton
-            label={uploadMutation.isPending ? 'Adding games...' : 'Scoreboard Images'}
-            leftIcon={
-              uploadMutation.isPending ? (
-                <BowlingBallSpinner size={18} color={palette.text} holeColor={palette.accent} />
-              ) : (
-                <Ionicons name="images-outline" size={18} color={palette.text} />
-              )
+      {mode === 'add_multiple_sessions' ? (
+        <DraggableFlatList
+          data={flatRows}
+          keyExtractor={(item) => item.key}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+          activationDistance={8}
+          dragItemOverflow
+          ListHeaderComponent={topContent}
+          ListEmptyComponent={
+            <SurfaceCard style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No scoreboards yet</Text>
+              <Text style={styles.emptyBody}>
+                Choose scoreboard images and they will appear here one by one as they finish processing.
+              </Text>
+            </SurfaceCard>
+          }
+          renderItem={renderFlatRow}
+          onDragEnd={({ data, from, to }) => {
+            if (from === to) {
+              setFlatRows(data);
+              return;
             }
-            onPress={handlePickImages}
-            disabled={uploadMutation.isPending}
-          />
-        </SurfaceCard>
 
-        {progressVisible && progress ? (
-          <SurfaceCard style={styles.progressCard}>
-            <Text style={styles.progressTitle}>
-              {progress.completed} of {progress.total} processed
-            </Text>
-            <View style={styles.progressTrack}>
-              <View
-                style={[
-                  styles.progressFill,
-                  { width: progress.total ? `${(progress.completed / progress.total) * 100}%` : '0%' },
-                ]}
-              />
-            </View>
-            <Text style={styles.progressMeta}>
-              {getProgressSecondaryText(progress)}
-            </Text>
-          </SurfaceCard>
-        ) : null}
+            const draggedRow = data[to];
+            if (!draggedRow || draggedRow.kind !== 'game') {
+              setFlatRows(groupedFlatRows);
+              return;
+            }
 
-        {draft ? (
-          <Pressable
-            onPress={handleDiscardDraft}
-            disabled={discardMutation.isPending}
-            style={({ pressed }) => [styles.discardButton, pressed && styles.pressed]}>
-            <Text style={styles.discardText}>
-              {discardMutation.isPending ? 'Discarding draft...' : 'Discard Draft'}
-            </Text>
-          </Pressable>
-        ) : null}
+            const normalizedRows = normalizeDraggedFlatRows(data, draggedRow.game.id);
+            setFlatRows(normalizedRows);
 
-        {draft ? (
-          <SurfaceCard style={styles.sectionCard}>
-            <Text style={styles.sectionBody}>{'Who are you?\n(may select multiple)'}</Text>
-            {playerOptions.length === 0 ? (
-              <Text style={styles.sectionBody}>Add a scoreboard to start extracting player names.</Text>
-            ) : (
-              <View style={styles.checkboxList}>
-                {playerOptions.map((option) => {
-                  const checked = selectedPlayerKeys.includes(option.key);
-                  return (
-                    <Pressable
-                      key={option.key}
-                      onPress={() => handleTogglePlayer(option.key)}
-                      hitSlop={8}
-                      style={({ pressed }) => [styles.checkboxRow, pressed && styles.pressed]}>
-                      <MaterialIcons
-                        name={checked ? 'check-box' : 'check-box-outline-blank'}
-                        size={22}
-                        color={checked ? palette.accent : palette.muted}
-                      />
-                      <Text style={styles.checkboxLabel}>{canonicalizePlayerLabel(option.label)}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-          </SurfaceCard>
-        ) : null}
+            const payload = deriveDraftReorderPayload(normalizedRows, draggedRow.game.id);
+            if (!payload) {
+              return;
+            }
 
-        {groups.length > 0 ? (
-          <View style={styles.groupList}>
-            {groups.map((group) => (
-              <View key={group.id} style={styles.groupWrap}>
-                {mode === 'add_multiple_sessions' ? (
-                  <View style={styles.groupHeader}>
-                    <View style={styles.groupHeaderMain}>
-                      <StackBadge lines={getGroupDateLines(group)} />
-                      <View style={styles.groupHeaderText}>
-                        <Text style={styles.groupTitle}>{getGroupTitle(group)}</Text>
-                        {group.description ? (
-                          <Text style={styles.groupDescription}>{group.description}</Text>
-                        ) : null}
-                      </View>
-                    </View>
-                    <View style={styles.groupActions}>
-                      <Pressable
-                        onPress={() => setEditingGroup(group)}
-                        style={({ pressed }) => [styles.groupActionButton, pressed && styles.pressed]}>
-                        <MaterialIcons name="edit" size={20} color={palette.text} />
-                      </Pressable>
-                      <Pressable
-                        onPress={() =>
-                          confirmAction({
-                            title: 'Delete draft session',
-                            message: 'Remove this grouped session draft and all of its games?',
-                            confirmLabel: 'Delete',
-                            destructive: true,
-                            onConfirm: () => deleteGroupMutation.mutate(group.id),
-                          })
-                        }
-                        style={({ pressed }) => [styles.groupActionButton, pressed && styles.pressed]}>
-                        <MaterialIcons name="delete" size={20} color={palette.text} />
-                      </Pressable>
+            reorderMutation.mutate({
+              gameId: draggedRow.game.id,
+              ...payload,
+            });
+          }}
+        />
+      ) : (
+        <KeyboardAwareScrollView
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}>
+          {topContent}
+
+          {groups.length > 0 ? (
+            <View style={styles.groupList}>
+              {(() => {
+                let gameNumber = 0;
+                return groups.map((group) => (
+                  <View key={group.id} style={styles.groupWrap}>
+                    <View style={styles.gameList}>
+                      {group.games.map((game) => {
+                        gameNumber += 1;
+                        return game.status === 'ready' ? (
+                          <RecordingDraftGameCard
+                            key={game.id}
+                            game={game}
+                            gameNumber={gameNumber}
+                            selectedPlayerKeys={selectedPlayerKeys}
+                            deleting={deletingGameId === game.id}
+                            onEdit={setEditingGame}
+                            onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+                          />
+                        ) : (
+                          <PendingDraftGameCard
+                            key={game.id}
+                            gameNumber={gameNumber}
+                            game={game}
+                            deleting={deletingGameId === game.id}
+                            onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+                          />
+                        );
+                      })}
                     </View>
                   </View>
-                ) : null}
-
-                <View style={styles.gameList}>
-                  {group.games.map((game) => {
-                    gameNumber += 1;
-                    return game.status === 'ready' ? (
-                      <RecordingDraftGameCard
-                        key={game.id}
-                        game={game}
-                        gameNumber={gameNumber}
-                        selectedPlayerKeys={selectedPlayerKeys}
-                        deleting={deletingGameId === game.id}
-                        onEdit={setEditingGame}
-                        onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
-                      />
-                    ) : (
-                      <PendingDraftGameCard
-                        key={game.id}
-                        gameNumber={gameNumber}
-                        game={game}
-                        deleting={deletingGameId === game.id}
-                        onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
-                      />
-                    );
-                  })}
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <SurfaceCard style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>No scoreboards yet</Text>
-            <Text style={styles.emptyBody}>
-              Choose scoreboard images and they will appear here one by one as they finish processing.
-            </Text>
-          </SurfaceCard>
-        )}
-      </KeyboardAwareScrollView>
+                ));
+              })()}
+            </View>
+          ) : (
+            <SurfaceCard style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No scoreboards yet</Text>
+              <Text style={styles.emptyBody}>
+                Choose scoreboard images and they will appear here one by one as they finish processing.
+              </Text>
+            </SurfaceCard>
+          )}
+        </KeyboardAwareScrollView>
+      )}
 
       {draft ? (
         <View style={styles.bottomDock}>
@@ -1032,6 +1286,15 @@ const styles = StyleSheet.create({
   groupWrap: {
     gap: spacing.sm,
   },
+  flatHeaderRow: {
+    gap: spacing.sm,
+  },
+  flatHeaderRowSpaced: {
+    paddingTop: spacing.lg,
+  },
+  flatGameRow: {
+    gap: spacing.xs,
+  },
   groupHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1099,6 +1362,9 @@ const styles = StyleSheet.create({
   pendingCard: {
     paddingHorizontal: 2,
     paddingVertical: 6,
+  },
+  pendingCardActive: {
+    opacity: 0.95,
   },
   pendingCardRow: {
     flexDirection: 'row',
