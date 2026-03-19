@@ -37,15 +37,18 @@ import {
   updateLiveSessionGame,
 } from '@/lib/backend';
 import {
+  buildLivePlayerComparisons,
+  type LivePlayerComparisonMetric,
+  type LivePlayerComparisonRow,
   buildLiveSessionStats,
   buildProjectedLoggedGameCount,
   canonicalizePlayerLabel,
-  getLiveGameScoreLabel,
+  getFirstSelectionValidationError,
 } from '@/lib/live-session';
 import { confirmAction } from '@/lib/confirm';
 import { deriveCapturedAtHint, sanitizeFilename } from '@/lib/upload';
 import { supabase } from '@/lib/supabase';
-import type { LiveSessionGame, LiveSessionResponse } from '@/lib/types';
+import type { LiveSessionGame, LiveSessionResponse, LiveSessionStats } from '@/lib/types';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { useAuth } from '@/providers/auth-provider';
@@ -59,38 +62,6 @@ async function getUploadBody(asset: ImagePicker.ImagePickerAsset) {
 
   const file = new ExpoFile(asset.uri);
   return file.arrayBuffer();
-}
-
-function formatStatusLabel(status: LiveSessionGame['status']) {
-  if (status === 'queued') {
-    return 'Queued for extraction';
-  }
-  if (status === 'processing') {
-    return 'Processing scoreboard';
-  }
-  if (status === 'error') {
-    return 'Extraction failed';
-  }
-  return 'Ready';
-}
-
-function formatGameMeta(game: LiveSessionGame) {
-  const source = game.captured_at || game.captured_at_hint || game.created_at;
-  if (!source) {
-    return 'Scoreboard captured';
-  }
-
-  const date = new Date(source);
-  if (Number.isNaN(date.getTime())) {
-    return 'Scoreboard captured';
-  }
-
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 function updateLiveSessionCache(
@@ -110,14 +81,136 @@ function updateLiveSessionCache(
 type StatsTileProps = {
   label: string;
   value: string;
+  onPress?: () => void;
 };
 
-function StatsTile({ label, value }: StatsTileProps) {
-  return (
-    <View style={styles.statsTile}>
+type LiveTabKey = 'games' | 'stats';
+
+const comparisonCategories: Array<{ key: LivePlayerComparisonMetric; label: string }> = [
+  { key: 'average', label: 'Average' },
+  { key: 'bestScore', label: 'Best Score' },
+  { key: 'bestSeries', label: 'Best Series' },
+  { key: 'games', label: '# of Games' },
+  { key: 'strikeRate', label: 'Strike Rate' },
+  { key: 'strikes', label: '# of Strikes' },
+  { key: 'spareConversionRate', label: 'Spare Conversion' },
+  { key: 'nines', label: '# of 9s' },
+  { key: 'bestFrame', label: 'Best Frame' },
+  { key: 'worstFrame', label: 'Worst Frame' },
+];
+
+function formatOneDecimal(value: number) {
+  const formatted = value.toFixed(1);
+  return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
+}
+
+function getComparisonMetricValue(
+  row: LivePlayerComparisonRow,
+  metric: LivePlayerComparisonMetric,
+) {
+  switch (metric) {
+    case 'average':
+      return row.average;
+    case 'bestScore':
+      return row.bestScore;
+    case 'bestSeries':
+      return row.bestSeries;
+    case 'games':
+      return row.games;
+    case 'strikeRate':
+      return row.strikeRate;
+    case 'strikes':
+      return row.strikes;
+    case 'spareConversionRate':
+      return row.spareConversionRate;
+    case 'nines':
+      return row.nines;
+    case 'bestFrame':
+      return row.bestFrame;
+    case 'worstFrame':
+      return row.worstFrame;
+  }
+}
+
+function getStatsTileValue(stats: LiveSessionStats, metric: LivePlayerComparisonMetric) {
+  switch (metric) {
+    case 'average':
+      return stats.averageLabel;
+    case 'bestScore':
+      return stats.bestScoreLabel;
+    case 'bestSeries':
+      return stats.bestSeriesLabel;
+    case 'games':
+      return stats.gameCountLabel;
+    case 'strikeRate':
+      return stats.strikeRateLabel;
+    case 'strikes':
+      return stats.strikesLabel;
+    case 'spareConversionRate':
+      return stats.spareConversionRateLabel;
+    case 'nines':
+      return stats.ninesLabel;
+    case 'bestFrame':
+      return stats.bestFrameLabel;
+    case 'worstFrame':
+      return stats.worstFrameLabel;
+  }
+}
+
+function formatComparisonMetricValue(
+  metric: LivePlayerComparisonMetric,
+  value: number | null,
+) {
+  if (value === null || Number.isNaN(value)) {
+    return '—';
+  }
+
+  if (
+    metric === 'average' ||
+    metric === 'bestFrame' ||
+    metric === 'worstFrame' ||
+    metric === 'strikeRate' ||
+    metric === 'spareConversionRate'
+  ) {
+    const formatted = formatOneDecimal(value);
+    return metric === 'strikeRate' || metric === 'spareConversionRate'
+      ? `${formatted}%`
+      : formatted;
+  }
+
+  return String(Math.round(value));
+}
+
+function getComparisonMetricDisplayLabel(
+  row: LivePlayerComparisonRow,
+  metric: LivePlayerComparisonMetric,
+) {
+  if (metric === 'bestFrame') {
+    return row.bestFrameLabel;
+  }
+  if (metric === 'worstFrame') {
+    return row.worstFrameLabel;
+  }
+
+  return formatComparisonMetricValue(metric, getComparisonMetricValue(row, metric));
+}
+
+function StatsTile({ label, value, onPress }: StatsTileProps) {
+  const content = (
+    <>
       <Text style={styles.statsLabel}>{label}</Text>
       <Text style={styles.statsValue}>{value}</Text>
-    </View>
+    </>
+  );
+
+  if (!onPress) {
+    return <View style={styles.statsTile}>{content}</View>;
+  }
+
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.statsTile, pressed && styles.pressed]}>
+      {content}
+    </Pressable>
   );
 }
 
@@ -125,6 +218,9 @@ export default function LiveSessionScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, loading: authLoading } = useAuth();
+  const scrollRef = useRef<ScrollView | null>(null);
+  const pagerRef = useRef<ScrollView | null>(null);
+  const comparisonCategoryScrollRef = useRef<ScrollView | null>(null);
 
   const [sourceOpen, setSourceOpen] = useState(false);
   const [endSessionOpen, setEndSessionOpen] = useState(false);
@@ -133,7 +229,23 @@ export default function LiveSessionScreen() {
   const [error, setError] = useState('');
   const [editingGame, setEditingGame] = useState<LiveSessionGame | null>(null);
   const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<LiveTabKey>('games');
+  const [selectedComparisonMetric, setSelectedComparisonMetric] =
+    useState<LivePlayerComparisonMetric>('average');
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [pagerWidth, setPagerWidth] = useState(0);
+  const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const selectionRevisionRef = useRef(0);
+  const previousGameCountRef = useRef(0);
+  const shouldScrollToNewGameRef = useRef(false);
+  const comparisonLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const comparisonRenderFrameRef = useRef<number | null>(null);
+  const pagerViewportYRef = useRef(0);
+  const compareSectionYRef = useRef(0);
+  const comparisonCategoryLayoutsRef = useRef<
+    Partial<Record<LivePlayerComparisonMetric, { x: number; width: number }>>
+  >({});
+  const comparisonCategoryViewportWidthRef = useRef(0);
 
   const liveSessionQuery = useQuery({
     queryKey: queryKeys.liveSession,
@@ -157,6 +269,32 @@ export default function LiveSessionScreen() {
     setDraftDescription(liveSession.description?.trim() || '');
   }, [liveSession?.id, liveSession?.name, liveSession?.description]);
 
+  useEffect(() => {
+    const nextGameCount = liveSession?.games?.length ?? 0;
+
+    if (shouldScrollToNewGameRef.current && nextGameCount > previousGameCountRef.current) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollToEnd({ animated: true });
+        });
+      });
+      shouldScrollToNewGameRef.current = false;
+    }
+
+    previousGameCountRef.current = nextGameCount;
+  }, [liveSession?.games?.length]);
+
+  useEffect(() => {
+    return () => {
+      if (comparisonLoadTimeoutRef.current) {
+        clearTimeout(comparisonLoadTimeoutRef.current);
+      }
+      if (comparisonRenderFrameRef.current !== null) {
+        cancelAnimationFrame(comparisonRenderFrameRef.current);
+      }
+    };
+  }, []);
+
   const readyGames = useMemo(
     () => (liveSession?.games ?? []).filter((game) => game.status === 'ready'),
     [liveSession?.games],
@@ -172,10 +310,33 @@ export default function LiveSessionScreen() {
     () => buildLiveSessionStats(readyGames, selectedPlayerKeys),
     [readyGames, selectedPlayerKeys],
   );
+  const playerComparisons = useMemo(() => buildLivePlayerComparisons(readyGames), [readyGames]);
   const projectedLoggedGameCount = useMemo(
     () => buildProjectedLoggedGameCount(readyGames, selectedPlayerKeys),
     [readyGames, selectedPlayerKeys],
   );
+  const selectionError = useMemo(
+    () => getFirstSelectionValidationError(readyGames, selectedPlayerKeys),
+    [readyGames, selectedPlayerKeys],
+  );
+  const comparisonRows = useMemo(() => {
+    return [...playerComparisons].sort((left, right) => {
+      const leftValue = getComparisonMetricValue(left, selectedComparisonMetric);
+      const rightValue = getComparisonMetricValue(right, selectedComparisonMetric);
+      const normalizedLeft = leftValue ?? -1;
+      const normalizedRight = rightValue ?? -1;
+      if (normalizedRight !== normalizedLeft) {
+        return normalizedRight - normalizedLeft;
+      }
+      return left.label.localeCompare(right.label);
+    });
+  }, [playerComparisons, selectedComparisonMetric]);
+  const comparisonMaxValue = useMemo(() => {
+    return comparisonRows.reduce((max, row) => {
+      const value = getComparisonMetricValue(row, selectedComparisonMetric);
+      return value !== null && value > max ? value : max;
+    }, 0);
+  }, [comparisonRows, selectedComparisonMetric]);
 
   const hasSelectedPlayers = selectedPlayerKeys.length > 0;
   const hasUnfinishedGames = nonReadyGames.some(
@@ -224,12 +385,12 @@ export default function LiveSessionScreen() {
       const result =
         source === 'camera'
           ? await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              mediaTypes: 'images',
               exif: true,
               quality: 1,
             })
           : await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              mediaTypes: 'images',
               allowsMultipleSelection: false,
               exif: true,
               quality: 1,
@@ -240,6 +401,10 @@ export default function LiveSessionScreen() {
       }
 
       const asset = result.assets[0];
+      setSourceOpen(false);
+      setActiveTab('games');
+      scrollToTab('games', true);
+      shouldScrollToNewGameRef.current = true;
       const filename = sanitizeFilename(asset.fileName ?? undefined, 0);
       const storageKey = `${user.id}/${Date.now()}-${filename}`;
       const uploadBody = await getUploadBody(asset);
@@ -271,9 +436,13 @@ export default function LiveSessionScreen() {
     onSuccess: async () => {
       setSourceOpen(false);
       setError('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.liveSession });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
+      ]);
     },
     onError: (nextError) => {
+      shouldScrollToNewGameRef.current = false;
       setError(nextError instanceof Error ? nextError.message : 'Failed to add scoreboard.');
     },
   });
@@ -283,7 +452,10 @@ export default function LiveSessionScreen() {
     onSuccess: async () => {
       setEditingGame(null);
       setError('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.liveSession });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
+      ]);
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to save live game.');
@@ -338,6 +510,7 @@ export default function LiveSessionScreen() {
         queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
       ]);
       router.replace(`/sessions/${payload.sessionId}` as never);
     },
@@ -376,6 +549,80 @@ export default function LiveSessionScreen() {
     setEndSessionOpen(true);
   };
 
+  const handleSelectComparisonMetric = (metric: LivePlayerComparisonMetric) => {
+    scrollComparisonCategoryIntoView(metric);
+
+    if (metric === selectedComparisonMetric) {
+      return;
+    }
+
+    if (comparisonLoadTimeoutRef.current) {
+      clearTimeout(comparisonLoadTimeoutRef.current);
+    }
+    if (comparisonRenderFrameRef.current !== null) {
+      cancelAnimationFrame(comparisonRenderFrameRef.current);
+    }
+
+    setSelectedComparisonMetric(metric);
+    setComparisonLoading(false);
+    comparisonLoadTimeoutRef.current = setTimeout(() => {
+      setComparisonLoading(true);
+      comparisonLoadTimeoutRef.current = null;
+    }, 180);
+    comparisonRenderFrameRef.current = requestAnimationFrame(() => {
+      comparisonRenderFrameRef.current = requestAnimationFrame(() => {
+        if (comparisonLoadTimeoutRef.current) {
+          clearTimeout(comparisonLoadTimeoutRef.current);
+          comparisonLoadTimeoutRef.current = null;
+        }
+        setComparisonLoading(false);
+        comparisonRenderFrameRef.current = null;
+      });
+    });
+  };
+
+  const scrollToTab = (tab: LiveTabKey, animated: boolean) => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    pagerRef.current?.scrollTo({
+      x: tab === 'stats' ? pagerWidth : 0,
+      y: 0,
+      animated,
+    });
+  };
+
+  const scrollToCompareSection = () => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, pagerViewportYRef.current + compareSectionYRef.current - spacing.md),
+        animated: true,
+      });
+    });
+  };
+
+  const scrollComparisonCategoryIntoView = (metric: LivePlayerComparisonMetric) => {
+    const layout = comparisonCategoryLayoutsRef.current[metric];
+    if (!layout || !comparisonCategoryViewportWidthRef.current) {
+      return;
+    }
+
+    const targetX = Math.max(
+      0,
+      layout.x - (comparisonCategoryViewportWidthRef.current - layout.width) / 2,
+    );
+    comparisonCategoryScrollRef.current?.scrollTo({ x: targetX, y: 0, animated: true });
+  };
+
+  const handlePressStatsTile = (metric: LivePlayerComparisonMetric) => {
+    handleSelectComparisonMetric(metric);
+    requestAnimationFrame(() => {
+      scrollComparisonCategoryIntoView(metric);
+      scrollToCompareSection();
+    });
+  };
+
   if (authLoading || (liveSessionQuery.isPending && !liveSessionQuery.data)) {
     return <CenteredState title="Loading live session..." loading />;
   }
@@ -405,6 +652,7 @@ export default function LiveSessionScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={styles.page}>
         <ScrollView
+          ref={scrollRef}
           style={styles.scroll}
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}>
@@ -432,20 +680,26 @@ export default function LiveSessionScreen() {
           ) : null}
 
           <SurfaceCard style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Add Game</Text>
             <Text style={styles.sectionBody}>
               Capture one scoreboard after each game. The scoreboard stays as a draft until you end the session.
             </Text>
             <ActionButton
               label={captureMutation.isPending ? 'Adding game...' : 'Add Game'}
+              leftIcon={
+                captureMutation.isPending ? (
+                  <BowlingBallSpinner size={18} color={palette.text} holeColor={palette.accent} />
+                ) : (
+                  <Ionicons name="add" size={18} color={palette.text} />
+                )
+              }
               onPress={() => setSourceOpen(true)}
               disabled={captureMutation.isPending}
             />
           </SurfaceCard>
 
           <SurfaceCard style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>
-              Which of these are you? Or which of these do you want to see stats for? (may select multiple)
+            <Text style={styles.sectionBody}>
+              {'Who are you?\n(may select multiple)'}
             </Text>
             {playerOptions.length === 0 ? (
               <Text style={styles.sectionBody}>
@@ -474,92 +728,243 @@ export default function LiveSessionScreen() {
             )}
           </SurfaceCard>
 
-          <SurfaceCard style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Session Stats</Text>
-            <View style={styles.statsGrid}>
-              <StatsTile label="Average" value={stats.averageLabel} />
-              <StatsTile label="Strike Rate" value={stats.strikeRateLabel} />
-              <StatsTile label="Spare Rate" value={stats.spareRateLabel} />
-              <StatsTile label="Spare Conversion" value={stats.spareConversionRateLabel} />
-              <StatsTile label="Best Frame" value={stats.bestFrameLabel} />
-              <StatsTile label="Worst Frame" value={stats.worstFrameLabel} />
-            </View>
-          </SurfaceCard>
+          <View style={styles.tabRow}>
+            <Pressable
+              onPress={() => {
+                setActiveTab('games');
+                scrollToTab('games', true);
+              }}
+              style={({ pressed }) => [
+                styles.tabButton,
+                activeTab === 'games' && styles.tabButtonActive,
+                pressed && styles.pressed,
+              ]}>
+              <Text style={[styles.tabLabel, activeTab === 'games' && styles.tabLabelActive]}>Games</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setActiveTab('stats');
+                scrollToTab('stats', true);
+              }}
+              style={({ pressed }) => [
+                styles.tabButton,
+                activeTab === 'stats' && styles.tabButtonActive,
+                pressed && styles.pressed,
+              ]}>
+              <Text style={[styles.tabLabel, activeTab === 'stats' && styles.tabLabelActive]}>Stats</Text>
+            </Pressable>
+          </View>
+          <View style={styles.tabDots}>
+            <View style={[styles.tabDot, activeTab === 'games' && styles.tabDotActive]} />
+            <View style={[styles.tabDot, activeTab === 'stats' && styles.tabDotActive]} />
+          </View>
 
-          {liveSession?.games?.length ? (
-            <View style={styles.gameList}>
-              {liveSession.games.map((game, index) =>
-                game.status === 'ready' ? (
-                  <LiveSessionGameCard
-                    key={game.id}
-                    game={game}
-                    gameNumber={index + 1}
-                    selectedPlayerKeys={selectedPlayerKeys}
-                    deleting={deletingGameId === game.id}
-                    onEdit={setEditingGame}
-                    onDelete={(liveGameId) => deleteGameMutation.mutate(liveGameId)}
-                  />
-                ) : (
-                  <SurfaceCard key={game.id} style={styles.pendingCard}>
-                    <View style={styles.pendingCardRow}>
-                      <View style={styles.pendingSummary}>
-                        <StackBadge lines={['Game', String(index + 1)]} />
-                        <View style={styles.pendingTextBlock}>
-                          <Text style={styles.pendingTitle}>
-                            {game.status === 'error'
-                              ? 'Scoreboard needs attention'
-                              : getLiveGameScoreLabel(game, selectedPlayerKeys)}
-                          </Text>
-                          <Text style={styles.pendingMeta}>{formatGameMeta(game)}</Text>
-                          <Text style={styles.pendingStatus}>{formatStatusLabel(game.status)}</Text>
-                          {game.last_error ? (
-                            <Text style={styles.pendingError}>{game.last_error}</Text>
-                          ) : null}
-                        </View>
-                      </View>
-                      <View style={styles.pendingActions}>
-                        {game.status === 'queued' || game.status === 'processing' ? (
-                          <BowlingBallSpinner size={22} holeColor={palette.field} />
-                        ) : null}
-                        <IconAction
-                          accessibilityLabel="Delete pending live game"
-                          onPress={() =>
-                            confirmAction({
-                              title: 'Delete game',
-                              message: 'Remove this scoreboard from the live session?',
-                              confirmLabel: 'Delete',
-                              destructive: true,
-                              onConfirm: () => deleteGameMutation.mutate(game.id),
-                            })
-                          }
-                          icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
+          <View
+            style={styles.pagerViewport}
+            onLayout={(event) => {
+              const nextLayout = event.nativeEvent.layout;
+              pagerViewportYRef.current = nextLayout.y;
+              const nextWidth = Math.round(nextLayout.width);
+              if (!nextWidth || nextWidth === pagerWidth) {
+                return;
+              }
+
+              setPagerWidth(nextWidth);
+              requestAnimationFrame(() => {
+                scrollToTab(activeTab, false);
+              });
+            }}>
+            <ScrollView
+              ref={pagerRef}
+              horizontal
+              pagingEnabled
+              scrollEnabled={pagerScrollEnabled}
+              nestedScrollEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={(event) => {
+                if (!pagerWidth) {
+                  return;
+                }
+                const nextTab =
+                  Math.round(event.nativeEvent.contentOffset.x / pagerWidth) === 1 ? 'stats' : 'games';
+                setActiveTab(nextTab);
+              }}>
+              <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
+                {liveSession?.games?.length ? (
+                  <View style={styles.gameList}>
+                    {liveSession.games.map((game, index) =>
+                      game.status === 'ready' ? (
+                        <LiveSessionGameCard
+                          key={game.id}
+                          game={game}
+                          gameNumber={index + 1}
+                          selectedPlayerKeys={selectedPlayerKeys}
+                          deleting={deletingGameId === game.id}
+                          onEdit={setEditingGame}
+                          onDelete={(liveGameId) => deleteGameMutation.mutate(liveGameId)}
+                          onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
+                          onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
                         />
-                      </View>
-                    </View>
+                      ) : (
+                        <View key={game.id} style={styles.pendingCard}>
+                          <View style={styles.pendingCardRow}>
+                            <View style={styles.pendingSummary}>
+                              <StackBadge lines={['Game', String(index + 1)]} />
+                              <View style={styles.pendingTextBlock}>
+                                <Text style={styles.pendingTitle}>
+                                  {game.status === 'error' ? 'Scoreboard needs attention' : 'Processing scoreboard'}
+                                </Text>
+                                {game.last_error ? (
+                                  <Text style={styles.pendingError}>{game.last_error}</Text>
+                                ) : null}
+                              </View>
+                            </View>
+                            <View style={styles.pendingActions}>
+                              {game.status === 'queued' || game.status === 'processing' ? (
+                                <BowlingBallSpinner size={22} holeColor={palette.field} />
+                              ) : null}
+                              <IconAction
+                                accessibilityLabel="Delete pending live game"
+                                onPress={() =>
+                                  confirmAction({
+                                    title: 'Delete game',
+                                    message: 'Remove this scoreboard from the live session?',
+                                    confirmLabel: 'Delete',
+                                    destructive: true,
+                                    onConfirm: () => deleteGameMutation.mutate(game.id),
+                                  })
+                                }
+                                icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
+                              />
+                            </View>
+                          </View>
+                        </View>
+                      ),
+                    )}
+                  </View>
+                ) : (
+                  <SurfaceCard style={styles.emptyCard}>
+                    <Text style={styles.emptyTitle}>No live games yet</Text>
+                    <Text style={styles.emptyBody}>
+                      After you finish a game, add a scoreboard photo here. Once it is processed, the draft game card will appear below.
+                    </Text>
                   </SurfaceCard>
-                ),
-              )}
-            </View>
-          ) : (
-            <SurfaceCard style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No live games yet</Text>
-              <Text style={styles.emptyBody}>
-                After you finish a game, add a scoreboard photo here. Once it is processed, the draft game card will appear below.
-              </Text>
-            </SurfaceCard>
-          )}
+                )}
+              </View>
+
+              <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
+              <View style={styles.statsSection}>
+                <View style={styles.statsGrid}>
+                  {comparisonCategories.map((category) => (
+                    <StatsTile
+                      key={category.key}
+                      label={category.label}
+                      value={getStatsTileValue(stats, category.key)}
+                      onPress={() => handlePressStatsTile(category.key)}
+                    />
+                  ))}
+                </View>
+                </View>
+
+                <View
+                  onLayout={(event) => {
+                    compareSectionYRef.current = event.nativeEvent.layout.y;
+                  }}>
+                  <SurfaceCard style={styles.sectionCard}>
+                    <Text style={styles.sectionBody}>Select category to compare players.</Text>
+                    <ScrollView
+                      ref={comparisonCategoryScrollRef}
+                      horizontal
+                      nestedScrollEnabled
+                      showsHorizontalScrollIndicator={false}
+                      onLayout={(event) => {
+                        comparisonCategoryViewportWidthRef.current = event.nativeEvent.layout.width;
+                      }}
+                      onTouchStart={() => setPagerScrollEnabled(false)}
+                      onTouchEnd={() => setPagerScrollEnabled(true)}
+                      onTouchCancel={() => setPagerScrollEnabled(true)}
+                      onScrollBeginDrag={() => setPagerScrollEnabled(false)}
+                      onScrollEndDrag={() => setPagerScrollEnabled(true)}
+                      onMomentumScrollEnd={() => setPagerScrollEnabled(true)}
+                      contentContainerStyle={styles.comparisonCategoryRow}>
+                      {comparisonCategories.map((category) => (
+                        <Pressable
+                          key={category.key}
+                          onPress={() => handleSelectComparisonMetric(category.key)}
+                          onLayout={(event) => {
+                            comparisonCategoryLayoutsRef.current[category.key] = {
+                              x: event.nativeEvent.layout.x,
+                              width: event.nativeEvent.layout.width,
+                            };
+                          }}
+                          style={({ pressed }) => [
+                            styles.comparisonCategoryChip,
+                            selectedComparisonMetric === category.key && styles.comparisonCategoryChipActive,
+                            pressed && styles.pressed,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.comparisonCategoryLabel,
+                              selectedComparisonMetric === category.key && styles.comparisonCategoryLabelActive,
+                            ]}>
+                            {category.label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+
+                    <View style={styles.comparisonList}>
+                      {comparisonRows.map((row) => {
+                        const value = getComparisonMetricValue(row, selectedComparisonMetric);
+                        const fillPercent =
+                          value !== null && comparisonMaxValue > 0
+                            ? Math.max(8, (value / comparisonMaxValue) * 100)
+                            : 0;
+
+                        return (
+                          <View key={row.playerKey} style={styles.comparisonRow}>
+                            <View style={styles.comparisonHeader}>
+                              <Text style={styles.comparisonPlayerLabel}>{row.label}</Text>
+                              <Text style={styles.comparisonValueLabel}>
+                                {getComparisonMetricDisplayLabel(row, selectedComparisonMetric)}
+                              </Text>
+                            </View>
+                            <View style={styles.comparisonBarTrack}>
+                              <View
+                                style={[
+                                  styles.comparisonBarFill,
+                                  { width: fillPercent > 0 ? `${fillPercent}%` : '0%' },
+                                ]}
+                              />
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                    {comparisonLoading ? (
+                      <View style={styles.comparisonLoading}>
+                        <BowlingBallSpinner size={28} holeColor={palette.surface} />
+                      </View>
+                    ) : null}
+                  </SurfaceCard>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
         </ScrollView>
 
         <View style={styles.endDock}>
           {!hasSelectedPlayers ? (
             <Text style={styles.dockNote}>Choose at least one player before ending the session.</Text>
+          ) : selectionError ? (
+            <Text style={styles.dockNote}>{selectionError}</Text>
           ) : hasUnfinishedGames ? (
             <Text style={styles.dockNote}>Wait for all scoreboards to finish processing.</Text>
           ) : hasFailedGames ? (
             <Text style={styles.dockNote}>Remove or fix failed scoreboards before ending the session.</Text>
-          ) : selectedPlayerKeys.length > 1 ? (
+          ) : projectedLoggedGameCount > 0 ? (
             <Text style={styles.dockNote}>
-              Multiple selected names will log {projectedLoggedGameCount} games from {readyGames.length} scoreboards.
+              Ending this session will log {projectedLoggedGameCount} games from {readyGames.length} scoreboards.
             </Text>
           ) : null}
           <ActionButton
@@ -572,6 +977,7 @@ export default function LiveSessionScreen() {
               readyGames.length === 0 ||
               hasUnfinishedGames ||
               hasFailedGames ||
+              Boolean(selectionError) ||
               projectedLoggedGameCount === 0
             }
           />
@@ -585,12 +991,14 @@ export default function LiveSessionScreen() {
             <ActionButton
               label="Camera"
               onPress={() => captureMutation.mutate('camera')}
+              textStyle={styles.cameraButtonText}
               disabled={captureMutation.isPending}
             />
             <ActionButton
               label="Photo Library"
               onPress={() => captureMutation.mutate('library')}
               variant="secondary"
+              style={styles.photoLibraryButton}
               disabled={captureMutation.isPending}
             />
             <ActionButton label="Cancel" onPress={() => setSourceOpen(false)} variant="secondary" />
@@ -619,11 +1027,6 @@ export default function LiveSessionScreen() {
                 Logged games that will be created: {projectedLoggedGameCount}
               </Text>
             </View>
-            {selectedPlayerKeys.length > 1 ? (
-              <Text style={styles.modalBody}>
-                Multiple selected names can create more logged games than visible scoreboards because each selected row is logged separately.
-              </Text>
-            ) : null}
             <Text style={styles.modalHint}>
               Optionally rename the session or add a description before ending it.
             </Text>
@@ -751,6 +1154,57 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontFamily: fontFamilySans,
   },
+  tabRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  tabDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: -4,
+  },
+  tabDot: {
+    width: 8,
+    height: 8,
+    borderRadius: radii.pill,
+    backgroundColor: palette.field,
+  },
+  tabDotActive: {
+    backgroundColor: palette.text,
+  },
+  tabButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: radii.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.surfaceRaised,
+    paddingHorizontal: spacing.md,
+  },
+  tabButtonActive: {
+    backgroundColor: palette.accent,
+  },
+  tabLabel: {
+    color: palette.muted,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  tabLabelActive: {
+    color: palette.text,
+  },
+  pagerViewport: {
+    overflow: 'visible',
+  },
+  pagerPage: {
+    gap: spacing.md,
+  },
+  statsSection: {
+    gap: spacing.sm,
+  },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -758,7 +1212,7 @@ const styles = StyleSheet.create({
   },
   statsTile: {
     width: '48%',
-    backgroundColor: palette.field,
+    backgroundColor: palette.surface,
     borderRadius: radii.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
@@ -777,48 +1231,105 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: fontFamilySans,
   },
+  comparisonCategoryRow: {
+    gap: spacing.sm,
+    paddingRight: spacing.xs,
+  },
+  comparisonCategoryChip: {
+    minHeight: 40,
+    borderRadius: radii.pill,
+    backgroundColor: palette.field,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  comparisonCategoryChipActive: {
+    backgroundColor: palette.accent,
+  },
+  comparisonCategoryLabel: {
+    color: palette.muted,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  comparisonCategoryLabelActive: {
+    color: palette.text,
+  },
+  comparisonList: {
+    gap: spacing.md,
+  },
+  comparisonLoading: {
+    minHeight: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  comparisonRow: {
+    gap: spacing.xs,
+  },
+  comparisonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  comparisonPlayerLabel: {
+    flex: 1,
+    color: palette.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  comparisonValueLabel: {
+    color: palette.muted,
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: fontFamilySans,
+  },
+  comparisonBarTrack: {
+    height: 12,
+    borderRadius: radii.pill,
+    backgroundColor: palette.field,
+    overflow: 'hidden',
+  },
+  comparisonBarFill: {
+    height: '100%',
+    borderRadius: radii.pill,
+    backgroundColor: palette.accent,
+  },
   gameList: {
     gap: 8,
   },
   pendingCard: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingHorizontal: 2,
+    paddingVertical: 6,
+    gap: 10,
   },
   pendingCardRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.md,
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   pendingSummary: {
     flex: 1,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
+    gap: 16,
+    paddingLeft: 6,
   },
   pendingTextBlock: {
     flex: 1,
     minWidth: 0,
+    minHeight: 52,
+    justifyContent: 'center',
     gap: 2,
   },
   pendingTitle: {
     color: palette.text,
-    fontSize: 24,
-    lineHeight: 28,
-    fontWeight: '400',
-    fontFamily: fontFamilySans,
-  },
-  pendingMeta: {
-    color: palette.muted,
-    fontSize: 14,
-    lineHeight: 18,
-    fontFamily: fontFamilySans,
-  },
-  pendingStatus: {
-    color: palette.accent,
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 20,
+    lineHeight: 25,
     fontWeight: '600',
     fontFamily: fontFamilySans,
   },
@@ -922,6 +1433,12 @@ const styles = StyleSheet.create({
   descriptionInput: {
     minHeight: 96,
     textAlignVertical: 'top',
+  },
+  cameraButtonText: {
+    fontWeight: '600',
+  },
+  photoLibraryButton: {
+    backgroundColor: palette.field,
   },
   pressed: {
     opacity: 0.9,

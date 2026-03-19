@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUserIdFromRequest } from "../utils/auth";
+import {
+  normalizeLiveExtraction,
+  normalizePlayerKey,
+  serializeLiveExtraction,
+} from "../live-session/shared";
 
 export const runtime = "nodejs";
 
@@ -222,7 +227,7 @@ export async function GET(request: Request) {
   const { data: game, error: gameError } = await supabase
     .from("games")
     .select(
-      "id,game_name,player_name,total_score,status,played_at,created_at,frames:frames(id,frame_number,is_strike,is_spare,frame_score,shots:shots(id,shot_number,pins))"
+      "id,game_name,player_name,total_score,status,played_at,created_at,scoreboard_extraction,selected_self_player_key,selected_self_player_name,frames:frames(id,frame_number,is_strike,is_spare,frame_score,shots:shots(id,shot_number,pins))"
     )
     .eq("id", gameId)
     .eq("user_id", userId)
@@ -270,6 +275,22 @@ export async function PATCH(request: Request) {
   const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false }
   });
+
+  const { data: existingGame, error: existingGameError } = await supabase
+    .from("games")
+    .select(
+      "id,player_name,scoreboard_extraction,selected_self_player_key,selected_self_player_name"
+    )
+    .eq("id", payload.gameId)
+    .eq("user_id", userId)
+    .single();
+
+  if (existingGameError || !existingGame) {
+    return NextResponse.json(
+      { error: existingGameError?.message || "Game not found." },
+      { status: 404 }
+    );
+  }
 
   const normalizedFrames = payload.frames.map((frame) => ({
     ...frame,
@@ -379,6 +400,8 @@ export async function PATCH(request: Request) {
     total_score?: number | null;
     status?: string;
     played_at?: string;
+    raw_extraction?: unknown;
+    scoreboard_extraction?: unknown;
   } = {};
   if (payload.playedAt) {
     const parsed = new Date(payload.playedAt);
@@ -392,6 +415,45 @@ export async function PATCH(request: Request) {
   }
   updates.total_score = computeTotalScore(normalizedFrames);
   updates.status = "logged";
+
+  const selectedSelfPlayerKey =
+    typeof existingGame.selected_self_player_key === "string" &&
+    existingGame.selected_self_player_key.trim()
+      ? existingGame.selected_self_player_key.trim()
+      : null;
+  const selectedSelfPlayerName =
+    typeof existingGame.selected_self_player_name === "string" &&
+    existingGame.selected_self_player_name.trim()
+      ? existingGame.selected_self_player_name.trim()
+      : existingGame.player_name;
+  const selectedPlayerFrames = normalizedFrames.map((frame) => ({
+    frame: frame.frameNumber,
+    shots: [
+      frame.shots.find((shot) => shot.shotNumber === 1)?.pins ?? null,
+      frame.shots.find((shot) => shot.shotNumber === 2)?.pins ?? null,
+      frame.shots.find((shot) => shot.shotNumber === 3)?.pins ?? null,
+    ] as [number | null, number | null, number | null],
+  }));
+  const selectedPlayerExtraction = {
+    playerName: selectedSelfPlayerName || existingGame.player_name,
+    playerKey: normalizePlayerKey(selectedSelfPlayerName || existingGame.player_name),
+    totalScore: updates.total_score ?? null,
+    frames: selectedPlayerFrames,
+  };
+
+  if (existingGame.scoreboard_extraction && selectedSelfPlayerKey) {
+    const players = normalizeLiveExtraction(existingGame.scoreboard_extraction).players.map(
+      (player) =>
+        player.playerKey === selectedSelfPlayerKey
+          ? selectedPlayerExtraction
+          : player
+    );
+    updates.scoreboard_extraction = serializeLiveExtraction(players);
+  } else {
+    updates.scoreboard_extraction = serializeLiveExtraction([selectedPlayerExtraction]);
+  }
+
+  updates.raw_extraction = serializeLiveExtraction([selectedPlayerExtraction]);
 
   const { error: gameError } = await supabase
     .from("games")

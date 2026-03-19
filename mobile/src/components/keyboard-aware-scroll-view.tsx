@@ -2,6 +2,7 @@ import React, { type ReactNode } from 'react';
 import {
   Platform,
   ScrollView,
+  StyleSheet,
   type ScrollViewProps,
 } from 'react-native';
 import { KeyboardAwareScrollView as NativeKeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
@@ -21,12 +22,17 @@ export default function KeyboardAwareScrollView({
   children,
   keyboardShouldPersistTaps = 'handled',
   extraScrollHeight = DEFAULT_EXTRA_SCROLL_HEIGHT,
+  contentContainerStyle,
   ...props
 }: KeyboardAwareScrollViewProps) {
+  const flattenedContentContainerStyle =
+    StyleSheet.flatten(contentContainerStyle) ?? undefined;
+
   if (Platform.OS === 'web') {
     return (
       <ScrollView
         {...props}
+        contentContainerStyle={flattenedContentContainerStyle}
         keyboardShouldPersistTaps={keyboardShouldPersistTaps}>
         {children}
       </ScrollView>
@@ -36,6 +42,7 @@ export default function KeyboardAwareScrollView({
   return (
     <NativeKeyboardAwareScrollView
       {...props}
+      contentContainerStyle={flattenedContentContainerStyle}
       enableOnAndroid
       extraHeight={extraScrollHeight}
       extraScrollHeight={0}

@@ -105,7 +105,7 @@ export function normalizeFrameShots(
 }
 
 export function normalizeLivePlayers(players: RawLivePlayer[]) {
-  return players
+  const normalizedPlayers = players
     .map((player, playerIndex) => {
       const nameSource =
         typeof player.playerName === "string" ? player.playerName.trim() : "";
@@ -142,6 +142,23 @@ export function normalizeLivePlayers(players: RawLivePlayer[]) {
       } satisfies NormalizedLivePlayer;
     })
     .filter((player) => player.playerName.trim().length > 0);
+
+  const duplicateCounts = new Map<string, number>();
+  return normalizedPlayers.map((player) => {
+    const baseKey = normalizePlayerKey(player.playerName);
+    const nextCount = (duplicateCounts.get(baseKey) ?? 0) + 1;
+    duplicateCounts.set(baseKey, nextCount);
+    if (nextCount === 1) {
+      return player;
+    }
+
+    const playerName = `${player.playerName}(${nextCount})`;
+    return {
+      ...player,
+      playerName,
+      playerKey: normalizePlayerKey(playerName),
+    };
+  });
 }
 
 export function normalizeLiveExtraction(value: unknown) {

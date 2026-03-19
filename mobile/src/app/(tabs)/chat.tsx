@@ -1,6 +1,7 @@
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Image,
   Keyboard,
@@ -20,9 +21,11 @@ import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import IconAction from '@/components/icon-action';
 import SurfaceCard from '@/components/surface-card';
-import { sendChat } from '@/lib/backend';
+import { queryKeys, sendChat } from '@/lib/backend';
+import { buildOfflineChatResult } from '@/lib/offline-chat';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import type { GameListItem } from '@/lib/types';
 
 type Message = {
   role: 'user' | 'assistant';
@@ -106,6 +109,7 @@ function renderMessageContent(content: string, isUser: boolean) {
 
 export default function ChatScreen() {
   const tabBarHeight = useBottomTabBarHeight();
+  const queryClient = useQueryClient();
   const scrollRef = useRef<ScrollView | null>(null);
   const inputRef = useRef<TextInput | null>(null);
   const [question, setQuestion] = useState('');
@@ -187,12 +191,36 @@ export default function ChatScreen() {
       setChatStatus('idle');
       setHasCompletedResponse(true);
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Chat request failed.';
+      const isNetworkError =
+        /network request failed/i.test(errorMessage) || /failed to fetch/i.test(errorMessage);
+
+      if (isNetworkError) {
+        const gamesPayload = queryClient.getQueryData<{ games: GameListItem[]; count: number | null }>(
+          queryKeys.games,
+        );
+        const offlineResult = await buildOfflineChatResult(userQuestion, gamesPayload?.games);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: offlineResult.answer,
+            variant: 'offline',
+            meta: offlineResult.meta,
+            note: offlineResult.note,
+          },
+        ]);
+        setChatStatus('idle');
+        setHasCompletedResponse(true);
+        return;
+      }
+
       setChatStatus('error');
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: error instanceof Error ? error.message : 'Chat request failed.',
+          content: errorMessage,
           variant: 'error',
         },
       ]);

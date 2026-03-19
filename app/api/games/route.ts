@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     let query = supabase
       .from("games")
       .select(
-        "id,game_name,player_name,total_score,status,played_at,created_at,session_id,session:bowling_sessions(id,name,description,started_at,created_at)",
+        "id,game_name,player_name,total_score,status,played_at,created_at,session_id,scoreboard_extraction,selected_self_player_key,selected_self_player_name,session:bowling_sessions(id,name,description,started_at,created_at)",
         {
           count: "exact"
         }

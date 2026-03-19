@@ -34,6 +34,9 @@ export type GameDetail = {
   created_at?: string | null;
   status: string;
   session_id?: string | null;
+  scoreboard_extraction?: LiveExtraction | null;
+  selected_self_player_key?: string | null;
+  selected_self_player_name?: string | null;
   frames?: FrameDetail[];
 };
 
@@ -46,6 +49,9 @@ export type GameListItem = {
   played_at?: string | null;
   created_at: string;
   session_id?: string | null;
+  scoreboard_extraction?: LiveExtraction | null;
+  selected_self_player_key?: string | null;
+  selected_self_player_name?: string | null;
   session?: SessionItem | null;
 };
 
@@ -102,6 +108,10 @@ export type InviteLookupResponse = {
 };
 
 export type LiveSessionGameStatus = 'queued' | 'processing' | 'ready' | 'error';
+export type RecordingDraftMode =
+  | 'upload_session'
+  | 'add_multiple_sessions'
+  | 'add_existing_session';
 
 export type LiveFrame = {
   frame: number;
@@ -168,10 +178,79 @@ export type LiveSessionEndResponse = {
 };
 
 export type LiveSessionStats = {
+  gameCountLabel: string;
   averageLabel: string;
+  bestScoreLabel: string;
+  bestSeriesLabel: string;
+  strikesLabel: string;
+  ninesLabel: string;
   strikeRateLabel: string;
-  spareRateLabel: string;
   spareConversionRateLabel: string;
   bestFrameLabel: string;
   worstFrameLabel: string;
+};
+
+export type RecordingDraftGameStatus = 'queued' | 'processing' | 'ready' | 'error';
+
+export type RecordingDraftGame = {
+  id: string;
+  draft_id: string;
+  group_id?: string | null;
+  capture_order: number;
+  storage_key: string;
+  status: RecordingDraftGameStatus;
+  captured_at_hint?: string | null;
+  captured_at?: string | null;
+  sort_at?: string | null;
+  last_error?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  extraction?: LiveExtraction | null;
+};
+
+export type RecordingDraftGroup = {
+  id: string;
+  draft_id: string;
+  display_order: number;
+  name?: string | null;
+  description?: string | null;
+  anchor_captured_at?: string | null;
+  games: RecordingDraftGame[];
+};
+
+export type RecordingDraftProgress = {
+  total: number;
+  queued: number;
+  processing: number;
+  ready: number;
+  error: number;
+  completed: number;
+};
+
+export type RecordingDraft = {
+  id: string;
+  mode: RecordingDraftMode;
+  status: 'active' | 'finalized' | 'discarded';
+  selectedPlayerKeys: string[];
+  playerOptions: LiveSessionPlayerOption[];
+  targetSessionId?: string | null;
+  name?: string | null;
+  description?: string | null;
+  groups: RecordingDraftGroup[];
+  progress: RecordingDraftProgress;
+};
+
+export type RecordingDraftResponse = {
+  draft: RecordingDraft | null;
+};
+
+export type RecordEntryStatus = {
+  liveSession: boolean;
+  uploadSessionDraft: boolean;
+  addMultipleSessionsDraft: boolean;
+  addExistingSessionDraft: boolean;
+};
+
+export type RecordEntryStatusResponse = {
+  status: RecordEntryStatus;
 };

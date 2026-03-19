@@ -5,16 +5,16 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
-import FrameGrid from '@/components/frame-grid';
 import GameEditSheet from '@/components/game-edit-sheet';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
+import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
 import StackBadge from '@/components/stack-badge';
 import { deleteGame, fetchGameById, queryKeys } from '@/lib/backend';
-import { buildFrameGrid } from '@/lib/bowling';
 import { confirmAction } from '@/lib/confirm';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { getResolvedPlayersForGame } from '@/lib/live-session';
 import type { GameListItem } from '@/lib/types';
 
 type SessionGameCardProps = {
@@ -134,8 +134,19 @@ export default function SessionGameCard({
                   gameQuery.error instanceof Error ? gameQuery.error.message : 'Failed to load game.'
                 }
               />
+            ) : gameQuery.data?.game?.scoreboard_extraction ? (
+              <MultiPlayerFrameGrid
+                players={getResolvedPlayersForGame({
+                  extraction: gameQuery.data.game.scoreboard_extraction,
+                })}
+                selectedPlayerKeys={
+                  gameQuery.data.game.selected_self_player_key
+                    ? [gameQuery.data.game.selected_self_player_key]
+                    : []
+                }
+              />
             ) : gameQuery.data?.game ? (
-              <FrameGrid frames={buildFrameGrid(gameQuery.data.game)} />
+              <Text style={styles.loadingText}>No scoreboard data available for this game.</Text>
             ) : null}
 
             {deleteError ? <InfoBanner tone="error" text={deleteError} /> : null}
@@ -178,9 +189,9 @@ const styles = StyleSheet.create({
   },
   scoreValue: {
     color: palette.text,
-    fontSize: 30,
-    lineHeight: 30,
-    fontWeight: '400',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: '600',
     fontFamily: fontFamilySans,
   },
   metaLine: {

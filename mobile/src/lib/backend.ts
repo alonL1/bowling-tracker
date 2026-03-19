@@ -1,4 +1,5 @@
 import { apiJson } from '@/lib/api';
+import { cacheOfflineChatGames } from '@/lib/offline-chat';
 import type {
   GameDetail,
   GameListItem,
@@ -9,6 +10,9 @@ import type {
   LiveSessionCaptureResponse,
   LiveSessionEndResponse,
   LiveSessionResponse,
+  RecordingDraftMode,
+  RecordingDraftResponse,
+  RecordEntryStatusResponse,
   SessionItem,
   SessionMode,
   StatusResponse,
@@ -19,12 +23,16 @@ export const queryKeys = {
   game: (gameId: string) => ['game', gameId] as const,
   sessions: ['sessions'] as const,
   liveSession: ['live-session'] as const,
+  recordEntryStatus: ['record-entry-status'] as const,
+  recordingDraft: (mode: RecordingDraftMode) => ['recording-draft', mode] as const,
   leaderboard: ['leaderboard'] as const,
   inviteLookup: (token: string) => ['invite-lookup', token] as const,
 };
 
 export async function fetchGames() {
-  return apiJson<{ games: GameListItem[]; count: number | null }>('/api/games');
+  const payload = await apiJson<{ games: GameListItem[]; count: number | null }>('/api/games');
+  void cacheOfflineChatGames(payload.games);
+  return payload;
 }
 
 export async function fetchGameById(gameId: string) {
@@ -188,6 +196,125 @@ export async function fetchStatus(jobId: string) {
 
 export async function fetchLiveSession() {
   return apiJson<LiveSessionResponse>('/api/live-session');
+}
+
+export async function fetchRecordEntryStatus() {
+  return apiJson<RecordEntryStatusResponse>('/api/record-entry-status');
+}
+
+export async function fetchRecordingDraft(mode: RecordingDraftMode) {
+  return apiJson<RecordingDraftResponse>(`/api/recording-draft?mode=${encodeURIComponent(mode)}`);
+}
+
+export async function updateRecordingDraft(payload: {
+  mode: RecordingDraftMode;
+  selectedPlayerKeys?: string[];
+  targetSessionId?: string | null;
+  name?: string | null;
+  description?: string | null;
+}) {
+  return apiJson<RecordingDraftResponse>('/api/recording-draft', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function discardRecordingDraft(mode: RecordingDraftMode) {
+  return apiJson<RecordingDraftResponse | { ok: boolean; discarded: boolean }>('/api/recording-draft', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export async function uploadToRecordingDraft(payload: {
+  mode: RecordingDraftMode;
+  timezoneOffsetMinutes: number;
+  storageItems: SubmitStorageItem[];
+}) {
+  return apiJson<RecordingDraftResponse>('/api/recording-draft/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateRecordingDraftGroup(payload: {
+  mode: RecordingDraftMode;
+  groupId: string;
+  name?: string | null;
+  description?: string | null;
+}) {
+  return apiJson<RecordingDraftResponse>('/api/recording-draft/group', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteRecordingDraftGroup(payload: {
+  mode: RecordingDraftMode;
+  groupId: string;
+}) {
+  return apiJson<RecordingDraftResponse>('/api/recording-draft/group', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function reorderRecordingDraftGame(payload: {
+  mode: RecordingDraftMode;
+  gameId: string;
+  targetGroupId?: string | null;
+  beforeGameId?: string | null;
+  afterGameId?: string | null;
+}) {
+  return apiJson<RecordingDraftResponse>('/api/recording-draft/reorder', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateRecordingDraftGame(payload: {
+  mode: RecordingDraftMode;
+  draftGameId: string;
+  players: LivePlayer[];
+  capturedAt?: string | null;
+}) {
+  return apiJson<RecordingDraftResponse>('/api/recording-draft/game', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteRecordingDraftGame(mode: RecordingDraftMode, draftGameId: string) {
+  return apiJson<RecordingDraftResponse>('/api/recording-draft/game', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, draftGameId }),
+  });
+}
+
+export async function finalizeRecordingDraft(payload: {
+  mode: RecordingDraftMode;
+  targetSessionId?: string | null;
+  name?: string | null;
+  description?: string | null;
+}) {
+  return apiJson<{
+    ok: boolean;
+    createdGameIds: string[];
+    createdSessionIds: string[];
+    primarySessionId: string | null;
+  }>('/api/recording-draft/finalize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function updateLiveSession(payload: {

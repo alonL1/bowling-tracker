@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import ActionButton from '@/components/action-button';
 import InfoBanner from '@/components/info-banner';
@@ -36,23 +37,23 @@ export default function AccountScreen() {
 
   return (
     <ScreenShell title="Account">
-      <SurfaceCard style={styles.summaryCard}>
-        <Text style={styles.summaryEyebrow}>{isGuest ? 'Guest Session' : 'Signed In'}</Text>
-        <Text style={[styles.summaryTitle, !isGuest && styles.summaryEmail]}>
-          {isGuest ? 'Explore before you commit' : user?.email || 'Account'}
-        </Text>
-        <Text style={styles.summaryDescription}>
-          {isGuest
-            ? 'Guest sessions let you browse your stats and uploads before creating an account.'
-            : 'Your sessions, uploads, chat history, and friends all stay tied to this account.'}
-        </Text>
-      </SurfaceCard>
+      {!isGuest ? (
+        <SurfaceCard style={styles.summaryCard}>
+          <Text style={styles.summaryEyebrow}>Signed In</Text>
+          <Text style={[styles.summaryTitle, styles.summaryEmail]}>
+            {user?.email || 'Account'}
+          </Text>
+          <Text style={styles.summaryDescription}>
+            Your sessions, uploads, chat history, and friends all stay tied to this account.
+          </Text>
+        </SurfaceCard>
+      ) : null}
 
       {isGuest ? (
         <SurfaceCard style={styles.actionsCard} tone="raised">
           <Text style={styles.actionsTitle}>Ready to save your progress?</Text>
           <Text style={styles.actionsDescription}>
-            Create an account to keep your logs and sync the same PinPoint data on every device.
+            Create an account to never lose your logs, add friends, and sync the same PinPoint data on every device.
           </Text>
           <ActionButton
             label="Sign in / Create account"
@@ -76,6 +77,43 @@ export default function AccountScreen() {
       ) : null}
 
       {error ? <InfoBanner text={error} tone="error" /> : null}
+
+      <SurfaceCard style={styles.linksCard} tone="raised">
+        <Text style={styles.linksTitle}>Legal & Data</Text>
+        <Text style={styles.linksDescription}>
+          Review PinPoint policies or open the pages used for privacy and deletion requests.
+        </Text>
+
+        <View style={styles.linkList}>
+          <Pressable
+            onPress={() => router.push('/privacy')}
+            style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}>
+            <Text style={styles.linkLabel}>Privacy Policy</Text>
+            <Ionicons name="chevron-forward" size={18} color={palette.muted} />
+          </Pressable>
+
+          <Pressable
+            onPress={() => router.push('/terms')}
+            style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}>
+            <Text style={styles.linkLabel}>Terms of Service</Text>
+            <Ionicons name="chevron-forward" size={18} color={palette.muted} />
+          </Pressable>
+
+          <Pressable
+            onPress={() => router.push('/delete-account')}
+            style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}>
+            <Text style={styles.linkLabel}>Delete Account</Text>
+            <Ionicons name="chevron-forward" size={18} color={palette.muted} />
+          </Pressable>
+
+          <Pressable
+            onPress={() => router.push('/delete-data')}
+            style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}>
+            <Text style={styles.linkLabel}>Delete Data</Text>
+            <Ionicons name="chevron-forward" size={18} color={palette.muted} />
+          </Pressable>
+        </View>
+      </SurfaceCard>
     </ScreenShell>
   );
 }
@@ -132,5 +170,47 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: spacing.sm,
+  },
+  linksCard: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
+    gap: spacing.md,
+  },
+  linksTitle: {
+    color: palette.text,
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  linksDescription: {
+    color: palette.muted,
+    fontSize: 15,
+    lineHeight: 21,
+    fontFamily: fontFamilySans,
+  },
+  linkList: {
+    gap: spacing.sm,
+  },
+  linkRow: {
+    minHeight: 52,
+    borderRadius: 14,
+    backgroundColor: palette.surfaceRaised,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  linkLabel: {
+    color: palette.text,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  pressed: {
+    opacity: 0.9,
   },
 });

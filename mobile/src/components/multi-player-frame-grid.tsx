@@ -9,6 +9,8 @@ import { formatFrameCell, normalizePlayerKey, type ResolvedLivePlayer } from '@/
 type MultiPlayerFrameGridProps = {
   players: ResolvedLivePlayer[];
   selectedPlayerKeys?: string[];
+  onHorizontalGestureStart?: () => void;
+  onHorizontalGestureEnd?: () => void;
 };
 
 const FRAME_HEADERS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'Total'];
@@ -16,12 +18,23 @@ const FRAME_HEADERS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'Total
 export default function MultiPlayerFrameGrid({
   players,
   selectedPlayerKeys = [],
+  onHorizontalGestureStart,
+  onHorizontalGestureEnd,
 }: MultiPlayerFrameGridProps) {
   const selectedKeySet = new Set(selectedPlayerKeys.map(normalizePlayerKey));
 
   return (
     <SurfaceCard style={styles.surface}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <ScrollView
+        horizontal
+        nestedScrollEnabled
+        showsHorizontalScrollIndicator={false}
+        onTouchStart={onHorizontalGestureStart}
+        onTouchEnd={onHorizontalGestureEnd}
+        onTouchCancel={onHorizontalGestureEnd}
+        onScrollBeginDrag={onHorizontalGestureStart}
+        onScrollEndDrag={onHorizontalGestureEnd}
+        onMomentumScrollEnd={onHorizontalGestureEnd}>
         <View style={styles.grid}>
           <View style={[styles.row, styles.headerRow]}>
             <View style={[styles.nameCell, styles.headerNameCell]}>

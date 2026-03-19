@@ -11,17 +11,15 @@ import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { confirmAction } from '@/lib/confirm';
 import { getLiveGameScoreLabel, getResolvedPlayersForGame } from '@/lib/live-session';
-import type { LiveSessionGame } from '@/lib/types';
+import type { RecordingDraftGame } from '@/lib/types';
 
-type LiveSessionGameCardProps = {
-  game: LiveSessionGame;
+type RecordingDraftGameCardProps = {
+  game: RecordingDraftGame;
   gameNumber: number;
   selectedPlayerKeys: string[];
-  onEdit: (game: LiveSessionGame) => void;
+  onEdit: (game: RecordingDraftGame) => void;
   onDelete: (gameId: string) => void;
   deleting?: boolean;
-  onScoreboardGestureStart?: () => void;
-  onScoreboardGestureEnd?: () => void;
 };
 
 function formatCapturedAt(value?: string | null) {
@@ -42,16 +40,14 @@ function formatCapturedAt(value?: string | null) {
   });
 }
 
-export default function LiveSessionGameCard({
+export default function RecordingDraftGameCard({
   game,
   gameNumber,
   selectedPlayerKeys,
   onEdit,
   onDelete,
   deleting = false,
-  onScoreboardGestureStart,
-  onScoreboardGestureEnd,
-}: LiveSessionGameCardProps) {
+}: RecordingDraftGameCardProps) {
   const [expanded, setExpanded] = useState(false);
   const players = useMemo(() => getResolvedPlayersForGame(game), [game]);
   const badgeLines = useMemo(() => ['Game', String(gameNumber)], [gameNumber]);
@@ -76,16 +72,16 @@ export default function LiveSessionGameCard({
 
         <View style={styles.actions}>
           <IconAction
-            accessibilityLabel="Edit live game"
+            accessibilityLabel="Edit draft game"
             onPress={() => onEdit(game)}
             icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
           />
           <IconAction
-            accessibilityLabel="Delete live game"
+            accessibilityLabel="Delete draft game"
             onPress={() =>
               confirmAction({
                 title: 'Delete game',
-                message: 'Remove this scoreboard from the live session?',
+                message: 'Remove this scoreboard from the draft?',
                 confirmLabel: 'Delete',
                 destructive: true,
                 onConfirm: () => onDelete(game.id),
@@ -100,7 +96,7 @@ export default function LiveSessionGameCard({
             }
           />
           <IconAction
-            accessibilityLabel={expanded ? 'Collapse live game' : 'Expand live game'}
+            accessibilityLabel={expanded ? 'Collapse draft game' : 'Expand draft game'}
             onPress={() => setExpanded((current) => !current)}
             icon={
               <Ionicons
@@ -116,12 +112,7 @@ export default function LiveSessionGameCard({
       {expanded ? (
         <View style={styles.expandedBody}>
           <Text style={styles.metaLine}>{formatCapturedAt(game.captured_at || game.captured_at_hint)}</Text>
-          <MultiPlayerFrameGrid
-            players={players}
-            selectedPlayerKeys={selectedPlayerKeys}
-            onHorizontalGestureStart={onScoreboardGestureStart}
-            onHorizontalGestureEnd={onScoreboardGestureEnd}
-          />
+          <MultiPlayerFrameGrid players={players} selectedPlayerKeys={selectedPlayerKeys} />
         </View>
       ) : null}
     </View>

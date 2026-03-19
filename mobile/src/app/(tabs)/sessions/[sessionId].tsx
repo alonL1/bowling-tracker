@@ -25,6 +25,13 @@ import SessionGameCard from '@/components/session-game-card';
 import StackBadge from '@/components/stack-badge';
 import SurfaceCard from '@/components/surface-card';
 import {
+  buildLivePlayerComparisons,
+  buildLoggedSessionStats,
+  type LivePlayerComparisonMetric,
+  type LivePlayerComparisonRow,
+  canonicalizePlayerLabel,
+} from '@/lib/live-session';
+import {
   createSession,
   deleteSession,
   fetchGames,
@@ -37,6 +44,117 @@ import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 
 const NEW_SESSION_TARGET = '__new-session__';
+const comparisonCategories: Array<{ key: LivePlayerComparisonMetric; label: string }> = [
+  { key: 'average', label: 'Average' },
+  { key: 'bestScore', label: 'Best Score' },
+  { key: 'bestSeries', label: 'Best Series' },
+  { key: 'games', label: '# of Games' },
+  { key: 'strikeRate', label: 'Strike Rate' },
+  { key: 'strikes', label: '# of Strikes' },
+  { key: 'spareConversionRate', label: 'Spare Conversion' },
+  { key: 'nines', label: '# of 9s' },
+  { key: 'bestFrame', label: 'Best Frame' },
+  { key: 'worstFrame', label: 'Worst Frame' },
+];
+
+function formatOneDecimal(value: number) {
+  const formatted = value.toFixed(1);
+  return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
+}
+
+function getComparisonMetricValue(
+  row: LivePlayerComparisonRow,
+  metric: LivePlayerComparisonMetric,
+) {
+  switch (metric) {
+    case 'average':
+      return row.average;
+    case 'bestScore':
+      return row.bestScore;
+    case 'bestSeries':
+      return row.bestSeries;
+    case 'games':
+      return row.games;
+    case 'strikeRate':
+      return row.strikeRate;
+    case 'strikes':
+      return row.strikes;
+    case 'spareConversionRate':
+      return row.spareConversionRate;
+    case 'nines':
+      return row.nines;
+    case 'bestFrame':
+      return row.bestFrame;
+    case 'worstFrame':
+      return row.worstFrame;
+  }
+}
+
+function getStatsTileValue(
+  stats: ReturnType<typeof buildLoggedSessionStats>,
+  metric: LivePlayerComparisonMetric,
+) {
+  switch (metric) {
+    case 'average':
+      return stats.averageLabel;
+    case 'bestScore':
+      return stats.bestScoreLabel;
+    case 'bestSeries':
+      return stats.bestSeriesLabel;
+    case 'games':
+      return stats.gameCountLabel;
+    case 'strikeRate':
+      return stats.strikeRateLabel;
+    case 'strikes':
+      return stats.strikesLabel;
+    case 'spareConversionRate':
+      return stats.spareConversionRateLabel;
+    case 'nines':
+      return stats.ninesLabel;
+    case 'bestFrame':
+      return stats.bestFrameLabel;
+    case 'worstFrame':
+      return stats.worstFrameLabel;
+  }
+}
+
+function formatComparisonMetricValue(
+  metric: LivePlayerComparisonMetric,
+  value: number | null,
+) {
+  if (value === null || Number.isNaN(value)) {
+    return '—';
+  }
+
+  if (
+    metric === 'average' ||
+    metric === 'bestFrame' ||
+    metric === 'worstFrame' ||
+    metric === 'strikeRate' ||
+    metric === 'spareConversionRate'
+  ) {
+    const formatted = formatOneDecimal(value);
+    return metric === 'strikeRate' || metric === 'spareConversionRate'
+      ? `${formatted}%`
+      : formatted;
+  }
+
+  return String(Math.round(value));
+}
+
+function getComparisonMetricDisplayLabel(
+  row: LivePlayerComparisonRow,
+  metric: LivePlayerComparisonMetric,
+) {
+  if (metric === 'bestFrame') {
+    return row.bestFrameLabel;
+  }
+  if (metric === 'worstFrame') {
+    return row.worstFrameLabel;
+  }
+
+  return formatComparisonMetricValue(metric, getComparisonMetricValue(row, metric));
+}
 
 function formatGameMeta(playerName: string, playedAt?: string | null, createdAt?: string | null) {
   const dateSource = playedAt || createdAt;
@@ -53,6 +171,21 @@ function formatGameMeta(playerName: string, playedAt?: string | null, createdAt?
     hour: 'numeric',
     minute: '2-digit',
   })}`;
+}
+
+function StatsTile({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.statsTile}>
+      <Text style={styles.statsLabel}>{label}</Text>
+      <Text style={styles.statsValue}>{value}</Text>
+    </View>
+  );
 }
 
 export default function SessionDetailScreen() {
@@ -80,6 +213,9 @@ export default function SessionDetailScreen() {
   const [pendingMoveTargetId, setPendingMoveTargetId] = useState<string | null>(null);
   const [pendingDeleteMoveTargetId, setPendingDeleteMoveTargetId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [activeTab, setActiveTab] = useState<'games' | 'stats'>('games');
+  const [selectedComparisonMetric, setSelectedComparisonMetric] =
+    useState<LivePlayerComparisonMetric>('average');
 
   useEffect(() => {
     if (!group || group.isSessionless) {
@@ -200,6 +336,32 @@ export default function SessionDetailScreen() {
   const moveTargets = grouping.groups.filter(
     (target) => !target.isSessionless && target.sessionId !== group.sessionId,
   );
+  const stats = useMemo(() => buildLoggedSessionStats(group.games), [group.games]);
+  const playerComparisons = useMemo(
+    () =>
+      buildLivePlayerComparisons(
+        group.games.map((game) => ({ extraction: game.scoreboard_extraction })),
+      ),
+    [group.games],
+  );
+  const comparisonRows = useMemo(() => {
+    return [...playerComparisons].sort((left, right) => {
+      const leftValue = getComparisonMetricValue(left, selectedComparisonMetric);
+      const rightValue = getComparisonMetricValue(right, selectedComparisonMetric);
+      const normalizedLeft = leftValue ?? -1;
+      const normalizedRight = rightValue ?? -1;
+      if (normalizedRight !== normalizedLeft) {
+        return normalizedRight - normalizedLeft;
+      }
+      return left.label.localeCompare(right.label);
+    });
+  }, [playerComparisons, selectedComparisonMetric]);
+  const comparisonMaxValue = useMemo(() => {
+    return comparisonRows.reduce((max, row) => {
+      const value = getComparisonMetricValue(row, selectedComparisonMetric);
+      return value !== null && value > max ? value : max;
+    }, 0);
+  }, [comparisonRows, selectedComparisonMetric]);
 
   const handleDeleteSession = () => {
     if (!group.sessionId || group.isSessionless) {
@@ -263,21 +425,120 @@ export default function SessionDetailScreen() {
 
         {group.description ? <Text style={styles.description}>{group.description}</Text> : null}
 
-        <Text style={styles.guidance}>
-          Tap on a game to see more info. Hold down on a game to move it into a different session.
-        </Text>
-
-        <View style={styles.gameList}>
-          {group.games.map((game) => (
-            <SessionGameCard
-              key={game.id}
-              game={game}
-              title={grouping.gameTitleMap.get(game.id) || game.game_name?.trim() || 'Game'}
-              meta={formatGameMeta(game.player_name, game.played_at, game.created_at)}
-              onRequestMove={setMoveGameId}
-            />
-          ))}
+        <View style={styles.tabRow}>
+          <Pressable
+            onPress={() => setActiveTab('games')}
+            style={({ pressed }) => [
+              styles.tabButton,
+              activeTab === 'games' && styles.tabButtonActive,
+              pressed && styles.pressed,
+            ]}>
+            <Text style={[styles.tabLabel, activeTab === 'games' && styles.tabLabelActive]}>Games</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setActiveTab('stats')}
+            style={({ pressed }) => [
+              styles.tabButton,
+              activeTab === 'stats' && styles.tabButtonActive,
+              pressed && styles.pressed,
+            ]}>
+            <Text style={[styles.tabLabel, activeTab === 'stats' && styles.tabLabelActive]}>Stats</Text>
+          </Pressable>
         </View>
+        <View style={styles.tabDots}>
+          <View style={[styles.tabDot, activeTab === 'games' && styles.tabDotActive]} />
+          <View style={[styles.tabDot, activeTab === 'stats' && styles.tabDotActive]} />
+        </View>
+
+        {activeTab === 'games' ? (
+          <>
+            <Text style={styles.guidance}>
+              Tap on a game to see more info. Hold down on a game to move it into a different session.
+            </Text>
+
+            <View style={styles.gameList}>
+              {group.games.map((game) => (
+                <SessionGameCard
+                  key={game.id}
+                  game={game}
+                  title={grouping.gameTitleMap.get(game.id) || game.game_name?.trim() || 'Game'}
+                  meta={formatGameMeta(game.player_name, game.played_at, game.created_at)}
+                  onRequestMove={setMoveGameId}
+                />
+              ))}
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={styles.statsGrid}>
+              {comparisonCategories.map((category) => (
+                <StatsTile
+                  key={category.key}
+                  label={category.label}
+                  value={getStatsTileValue(stats, category.key)}
+                />
+              ))}
+            </View>
+
+            <SurfaceCard style={styles.statsCompareCard}>
+              <Text style={styles.guidance}>Select category to compare players.</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.comparisonCategoryRow}>
+                {comparisonCategories.map((category) => (
+                  <Pressable
+                    key={category.key}
+                    onPress={() => setSelectedComparisonMetric(category.key)}
+                    style={({ pressed }) => [
+                      styles.comparisonCategoryChip,
+                      selectedComparisonMetric === category.key && styles.comparisonCategoryChipActive,
+                      pressed && styles.pressed,
+                    ]}>
+                    <Text
+                      style={[
+                        styles.comparisonCategoryLabel,
+                        selectedComparisonMetric === category.key && styles.comparisonCategoryLabelActive,
+                      ]}>
+                      {category.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              <View style={styles.comparisonList}>
+                {comparisonRows.map((row) => {
+                  const value = getComparisonMetricValue(row, selectedComparisonMetric);
+                  const fillPercent =
+                    value !== null && comparisonMaxValue > 0
+                      ? Math.max(8, (value / comparisonMaxValue) * 100)
+                      : 0;
+
+                  return (
+                    <View key={row.playerKey} style={styles.comparisonRow}>
+                      <View style={styles.comparisonHeader}>
+                        <Text style={styles.comparisonPlayerLabel}>
+                          {canonicalizePlayerLabel(row.label)}
+                        </Text>
+                        <Text style={styles.comparisonValueLabel}>
+                          {getComparisonMetricDisplayLabel(row, selectedComparisonMetric)}
+                        </Text>
+                      </View>
+                      <View style={styles.comparisonBarTrack}>
+                        <View
+                          style={[
+                            styles.comparisonBarFill,
+                            { width: fillPercent > 0 ? `${fillPercent}%` : '0%' },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </SurfaceCard>
+          </>
+        )}
       </ScrollView>
 
       <Modal transparent animationType="fade" visible={editing} onRequestClose={() => setEditing(false)}>
@@ -549,8 +810,141 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     fontFamily: fontFamilySans,
   },
+  tabRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  tabButton: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: radii.md,
+    backgroundColor: palette.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  tabButtonActive: {
+    backgroundColor: palette.accent,
+  },
+  tabLabel: {
+    color: palette.muted,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  tabLabelActive: {
+    color: palette.text,
+  },
+  tabDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  tabDot: {
+    width: 8,
+    height: 8,
+    borderRadius: radii.pill,
+    backgroundColor: palette.field,
+  },
+  tabDotActive: {
+    backgroundColor: palette.text,
+  },
   gameList: {
     gap: 8,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  statsTile: {
+    width: '48%',
+    backgroundColor: palette.surfaceRaised,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: 6,
+  },
+  statsLabel: {
+    color: palette.muted,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: fontFamilySans,
+  },
+  statsValue: {
+    color: palette.text,
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  statsCompareCard: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
+    gap: spacing.md,
+  },
+  comparisonCategoryRow: {
+    gap: spacing.sm,
+  },
+  comparisonCategoryChip: {
+    minHeight: 38,
+    borderRadius: radii.pill,
+    backgroundColor: palette.field,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  comparisonCategoryChipActive: {
+    backgroundColor: palette.accent,
+  },
+  comparisonCategoryLabel: {
+    color: palette.muted,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  comparisonCategoryLabelActive: {
+    color: palette.text,
+  },
+  comparisonList: {
+    gap: spacing.md,
+  },
+  comparisonRow: {
+    gap: spacing.xs,
+  },
+  comparisonHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  comparisonPlayerLabel: {
+    color: palette.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+    flex: 1,
+    minWidth: 0,
+  },
+  comparisonValueLabel: {
+    color: palette.muted,
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: fontFamilySans,
+  },
+  comparisonBarTrack: {
+    height: 12,
+    borderRadius: radii.pill,
+    backgroundColor: palette.field,
+    overflow: 'hidden',
+  },
+  comparisonBarFill: {
+    height: '100%',
+    borderRadius: radii.pill,
+    backgroundColor: palette.accent,
   },
   modalBackdrop: {
     flex: 1,

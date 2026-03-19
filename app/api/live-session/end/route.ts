@@ -1,23 +1,16 @@
 import { NextResponse } from "next/server";
 
 import {
-  normalizeLiveExtraction,
   normalizeSelectedPlayerKeys,
-  serializeLiveExtraction,
 } from "../shared";
 import { getActiveLiveSessionRecord, getLiveUserId, getServerSupabase } from "../server";
+import {
+  buildSelectionError,
+  getSelectedPlayersForExtraction,
+  insertLoggedGameFromSelectedPlayer,
+} from "../../utils/logged-scoreboard";
 
 export const runtime = "nodejs";
-
-function computeStrike(shot1: number | null) {
-  return shot1 === 10;
-}
-
-function computeSpare(shot1: number | null, shot2: number | null) {
-  return (
-    shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10
-  );
-}
 
 export async function POST(request: Request) {
   const supabase = getServerSupabase();
@@ -47,7 +40,7 @@ export async function POST(request: Request) {
     const selectedPlayerKeys = normalizeSelectedPlayerKeys(active.selected_player_keys);
     if (selectedPlayerKeys.length === 0) {
       return NextResponse.json(
-        { error: "Choose at least one player before ending the session." },
+        { error: "Choose exactly one player for each game before ending the session." },
         { status: 400 }
       );
     }
@@ -88,98 +81,50 @@ export async function POST(request: Request) {
       );
     }
 
-    let earliestPlayedAt: string | null = null;
-    let loggedGameCount = 0;
-
-    for (const liveGame of games) {
-      const normalizedPlayers = normalizeLiveExtraction(liveGame.extraction).players;
-      const selectedPlayers = normalizedPlayers.filter((player) =>
-        selectedPlayerKeys.includes(player.playerKey)
+    for (const [index, liveGame] of games.entries()) {
+      const { selectedPlayers } = getSelectedPlayersForExtraction(
+        liveGame.extraction,
+        selectedPlayerKeys
       );
-
-      const playedAt =
-        liveGame.captured_at ||
-        liveGame.captured_at_hint ||
-        liveGame.created_at ||
-        new Date().toISOString();
-
-      if (
-        !earliestPlayedAt ||
-        Date.parse(playedAt) < Date.parse(earliestPlayedAt)
-      ) {
-        earliestPlayedAt = playedAt;
-      }
-
-      for (const player of selectedPlayers) {
-        const { data: createdGame, error: createGameError } = await supabase
-          .from("games")
-          .insert({
-            user_id: userId,
-            session_id: active.session_id,
-            game_name: null,
-            player_name: player.playerName,
-            total_score: player.totalScore,
-            captured_at: liveGame.captured_at,
-            played_at: playedAt,
-            status: "logged",
-            raw_extraction: serializeLiveExtraction([player]),
-          })
-          .select("id")
-          .single();
-
-        if (createGameError || !createdGame) {
-          throw new Error(createGameError?.message || "Failed to create logged game.");
-        }
-
-        createdGameIds.push(createdGame.id as string);
-        loggedGameCount += 1;
-
-        const frameRows = player.frames.map((frame) => ({
-          game_id: createdGame.id,
-          frame_number: frame.frame,
-          is_strike: computeStrike(frame.shots[0]),
-          is_spare: computeSpare(frame.shots[0], frame.shots[1]),
-          frame_score: null,
-        }));
-
-        const { data: insertedFrames, error: frameError } = await supabase
-          .from("frames")
-          .insert(frameRows)
-          .select("id,frame_number");
-
-        if (frameError) {
-          throw new Error(frameError.message || "Failed to create logged frames.");
-        }
-
-        const frameIdByNumber = new Map(
-          (insertedFrames ?? []).map((frame) => [frame.frame_number, frame.id])
+      if (selectedPlayers.length !== 1) {
+        return NextResponse.json(
+          { error: buildSelectionError(`Game ${index + 1}`, selectedPlayers.length) },
+          { status: 400 }
         );
-        const shotRows = player.frames.flatMap((frame) =>
-          frame.shots.map((pins, shotIndex) => ({
-            frame_id: frameIdByNumber.get(frame.frame),
-            shot_number: shotIndex + 1,
-            pins,
-          }))
-        );
-
-        const validShotRows = shotRows.filter((row) => row.frame_id);
-        if (validShotRows.length > 0) {
-          const { error: shotError } = await supabase.from("shots").insert(validShotRows);
-          if (shotError) {
-            throw new Error(shotError.message || "Failed to create logged shots.");
-          }
-        }
       }
     }
 
-    if (loggedGameCount === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "None of the selected player names were present in the captured scoreboards.",
-        },
-        { status: 400 }
+    let earliestPlayedAt: string | null = null;
+
+    for (const [index, liveGame] of games.entries()) {
+      const { fullExtraction, selectedPlayers } = getSelectedPlayersForExtraction(
+        liveGame.extraction,
+        selectedPlayerKeys
       );
+
+      if (selectedPlayers.length !== 1) {
+        return NextResponse.json(
+          { error: buildSelectionError(`Game ${index + 1}`, selectedPlayers.length) },
+          { status: 400 }
+        );
+      }
+
+      const created = await insertLoggedGameFromSelectedPlayer({
+        supabase,
+        userId,
+        sessionId: active.session_id,
+        source: liveGame,
+        selectedPlayer: selectedPlayers[0],
+        fullExtraction,
+      });
+      createdGameIds.push(created.gameId);
+
+      if (
+        !earliestPlayedAt ||
+        Date.parse(created.playedAt) < Date.parse(earliestPlayedAt)
+      ) {
+        earliestPlayedAt = created.playedAt;
+      }
     }
 
     const { error: updateSessionError } = await supabase
@@ -214,7 +159,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       sessionId: active.session_id,
-      loggedGameCount,
+      loggedGameCount: createdGameIds.length,
     });
   } catch (error) {
     if (createdGameIds.length > 0) {

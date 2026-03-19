@@ -351,7 +351,7 @@ function computeLiveTotalScore(frames) {
 }
 
 function normalizeLivePlayers(players) {
-  return (Array.isArray(players) ? players : [])
+  const normalizedPlayers = (Array.isArray(players) ? players : [])
     .map((player, playerIndex) => {
       const sourceName =
         typeof player?.playerName === "string" ? player.playerName.trim() : "";
@@ -386,6 +386,23 @@ function normalizeLivePlayers(players) {
       };
     })
     .filter((player) => player.playerName.trim().length > 0);
+
+  const duplicateCounts = new Map();
+  return normalizedPlayers.map((player) => {
+    const baseKey = normalizePlayerKey(player.playerName);
+    const nextCount = (duplicateCounts.get(baseKey) || 0) + 1;
+    duplicateCounts.set(baseKey, nextCount);
+    if (nextCount === 1) {
+      return player;
+    }
+
+    const playerName = `${player.playerName}(${nextCount})`;
+    return {
+      ...player,
+      playerName,
+      playerKey: normalizePlayerKey(playerName)
+    };
+  });
 }
 
 function serializeLivePlayers(players) {
@@ -538,7 +555,33 @@ async function setLiveSessionGameStatus(
     .eq("id", liveSessionGameId);
 }
 
-async function setJobError(supabase, jobId, gameId, liveSessionGameId, message) {
+async function setRecordingDraftGameStatus(
+  supabase,
+  recordingDraftGameId,
+  status,
+  extras = {}
+) {
+  if (!recordingDraftGameId) {
+    return;
+  }
+  await supabase
+    .from("recording_draft_games")
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+      ...extras
+    })
+    .eq("id", recordingDraftGameId);
+}
+
+async function setJobError(
+  supabase,
+  jobId,
+  gameId,
+  liveSessionGameId,
+  recordingDraftGameId,
+  message
+) {
   console.error(`Job ${jobId} failed: ${message}`);
   const jobUpdate = {
     status: "error",
@@ -562,6 +605,12 @@ async function setJobError(supabase, jobId, gameId, liveSessionGameId, message) 
 
   if (liveSessionGameId) {
     await setLiveSessionGameStatus(supabase, liveSessionGameId, "error", {
+      last_error: message
+    });
+  }
+
+  if (recordingDraftGameId) {
+    await setRecordingDraftGameStatus(supabase, recordingDraftGameId, "error", {
       last_error: message
     });
   }
@@ -597,7 +646,12 @@ async function processJob() {
   }
 
   const job = jobs[0];
-  const jobType = job.job_type === "live_session" ? "live_session" : "standard";
+  const jobType =
+    job.job_type === "live_session"
+      ? "live_session"
+      : job.job_type === "recording_draft"
+        ? "recording_draft"
+        : "standard";
   const playerName = job.player_name;
   const playerNames = parsePlayerNames(playerName);
   const playerLabel =
@@ -605,6 +659,7 @@ async function processJob() {
   const userId = normalizeOptionalUuid(job.user_id);
   const sessionId = normalizeOptionalUuid(job.session_id);
   const liveSessionGameId = normalizeOptionalUuid(job.live_session_game_id);
+  const recordingDraftGameId = normalizeOptionalUuid(job.recording_draft_game_id);
   const capturedAtHint = normalizeOptionalTimestamp(job.captured_at_hint);
   if (job.user_id && !userId) {
     console.warn(`Job ${job.id} has invalid user_id:`, job.user_id);
@@ -617,8 +672,13 @@ async function processJob() {
       last_error: null
     });
   }
+  if (jobType === "recording_draft" && recordingDraftGameId) {
+    await setRecordingDraftGameStatus(supabase, recordingDraftGameId, "processing", {
+      last_error: null
+    });
+  }
   if (jobType !== "live_session" && !playerName) {
-    await setJobError(supabase, job.id, null, null, "Job missing player name.");
+    await setJobError(supabase, job.id, null, null, recordingDraftGameId, "Job missing player name.");
     return { status: "error", jobId: job.id };
   }
   if (jobType === "live_session" && !liveSessionGameId) {
@@ -627,13 +687,27 @@ async function processJob() {
       job.id,
       null,
       null,
+      null,
       "Live-session job missing live_session_game_id."
+    );
+    return { status: "error", jobId: job.id };
+  }
+  if (jobType === "recording_draft" && !recordingDraftGameId) {
+    await setJobError(
+      supabase,
+      job.id,
+      null,
+      null,
+      null,
+      "Recording-draft job missing recording_draft_game_id."
     );
     return { status: "error", jobId: job.id };
   }
   console.log(
     jobType === "live_session"
       ? `Claimed live-session job ${job.id}.`
+      : jobType === "recording_draft"
+        ? `Claimed recording-draft job ${job.id}.`
       : `Claimed job ${job.id} for ${playerLabel}.`
   );
 
@@ -647,6 +721,7 @@ async function processJob() {
       job.id,
       null,
       liveSessionGameId,
+      recordingDraftGameId,
       downloadError?.message || "Failed to download image."
     );
     return { status: "error", jobId: job.id };
@@ -672,7 +747,7 @@ async function processJob() {
     const result = await model.generateContent([
       {
         text:
-          jobType === "live_session"
+          jobType === "live_session" || jobType === "recording_draft"
             ? buildLivePrompt()
             : buildStandardPrompt(playerNames.length > 0 ? playerNames : playerName)
       },
@@ -692,6 +767,7 @@ async function processJob() {
       job.id,
       null,
       liveSessionGameId,
+      recordingDraftGameId,
       error instanceof Error ? error.message : "Gemini extraction failed."
     );
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
@@ -708,7 +784,7 @@ async function processJob() {
     (await extractCapturedAtFromExif(buffer, fallbackOffsetMinutes)) ||
     capturedAtHint;
 
-  if (jobType === "live_session") {
+  if (jobType === "live_session" || jobType === "recording_draft") {
     const normalizedPlayers = normalizeLivePlayers(extraction?.players);
     if (normalizedPlayers.length === 0) {
       await setJobError(
@@ -716,22 +792,29 @@ async function processJob() {
         job.id,
         null,
         liveSessionGameId,
-        "Live-session extraction did not return any player rows."
+        recordingDraftGameId,
+        jobType === "live_session"
+          ? "Live-session extraction did not return any player rows."
+          : "Recording draft extraction did not return any player rows."
       );
       await supabase.storage.from(BUCKET).remove([job.storage_key]);
       return { status: "error", jobId: job.id };
     }
 
     const { error: liveGameUpdateError } = await supabase
-      .from("live_session_games")
+      .from(jobType === "live_session" ? "live_session_games" : "recording_draft_games")
       .update({
         status: "ready",
         extraction: serializeLivePlayers(normalizedPlayers),
         captured_at: capturedAt,
+        sort_at:
+          jobType === "recording_draft"
+            ? capturedAt || capturedAtHint || new Date().toISOString()
+            : undefined,
         last_error: null,
         updated_at: new Date().toISOString()
       })
-      .eq("id", liveSessionGameId);
+      .eq("id", jobType === "live_session" ? liveSessionGameId : recordingDraftGameId);
 
     if (liveGameUpdateError) {
       await setJobError(
@@ -739,7 +822,11 @@ async function processJob() {
         job.id,
         null,
         liveSessionGameId,
-        liveGameUpdateError.message || "Failed to update live session game."
+        recordingDraftGameId,
+        liveGameUpdateError.message ||
+          (jobType === "live_session"
+            ? "Failed to update live session game."
+            : "Failed to update recording draft game.")
       );
       await supabase.storage.from(BUCKET).remove([job.storage_key]);
       return { status: "error", jobId: job.id };
@@ -754,8 +841,14 @@ async function processJob() {
       .eq("id", job.id);
 
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
-    console.log(`Live-session job ${job.id} complete for ${liveSessionGameId}.`);
-    return { status: "logged", jobId: job.id, liveSessionGameId };
+    console.log(
+      jobType === "live_session"
+        ? `Live-session job ${job.id} complete for ${liveSessionGameId}.`
+        : `Recording-draft job ${job.id} complete for ${recordingDraftGameId}.`
+    );
+    return jobType === "live_session"
+      ? { status: "logged", jobId: job.id, liveSessionGameId }
+      : { status: "logged", jobId: job.id, recordingDraftGameId };
   }
 
   const frames = Array.isArray(extraction?.frames) ? extraction.frames : [];
@@ -787,6 +880,7 @@ async function processJob() {
     await setJobError(
       supabase,
       job.id,
+      null,
       null,
       null,
       createError?.message || "Failed to create game."
@@ -856,7 +950,7 @@ async function processJob() {
 
     if (frameError) {
       await removeGame(supabase, gameId);
-      await setJobError(supabase, job.id, null, null, frameError.message);
+      await setJobError(supabase, job.id, null, null, null, frameError.message);
       await supabase.storage.from(BUCKET).remove([job.storage_key]);
       return { status: "error", jobId: job.id };
     }
@@ -888,7 +982,7 @@ async function processJob() {
     const { error: shotError } = await supabase.from("shots").insert(shotRows);
     if (shotError) {
       await removeGame(supabase, gameId);
-      await setJobError(supabase, job.id, null, null, shotError.message);
+      await setJobError(supabase, job.id, null, null, null, shotError.message);
       await supabase.storage.from(BUCKET).remove([job.storage_key]);
       return { status: "error", jobId: job.id };
     }
@@ -905,7 +999,7 @@ async function processJob() {
 
   if (gameUpdateError) {
     await removeGame(supabase, gameId);
-    await setJobError(supabase, job.id, null, null, gameUpdateError.message);
+    await setJobError(supabase, job.id, null, null, null, gameUpdateError.message);
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
     return { status: "error", jobId: job.id };
   }
