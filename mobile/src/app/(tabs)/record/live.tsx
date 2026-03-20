@@ -29,6 +29,7 @@ import StackBadge from '@/components/stack-badge';
 import SurfaceCard from '@/components/surface-card';
 import {
   deleteLiveSessionGame,
+  discardLiveSession,
   endLiveSession,
   fetchLiveSession,
   queryKeys,
@@ -229,7 +230,7 @@ export default function LiveSessionScreen() {
   const [draftDescription, setDraftDescription] = useState('');
   const [error, setError] = useState('');
   const [editingGame, setEditingGame] = useState<LiveSessionGame | null>(null);
-  const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
+  const [deletingGameIds, setDeletingGameIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<LiveTabKey>('games');
   const [selectedComparisonMetric, setSelectedComparisonMetric] =
     useState<LivePlayerComparisonMetric>('average');
@@ -238,8 +239,8 @@ export default function LiveSessionScreen() {
   const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const [endDockHeight, setEndDockHeight] = useState(0);
   const selectionRevisionRef = useRef(0);
-  const previousGameCountRef = useRef(0);
-  const shouldScrollToNewGameRef = useRef(false);
+  const pendingScrollGameIdRef = useRef<string | null>(null);
+  const gameLayoutYRef = useRef<Record<string, number>>({});
   const comparisonLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const comparisonRenderFrameRef = useRef<number | null>(null);
   const pagerViewportYRef = useRef(0);
@@ -272,21 +273,6 @@ export default function LiveSessionScreen() {
   }, [liveSession?.id, liveSession?.name, liveSession?.description]);
 
   useEffect(() => {
-    const nextGameCount = liveSession?.games?.length ?? 0;
-
-    if (shouldScrollToNewGameRef.current && nextGameCount > previousGameCountRef.current) {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          scrollRef.current?.scrollToEnd({ animated: true });
-        });
-      });
-      shouldScrollToNewGameRef.current = false;
-    }
-
-    previousGameCountRef.current = nextGameCount;
-  }, [liveSession?.games?.length]);
-
-  useEffect(() => {
     return () => {
       if (comparisonLoadTimeoutRef.current) {
         clearTimeout(comparisonLoadTimeoutRef.current);
@@ -296,6 +282,50 @@ export default function LiveSessionScreen() {
       }
     };
   }, []);
+
+  const scrollToGame = (gameId: string) => {
+    const y = gameLayoutYRef.current[gameId];
+    if (typeof y !== 'number') {
+      return false;
+    }
+
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, pagerViewportYRef.current + y - spacing.sm),
+        animated: true,
+      });
+    });
+    return true;
+  };
+
+  const isDeletingGame = (gameId: string) => deletingGameIds.includes(gameId);
+
+  const handleGameLayout = (
+    gameId: string,
+    y: number,
+    status: LiveSessionGame['status'],
+  ) => {
+    gameLayoutYRef.current[gameId] = y;
+    if (
+      status !== 'ready' &&
+      pendingScrollGameIdRef.current === gameId &&
+      scrollToGame(gameId)
+    ) {
+      pendingScrollGameIdRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    const pendingScrollGameId = pendingScrollGameIdRef.current;
+    const targetGame = liveSession?.games?.find((game) => game.id === pendingScrollGameId);
+    if (!pendingScrollGameId || !targetGame || targetGame.status === 'ready') {
+      return;
+    }
+
+    if (scrollToGame(pendingScrollGameId)) {
+      pendingScrollGameIdRef.current = null;
+    }
+  }, [liveSession?.games]);
 
   const readyGames = useMemo(
     () => (liveSession?.games ?? []).filter((game) => game.status === 'ready'),
@@ -415,7 +445,6 @@ export default function LiveSessionScreen() {
       setSourceOpen(false);
       setActiveTab('games');
       scrollToTab('games', true);
-      shouldScrollToNewGameRef.current = true;
       const filename = sanitizeFilename(asset.fileName ?? undefined, 0);
       const storageKey = `${user.id}/${Date.now()}-${filename}`;
       const uploadBody = await getUploadBody(asset);
@@ -430,7 +459,7 @@ export default function LiveSessionScreen() {
       }
 
       try {
-        await queueLiveSessionCapture({
+        return queueLiveSessionCapture({
           storageKey,
           capturedAtHint: deriveCapturedAtHint(asset),
           timezoneOffsetMinutes: new Date().getTimezoneOffset(),
@@ -441,19 +470,21 @@ export default function LiveSessionScreen() {
         await supabase.storage.from(DEFAULT_BUCKET).remove([storageKey]);
         throw nextError;
       }
-
-      return storageKey;
     },
-    onSuccess: async () => {
+    onSuccess: async (payload) => {
+      if (!payload) {
+        return;
+      }
+
       setSourceOpen(false);
       setError('');
+      pendingScrollGameIdRef.current = payload.liveGameId;
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
       ]);
     },
     onError: (nextError) => {
-      shouldScrollToNewGameRef.current = false;
       setError(nextError instanceof Error ? nextError.message : 'Failed to add scoreboard.');
     },
   });
@@ -474,9 +505,11 @@ export default function LiveSessionScreen() {
   });
 
   const deleteGameMutation = useMutation({
-    mutationFn: async (liveGameId: string) => {
-      setDeletingGameId(liveGameId);
-      return deleteLiveSessionGame(liveGameId);
+    mutationFn: (liveGameId: string) => deleteLiveSessionGame(liveGameId),
+    onMutate: (liveGameId) => {
+      setDeletingGameIds((current) =>
+        current.includes(liveGameId) ? current : [...current, liveGameId],
+      );
     },
     onSuccess: async (payload) => {
       if (payload.deletedSession) {
@@ -484,13 +517,34 @@ export default function LiveSessionScreen() {
         setDraftDescription('');
       }
       setError('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.liveSession });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
+      ]);
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to delete live game.');
     },
-    onSettled: () => {
-      setDeletingGameId(null);
+    onSettled: (_data, _error, liveGameId) => {
+      setDeletingGameIds((current) => current.filter((entry) => entry !== liveGameId));
+    },
+  });
+
+  const discardLiveSessionMutation = useMutation({
+    mutationFn: discardLiveSession,
+    onSuccess: async () => {
+      setError('');
+      setDraftName('');
+      setDraftDescription('');
+      setEditingGame(null);
+      setEndSessionOpen(false);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
+      ]);
+    },
+    onError: (nextError) => {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to discard live session.');
     },
   });
 
@@ -558,6 +612,16 @@ export default function LiveSessionScreen() {
       return;
     }
     setEndSessionOpen(true);
+  };
+
+  const handleDiscardLiveSession = () => {
+    confirmAction({
+      title: 'Discard live session',
+      message: 'This removes the current live session and all of its uploaded scoreboards.',
+      confirmLabel: 'Discard',
+      destructive: true,
+      onConfirm: () => discardLiveSessionMutation.mutate(),
+    });
   };
 
   const handleSelectComparisonMetric = (metric: LivePlayerComparisonMetric) => {
@@ -667,12 +731,27 @@ export default function LiveSessionScreen() {
           style={styles.scroll}
           contentContainerStyle={contentContainerStyle}
           showsVerticalScrollIndicator={false}>
-          <Pressable
-            onPress={() => router.back()}
-            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
-            <Ionicons name="chevron-back" size={16} color={palette.muted} />
-            <Text style={styles.backText}>Back</Text>
-          </Pressable>
+          <View style={styles.topBar}>
+            <Pressable
+              onPress={() => router.back()}
+              style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+              <Ionicons name="chevron-back" size={16} color={palette.muted} />
+              <Text style={styles.backText}>Back</Text>
+            </Pressable>
+
+            {liveSession ? (
+              <Pressable
+                onPress={handleDiscardLiveSession}
+                disabled={discardLiveSessionMutation.isPending}
+                style={({ pressed }) => [styles.discardButton, pressed && styles.pressed]}>
+                <Text style={styles.discardText}>
+                  {discardLiveSessionMutation.isPending
+                    ? 'Discarding live session...'
+                    : 'Discard Live Session'}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
 
           <View style={styles.header}>
             <Text style={styles.pageTitle}>Live Session</Text>
@@ -805,19 +884,29 @@ export default function LiveSessionScreen() {
                   <View style={styles.gameList}>
                     {liveSession.games.map((game, index) =>
                       game.status === 'ready' ? (
-                        <LiveSessionGameCard
+                        <View
                           key={game.id}
-                          game={game}
-                          gameNumber={index + 1}
-                          selectedPlayerKeys={selectedPlayerKeys}
-                          deleting={deletingGameId === game.id}
-                          onEdit={setEditingGame}
-                          onDelete={(liveGameId) => deleteGameMutation.mutate(liveGameId)}
-                          onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
-                          onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
-                        />
+                          onLayout={(event) => {
+                            handleGameLayout(game.id, event.nativeEvent.layout.y, game.status);
+                          }}>
+                          <LiveSessionGameCard
+                            game={game}
+                            gameNumber={index + 1}
+                            selectedPlayerKeys={selectedPlayerKeys}
+                            deleting={isDeletingGame(game.id)}
+                            onEdit={setEditingGame}
+                            onDelete={(liveGameId) => deleteGameMutation.mutate(liveGameId)}
+                            onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
+                            onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
+                          />
+                        </View>
                       ) : (
-                        <View key={game.id} style={styles.pendingCard}>
+                        <View
+                          key={game.id}
+                          style={styles.pendingCard}
+                          onLayout={(event) => {
+                            handleGameLayout(game.id, event.nativeEvent.layout.y, game.status);
+                          }}>
                           <View style={styles.pendingCardRow}>
                             <View style={styles.pendingSummary}>
                               <StackBadge lines={['Game', String(index + 1)]} />
@@ -831,22 +920,27 @@ export default function LiveSessionScreen() {
                               </View>
                             </View>
                             <View style={styles.pendingActions}>
-                              {game.status === 'queued' || game.status === 'processing' ? (
+                              {(game.status === 'queued' || game.status === 'processing') &&
+                              !isDeletingGame(game.id) ? (
                                 <BowlingBallSpinner size={22} holeColor={palette.field} />
                               ) : null}
-                              <IconAction
-                                accessibilityLabel="Delete pending live game"
-                                onPress={() =>
-                                  confirmAction({
-                                    title: 'Delete game',
-                                    message: 'Remove this scoreboard from the live session?',
-                                    confirmLabel: 'Delete',
-                                    destructive: true,
-                                    onConfirm: () => deleteGameMutation.mutate(game.id),
-                                  })
-                                }
-                                icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
-                              />
+                              {isDeletingGame(game.id) ? (
+                                <BowlingBallSpinner size={22} holeColor={palette.field} />
+                              ) : (
+                                <IconAction
+                                  accessibilityLabel="Delete pending live game"
+                                  onPress={() =>
+                                    confirmAction({
+                                      title: 'Delete game',
+                                      message: 'Remove this scoreboard from the live session?',
+                                      confirmLabel: 'Delete',
+                                      destructive: true,
+                                      onConfirm: () => deleteGameMutation.mutate(game.id),
+                                    })
+                                  }
+                                  icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
+                                />
+                              )}
                             </View>
                           </View>
                         </View>
@@ -1109,8 +1203,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
   },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
   backButton: {
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -1120,6 +1219,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '500',
+    fontFamily: fontFamilySans,
+  },
+  discardButton: {
+    minHeight: 22,
+    justifyContent: 'center',
+  },
+  discardText: {
+    color: palette.error,
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '600',
     fontFamily: fontFamilySans,
   },
   header: {

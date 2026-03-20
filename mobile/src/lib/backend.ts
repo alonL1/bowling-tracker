@@ -204,6 +204,12 @@ export async function fetchLiveSession() {
   return apiJson<LiveSessionResponse>('/api/live-session');
 }
 
+export async function discardLiveSession() {
+  return apiJson<{ ok: boolean; discarded: boolean }>('/api/live-session', {
+    method: 'DELETE',
+  });
+}
+
 export async function fetchRecordEntryStatus() {
   return apiJson<RecordEntryStatusResponse>('/api/record-entry-status');
 }
@@ -227,11 +233,12 @@ export async function updateRecordingDraft(payload: {
 }
 
 export async function discardRecordingDraft(mode: RecordingDraftMode) {
-  return apiJson<RecordingDraftResponse | { ok: boolean; discarded: boolean }>('/api/recording-draft', {
+  return apiJson<RecordingDraftResponse | { ok: boolean; discarded: boolean }>(
+    `/api/recording-draft?mode=${encodeURIComponent(mode)}`,
+    {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ mode }),
-  });
+    },
+  );
 }
 
 export async function uploadToRecordingDraft(payload: {

@@ -22,6 +22,8 @@ type SessionGameCardProps = {
   title: string;
   meta: string;
   onRequestMove: (gameId: string) => void;
+  onScoreboardGestureStart?: () => void;
+  onScoreboardGestureEnd?: () => void;
 };
 
 function getCollapsedBadgeLines(title: string) {
@@ -38,6 +40,8 @@ export default function SessionGameCard({
   title,
   meta,
   onRequestMove,
+  onScoreboardGestureStart,
+  onScoreboardGestureEnd,
 }: SessionGameCardProps) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
@@ -144,6 +148,8 @@ export default function SessionGameCard({
                     ? [gameQuery.data.game.selected_self_player_key]
                     : []
                 }
+                onHorizontalGestureStart={onScoreboardGestureStart}
+                onHorizontalGestureEnd={onScoreboardGestureEnd}
               />
             ) : gameQuery.data?.game ? (
               <Text style={styles.loadingText}>No scoreboard data available for this game.</Text>

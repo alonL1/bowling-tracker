@@ -3,7 +3,7 @@ import { File as ExpoFile } from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   KeyboardAvoidingView,
@@ -247,6 +247,10 @@ function getGroupDateLines(group: RecordingDraftGroup) {
   ];
 }
 
+function flattenDraftGames(groups: RecordingDraftGroup[]) {
+  return groups.flatMap((group) => group.games);
+}
+
 function formatTargetSessionLabel(
   targetSessionId: string | null,
   sessions: SessionItem[],
@@ -348,7 +352,7 @@ export default function UploadSessionForm({
   const [error, setError] = useState('');
   const [finalizeOpen, setFinalizeOpen] = useState(false);
   const [editingGame, setEditingGame] = useState<RecordingDraftGame | null>(null);
-  const [deletingGameId, setDeletingGameId] = useState<string | null>(null);
+  const [deletingGameIds, setDeletingGameIds] = useState<string[]>([]);
   const [editingGroup, setEditingGroup] = useState<RecordingDraftGroup | null>(null);
   const [groupDraftName, setGroupDraftName] = useState('');
   const [groupDraftDescription, setGroupDraftDescription] = useState('');
@@ -359,6 +363,11 @@ export default function UploadSessionForm({
   const [sessionPickerChoice, setSessionPickerChoice] = useState<string | null>(null);
   const [flatRows, setFlatRows] = useState<DraftFlatRow[]>([]);
   const [bottomDockHeight, setBottomDockHeight] = useState(0);
+  const scrollRef = useRef<any>(null);
+  const flatListRef = useRef<any>(null);
+  const pendingScrollGameIdRef = useRef<string | null>(null);
+  const gameLayoutYRef = useRef<Record<string, number>>({});
+  const gameListYRef = useRef(0);
 
   const draftQuery = useQuery({
     queryKey: queryKeys.recordingDraft(mode),
@@ -459,6 +468,74 @@ export default function UploadSessionForm({
     queryClient.setQueryData(queryKeys.recordingDraft(mode), next);
   };
 
+  const isDeletingGame = (gameId: string) => deletingGameIds.includes(gameId);
+
+  const scrollToDraftGame = (gameId: string) => {
+    const targetIndex = mode === 'add_multiple_sessions'
+      ? flatRows.findIndex((row) => row.key === `game-${gameId}`)
+      : -1;
+    const targetY =
+      mode === 'add_multiple_sessions'
+        ? null
+        : typeof gameLayoutYRef.current[gameId] === 'number'
+          ? Math.max(0, gameListYRef.current + gameLayoutYRef.current[gameId] - spacing.sm)
+          : null;
+
+    if (mode === 'add_multiple_sessions' && targetIndex < 0) {
+      return false;
+    }
+    if (mode !== 'add_multiple_sessions' && targetY === null) {
+      return false;
+    }
+
+    requestAnimationFrame(() => {
+      if (mode === 'add_multiple_sessions') {
+        flatListRef.current?.scrollToIndex?.({
+          index: targetIndex,
+          animated: true,
+          viewPosition: 0.2,
+        });
+      } else {
+        scrollRef.current?.scrollTo?.({
+          y: targetY,
+          animated: true,
+        });
+      }
+    });
+    return true;
+  };
+
+  const handleDraftGameLayout = (
+    gameId: string,
+    y: number,
+    status: RecordingDraftGame['status'],
+  ) => {
+    gameLayoutYRef.current[gameId] = y;
+    if (
+      status !== 'ready' &&
+      pendingScrollGameIdRef.current === gameId &&
+      scrollToDraftGame(gameId)
+    ) {
+      pendingScrollGameIdRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    const pendingScrollGameId = pendingScrollGameIdRef.current;
+    if (!pendingScrollGameId) {
+      return;
+    }
+
+    const targetGame = allGames.find((game) => game.id === pendingScrollGameId);
+    if (!targetGame || targetGame.status === 'ready') {
+      return;
+    }
+
+    if (scrollToDraftGame(pendingScrollGameId)) {
+      pendingScrollGameIdRef.current = null;
+    }
+  }, [allGames, flatRows, mode]);
+
   const uploadMutation = useMutation({
     mutationFn: async (assets: ImagePicker.ImagePickerAsset[]) => {
       if (!user) {
@@ -515,6 +592,11 @@ export default function UploadSessionForm({
       });
     },
     onSuccess: async (response) => {
+      const currentGameIds = new Set(allGames.map((game) => game.id));
+      const newGames = flattenDraftGames((response as { draft: typeof draft }).draft?.groups ?? []).filter(
+        (game) => !currentGameIds.has(game.id),
+      );
+      pendingScrollGameIdRef.current = newGames[0]?.id ?? null;
       setError('');
       setDraftCache(response as { draft: typeof draft });
       await queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus });
@@ -558,9 +640,11 @@ export default function UploadSessionForm({
   });
 
   const deleteGameMutation = useMutation({
-    mutationFn: async (draftGameId: string) => {
-      setDeletingGameId(draftGameId);
-      return deleteRecordingDraftGame(mode, draftGameId);
+    mutationFn: (draftGameId: string) => deleteRecordingDraftGame(mode, draftGameId),
+    onMutate: (draftGameId) => {
+      setDeletingGameIds((current) =>
+        current.includes(draftGameId) ? current : [...current, draftGameId],
+      );
     },
     onSuccess: async (response) => {
       setError('');
@@ -570,8 +654,8 @@ export default function UploadSessionForm({
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to delete draft game.');
     },
-    onSettled: () => {
-      setDeletingGameId(null);
+    onSettled: (_data, _error, draftGameId) => {
+      setDeletingGameIds((current) => current.filter((entry) => entry !== draftGameId));
     },
   });
 
@@ -796,10 +880,23 @@ export default function UploadSessionForm({
 
   const topContent = (
     <View style={styles.topContent}>
-      <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
-        <Ionicons name="chevron-back" size={16} color={palette.muted} />
-        <Text style={styles.backText}>Back</Text>
-      </Pressable>
+      <View style={styles.topBar}>
+        <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+          <Ionicons name="chevron-back" size={16} color={palette.muted} />
+          <Text style={styles.backText}>Back</Text>
+        </Pressable>
+
+        {draft ? (
+          <Pressable
+            onPress={handleDiscardDraft}
+            disabled={discardMutation.isPending}
+            style={({ pressed }) => [styles.discardButton, pressed && styles.pressed]}>
+            <Text style={styles.discardText}>
+              {discardMutation.isPending ? 'Discarding draft...' : 'Discard Draft'}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       {error ? <InfoBanner tone="error" text={error} /> : null}
       {draftQuery.error ? (
@@ -840,17 +937,6 @@ export default function UploadSessionForm({
           </View>
           <Text style={styles.progressMeta}>{getProgressSecondaryText(progress)}</Text>
         </SurfaceCard>
-      ) : null}
-
-      {draft ? (
-        <Pressable
-          onPress={handleDiscardDraft}
-          disabled={discardMutation.isPending}
-          style={({ pressed }) => [styles.discardButton, pressed && styles.pressed]}>
-          <Text style={styles.discardText}>
-            {discardMutation.isPending ? 'Discarding draft...' : 'Discard Draft'}
-          </Text>
-        </Pressable>
       ) : null}
 
       {draft ? (
@@ -899,6 +985,9 @@ export default function UploadSessionForm({
     return (
       <ScaleDecorator>
         <View
+          onLayout={(event) => {
+            handleDraftGameLayout(item.game.id, event.nativeEvent.layout.y, item.game.status);
+          }}
           style={[
             styles.flatGameRow,
             previousRow?.kind === 'header'
@@ -910,7 +999,7 @@ export default function UploadSessionForm({
               game={item.game}
               gameNumber={item.gameNumber}
               selectedPlayerKeys={selectedPlayerKeys}
-              deleting={deletingGameId === item.game.id}
+              deleting={isDeletingGame(item.game.id)}
               onEdit={setEditingGame}
               onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
               onStartDrag={drag}
@@ -920,7 +1009,7 @@ export default function UploadSessionForm({
             <PendingDraftGameCard
               gameNumber={item.gameNumber}
               game={item.game}
-              deleting={deletingGameId === item.game.id}
+              deleting={isDeletingGame(item.game.id)}
               onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
               onStartDrag={drag}
               dragActive={isActive}
@@ -935,6 +1024,7 @@ export default function UploadSessionForm({
     <>
       {mode === 'add_multiple_sessions' ? (
         <DraggableFlatList
+          ref={flatListRef}
           data={flatRows}
           keyExtractor={(item) => item.key}
           contentContainerStyle={contentContainerStyle}
@@ -951,6 +1041,12 @@ export default function UploadSessionForm({
             </SurfaceCard>
           }
           renderItem={renderFlatRow}
+          onScrollToIndexFailed={({ index, averageItemLength }) => {
+            flatListRef.current?.scrollToOffset?.({
+              offset: Math.max(0, averageItemLength * index - spacing.lg),
+              animated: true,
+            });
+          }}
           onDragEnd={({ data, from, to }) => {
             if (from === to) {
               setFlatRows(data);
@@ -979,43 +1075,48 @@ export default function UploadSessionForm({
         />
       ) : (
         <KeyboardAwareScrollView
+          ref={scrollRef}
           contentContainerStyle={contentContainerStyle}
           showsVerticalScrollIndicator={false}>
           {topContent}
 
           {groups.length > 0 ? (
-            <View style={styles.groupList}>
-              {(() => {
-                let gameNumber = 0;
-                return groups.map((group) => (
-                  <View key={group.id} style={styles.groupWrap}>
-                    <View style={styles.gameList}>
-                      {group.games.map((game) => {
-                        gameNumber += 1;
-                        return game.status === 'ready' ? (
-                          <RecordingDraftGameCard
-                            key={game.id}
-                            game={game}
-                            gameNumber={gameNumber}
-                            selectedPlayerKeys={selectedPlayerKeys}
-                            deleting={deletingGameId === game.id}
-                            onEdit={setEditingGame}
-                            onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
-                          />
-                        ) : (
-                          <PendingDraftGameCard
-                            key={game.id}
-                            gameNumber={gameNumber}
-                            game={game}
-                            deleting={deletingGameId === game.id}
-                            onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
-                          />
-                        );
-                      })}
-                    </View>
+            <View
+              style={styles.groupList}
+              onLayout={(event) => {
+                gameListYRef.current = event.nativeEvent.layout.y;
+              }}>
+              {allGames.map((game, index) =>
+                game.status === 'ready' ? (
+                  <View
+                    key={game.id}
+                    onLayout={(event) => {
+                      handleDraftGameLayout(game.id, event.nativeEvent.layout.y, game.status);
+                    }}>
+                    <RecordingDraftGameCard
+                      game={game}
+                      gameNumber={index + 1}
+                      selectedPlayerKeys={selectedPlayerKeys}
+                      deleting={isDeletingGame(game.id)}
+                      onEdit={setEditingGame}
+                      onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+                    />
                   </View>
-                ));
-              })()}
+                ) : (
+                  <View
+                    key={game.id}
+                    onLayout={(event) => {
+                      handleDraftGameLayout(game.id, event.nativeEvent.layout.y, game.status);
+                    }}>
+                    <PendingDraftGameCard
+                      gameNumber={index + 1}
+                      game={game}
+                      deleting={isDeletingGame(game.id)}
+                      onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+                    />
+                  </View>
+                ),
+              )}
             </View>
           ) : (
             <SurfaceCard style={styles.emptyCard}>
@@ -1238,8 +1339,13 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingBottom: spacing.md,
   },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
   backButton: {
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -1292,7 +1398,8 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilySans,
   },
   discardButton: {
-    alignSelf: 'flex-start',
+    minHeight: 22,
+    justifyContent: 'center',
   },
   discardText: {
     color: palette.error,

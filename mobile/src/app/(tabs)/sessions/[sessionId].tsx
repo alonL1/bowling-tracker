@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   KeyboardAvoidingView,
@@ -188,15 +188,27 @@ function getSelectedSelfPlayerKey(game: {
 function StatsTile({
   label,
   value,
+  onPress,
 }: {
   label: string;
   value: string;
+  onPress?: () => void;
 }) {
-  return (
-    <View style={styles.statsTile}>
+  const content = (
+    <>
       <Text style={styles.statsLabel}>{label}</Text>
       <Text style={styles.statsValue}>{value}</Text>
-    </View>
+    </>
+  );
+
+  if (!onPress) {
+    return <View style={styles.statsTile}>{content}</View>;
+  }
+
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.statsTile, pressed && styles.pressed]}>
+      {content}
+    </Pressable>
   );
 }
 
@@ -228,9 +240,20 @@ export default function SessionDetailScreen() {
   const [activeTab, setActiveTab] = useState<'games' | 'stats'>('games');
   const [selectedComparisonMetric, setSelectedComparisonMetric] =
     useState<LivePlayerComparisonMetric>('average');
+  const [pagerWidth, setPagerWidth] = useState(0);
+  const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const [draftSelectedPlayerKeys, setDraftSelectedPlayerKeys] = useState<Record<string, string>>(
     {},
   );
+  const pagerRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const comparisonCategoryScrollRef = useRef<ScrollView | null>(null);
+  const pagerViewportYRef = useRef(0);
+  const compareSectionYRef = useRef(0);
+  const comparisonCategoryLayoutsRef = useRef<
+    Partial<Record<LivePlayerComparisonMetric, { x: number; width: number }>>
+  >({});
+  const comparisonCategoryViewportWidthRef = useRef(0);
 
   useEffect(() => {
     if (!group || group.isSessionless) {
@@ -413,9 +436,57 @@ export default function SessionDetailScreen() {
     setDeleteOptionsOpen(true);
   };
 
+  const scrollToTab = (tab: 'games' | 'stats', animated: boolean) => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    pagerRef.current?.scrollTo({
+      x: tab === 'stats' ? pagerWidth : 0,
+      y: 0,
+      animated,
+    });
+  };
+
+  const scrollToCompareSection = () => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(0, pagerViewportYRef.current + compareSectionYRef.current - spacing.md),
+        animated: true,
+      });
+    });
+  };
+
+  const scrollComparisonCategoryIntoView = (metric: LivePlayerComparisonMetric) => {
+    const layout = comparisonCategoryLayoutsRef.current[metric];
+    if (!layout || !comparisonCategoryViewportWidthRef.current) {
+      return;
+    }
+
+    const targetX = Math.max(
+      0,
+      layout.x - (comparisonCategoryViewportWidthRef.current - layout.width) / 2,
+    );
+    comparisonCategoryScrollRef.current?.scrollTo({ x: targetX, y: 0, animated: true });
+  };
+
+  const handleSelectComparisonMetric = (metric: LivePlayerComparisonMetric) => {
+    scrollComparisonCategoryIntoView(metric);
+    setSelectedComparisonMetric(metric);
+  };
+
+  const handlePressStatsTile = (metric: LivePlayerComparisonMetric) => {
+    handleSelectComparisonMetric(metric);
+    requestAnimationFrame(() => {
+      scrollComparisonCategoryIntoView(metric);
+      scrollToCompareSection();
+    });
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}>
@@ -469,7 +540,10 @@ export default function SessionDetailScreen() {
 
         <View style={styles.tabRow}>
           <Pressable
-            onPress={() => setActiveTab('games')}
+            onPress={() => {
+              setActiveTab('games');
+              scrollToTab('games', true);
+            }}
             style={({ pressed }) => [
               styles.tabButton,
               activeTab === 'games' && styles.tabButtonActive,
@@ -478,7 +552,10 @@ export default function SessionDetailScreen() {
             <Text style={[styles.tabLabel, activeTab === 'games' && styles.tabLabelActive]}>Games</Text>
           </Pressable>
           <Pressable
-            onPress={() => setActiveTab('stats')}
+            onPress={() => {
+              setActiveTab('stats');
+              scrollToTab('stats', true);
+            }}
             style={({ pressed }) => [
               styles.tabButton,
               activeTab === 'stats' && styles.tabButtonActive,
@@ -492,95 +569,150 @@ export default function SessionDetailScreen() {
           <View style={[styles.tabDot, activeTab === 'stats' && styles.tabDotActive]} />
         </View>
 
-        {activeTab === 'games' ? (
-          <>
-            <Text style={styles.guidance}>
-              Tap on a game to see more info. Hold down on a game to move it into a different session.
-            </Text>
+        <View
+          style={styles.pagerViewport}
+          onLayout={(event) => {
+            const nextLayout = event.nativeEvent.layout;
+            pagerViewportYRef.current = nextLayout.y;
+            const nextWidth = Math.round(nextLayout.width);
+            if (!nextWidth || nextWidth === pagerWidth) {
+              return;
+            }
 
-            <View style={styles.gameList}>
-              {group.games.map((game) => (
-                <SessionGameCard
-                  key={game.id}
-                  game={game}
-                  title={grouping.gameTitleMap.get(game.id) || game.game_name?.trim() || 'Game'}
-                  meta={formatGameMeta(game.player_name, game.played_at, game.created_at)}
-                  onRequestMove={setMoveGameId}
-                />
-              ))}
-            </View>
-          </>
-        ) : (
-          <>
-            <View style={styles.statsGrid}>
-              {comparisonCategories.map((category) => (
-                <StatsTile
-                  key={category.key}
-                  label={category.label}
-                  value={getStatsTileValue(stats, category.key)}
-                />
-              ))}
-            </View>
+            setPagerWidth(nextWidth);
+            requestAnimationFrame(() => {
+              scrollToTab(activeTab, false);
+            });
+          }}>
+          <ScrollView
+            ref={pagerRef}
+            horizontal
+            pagingEnabled
+            scrollEnabled={pagerScrollEnabled}
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={(event) => {
+              if (!pagerWidth) {
+                return;
+              }
+              const nextTab =
+                Math.round(event.nativeEvent.contentOffset.x / pagerWidth) === 1 ? 'stats' : 'games';
+              setActiveTab(nextTab);
+            }}>
+            <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
+              <Text style={styles.guidance}>
+                Tap on a game to see more info. Hold down on a game to move it into a different session.
+              </Text>
 
-            <SurfaceCard style={styles.statsCompareCard}>
-              <Text style={styles.guidance}>Select category to compare players.</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.comparisonCategoryRow}>
-                {comparisonCategories.map((category) => (
-                  <Pressable
-                    key={category.key}
-                    onPress={() => setSelectedComparisonMetric(category.key)}
-                    style={({ pressed }) => [
-                      styles.comparisonCategoryChip,
-                      selectedComparisonMetric === category.key && styles.comparisonCategoryChipActive,
-                      pressed && styles.pressed,
-                    ]}>
-                    <Text
-                      style={[
-                        styles.comparisonCategoryLabel,
-                        selectedComparisonMetric === category.key && styles.comparisonCategoryLabelActive,
-                      ]}>
-                      {category.label}
-                    </Text>
-                  </Pressable>
+              <View style={styles.gameList}>
+                {group.games.map((game) => (
+                  <SessionGameCard
+                    key={game.id}
+                    game={game}
+                    title={grouping.gameTitleMap.get(game.id) || game.game_name?.trim() || 'Game'}
+                    meta={formatGameMeta(game.player_name, game.played_at, game.created_at)}
+                    onRequestMove={setMoveGameId}
+                    onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
+                    onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
+                  />
                 ))}
-              </ScrollView>
-
-              <View style={styles.comparisonList}>
-                {comparisonRows.map((row) => {
-                  const value = getComparisonMetricValue(row, selectedComparisonMetric);
-                  const fillPercent =
-                    value !== null && comparisonMaxValue > 0
-                      ? Math.max(8, (value / comparisonMaxValue) * 100)
-                      : 0;
-
-                  return (
-                    <View key={row.playerKey} style={styles.comparisonRow}>
-                      <View style={styles.comparisonHeader}>
-                        <Text style={styles.comparisonPlayerLabel}>
-                          {canonicalizePlayerLabel(row.label)}
-                        </Text>
-                        <Text style={styles.comparisonValueLabel}>
-                          {getComparisonMetricDisplayLabel(row, selectedComparisonMetric)}
-                        </Text>
-                      </View>
-                      <View style={styles.comparisonBarTrack}>
-                        <View
-                          style={[
-                            styles.comparisonBarFill,
-                            { width: fillPercent > 0 ? `${fillPercent}%` : '0%' },
-                          ]}
-                        />
-                      </View>
-                    </View>
-                  );
-                })}
               </View>
-            </SurfaceCard>
-          </>
-        )}
+            </View>
+
+            <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
+              <View style={styles.statsGrid}>
+                {comparisonCategories.map((category) => (
+                  <StatsTile
+                    key={category.key}
+                    label={category.label}
+                    value={getStatsTileValue(stats, category.key)}
+                    onPress={() => handlePressStatsTile(category.key)}
+                  />
+                ))}
+              </View>
+
+              <View
+                onLayout={(event) => {
+                  compareSectionYRef.current = event.nativeEvent.layout.y;
+                }}>
+                <SurfaceCard style={styles.statsCompareCard}>
+                  <Text style={styles.guidance}>Select category to compare players.</Text>
+                  <ScrollView
+                    ref={comparisonCategoryScrollRef}
+                    horizontal
+                    nestedScrollEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onLayout={(event) => {
+                      comparisonCategoryViewportWidthRef.current = event.nativeEvent.layout.width;
+                    }}
+                    onTouchStart={() => setPagerScrollEnabled(false)}
+                    onTouchEnd={() => setPagerScrollEnabled(true)}
+                    onTouchCancel={() => setPagerScrollEnabled(true)}
+                    onScrollBeginDrag={() => setPagerScrollEnabled(false)}
+                    onScrollEndDrag={() => setPagerScrollEnabled(true)}
+                    onMomentumScrollEnd={() => setPagerScrollEnabled(true)}
+                    contentContainerStyle={styles.comparisonCategoryRow}>
+                    {comparisonCategories.map((category) => (
+                      <Pressable
+                        key={category.key}
+                        onPress={() => handleSelectComparisonMetric(category.key)}
+                        onLayout={(event) => {
+                          comparisonCategoryLayoutsRef.current[category.key] = {
+                            x: event.nativeEvent.layout.x,
+                            width: event.nativeEvent.layout.width,
+                          };
+                        }}
+                        style={({ pressed }) => [
+                          styles.comparisonCategoryChip,
+                          selectedComparisonMetric === category.key && styles.comparisonCategoryChipActive,
+                          pressed && styles.pressed,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.comparisonCategoryLabel,
+                            selectedComparisonMetric === category.key && styles.comparisonCategoryLabelActive,
+                          ]}>
+                          {category.label}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+
+                  <View style={styles.comparisonList}>
+                    {comparisonRows.map((row) => {
+                      const value = getComparisonMetricValue(row, selectedComparisonMetric);
+                      const fillPercent =
+                        value !== null && comparisonMaxValue > 0
+                          ? Math.max(8, (value / comparisonMaxValue) * 100)
+                          : 0;
+
+                      return (
+                        <View key={row.playerKey} style={styles.comparisonRow}>
+                          <View style={styles.comparisonHeader}>
+                            <Text style={styles.comparisonPlayerLabel}>
+                              {canonicalizePlayerLabel(row.label)}
+                            </Text>
+                            <Text style={styles.comparisonValueLabel}>
+                              {getComparisonMetricDisplayLabel(row, selectedComparisonMetric)}
+                            </Text>
+                          </View>
+                          <View style={styles.comparisonBarTrack}>
+                            <View
+                              style={[
+                                styles.comparisonBarFill,
+                                { width: fillPercent > 0 ? `${fillPercent}%` : '0%' },
+                              ]}
+                            />
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </SurfaceCard>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
       </ScrollView>
 
       <Modal transparent animationType="fade" visible={editing} onRequestClose={() => setEditing(false)}>
@@ -930,6 +1062,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     gap: 8,
+  },
+  pagerViewport: {
+    overflow: 'visible',
+  },
+  pagerPage: {
+    gap: spacing.md,
   },
   tabDot: {
     width: 8,

@@ -17,6 +17,20 @@ function getModeFromRequest(request: Request) {
   return isRecordingDraftMode(mode) ? mode : null;
 }
 
+async function getDeleteModeFromRequest(request: Request) {
+  const queryMode = getModeFromRequest(request);
+  if (queryMode) {
+    return queryMode;
+  }
+
+  try {
+    const payload = (await request.json()) as { mode?: unknown };
+    return isRecordingDraftMode(payload?.mode) ? payload.mode : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(request: Request) {
   const userId = await getRecordingDraftUserId(request);
   if (!userId) {
@@ -108,7 +122,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const mode = getModeFromRequest(request);
+  const mode = await getDeleteModeFromRequest(request);
   if (!mode) {
     return NextResponse.json({ error: "mode is required." }, { status: 400 });
   }
