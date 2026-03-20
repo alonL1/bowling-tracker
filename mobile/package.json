@@ -13,6 +13,7 @@
     "lint": "expo lint",
     "env:pull:preview": "npx --yes eas-cli env:pull --environment preview --path .env.local --non-interactive",
     "env:pull:production": "npx --yes eas-cli env:pull --environment production --path .env.local --non-interactive",
+    "build:ios:production": "cross-env APP_VARIANT=production npx --yes eas-cli build --platform ios --profile production",
     "build:android:development": "cross-env APP_VARIANT=development npx --yes eas-cli build --platform android --profile development",
     "build:android:production": "cross-env APP_VARIANT=production npx --yes eas-cli build --platform android --profile production"
   },

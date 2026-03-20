@@ -42,6 +42,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       bundleIdentifier: isDevelopment
         ? 'com.alonl.pinpoint.dev'
         : 'com.alonl.pinpoint',
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false,
+      },
     },
     android: {
       icon: './assets/images/icon.png',
