@@ -891,6 +891,11 @@ export default function UploadSessionForm({
             onPress={handleDiscardDraft}
             disabled={discardMutation.isPending}
             style={({ pressed }) => [styles.discardButton, pressed && styles.pressed]}>
+            {discardMutation.isPending ? (
+              <BowlingBallSpinner size={16} color={palette.text} holeColor={palette.field} />
+            ) : (
+              <MaterialIcons name="delete-outline" size={18} color={palette.text} />
+            )}
             <Text style={styles.discardText}>
               {discardMutation.isPending ? 'Discarding draft...' : 'Discard Draft'}
             </Text>
@@ -1398,11 +1403,17 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilySans,
   },
   discardButton: {
-    minHeight: 22,
+    minHeight: 40,
+    borderRadius: radii.pill,
+    backgroundColor: palette.field,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
   },
   discardText: {
-    color: palette.error,
+    color: palette.text,
     fontSize: 14,
     lineHeight: 19,
     fontWeight: '600',
