@@ -54,6 +54,7 @@ import { fontFamilySans } from '@/constants/typography';
 import { useAuth } from '@/providers/auth-provider';
 
 const DEFAULT_BUCKET = 'scoreboards-temp';
+const BASE_CONTENT_BOTTOM_PADDING = 132;
 
 async function getUploadBody(asset: ImagePicker.ImagePickerAsset) {
   if (asset.file) {
@@ -235,6 +236,7 @@ export default function LiveSessionScreen() {
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [pagerWidth, setPagerWidth] = useState(0);
   const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
+  const [endDockHeight, setEndDockHeight] = useState(0);
   const selectionRevisionRef = useRef(0);
   const previousGameCountRef = useRef(0);
   const shouldScrollToNewGameRef = useRef(false);
@@ -337,6 +339,15 @@ export default function LiveSessionScreen() {
       return value !== null && value > max ? value : max;
     }, 0);
   }, [comparisonRows, selectedComparisonMetric]);
+  const contentContainerStyle = useMemo(
+    () => [
+      styles.content,
+      {
+        paddingBottom: Math.max(BASE_CONTENT_BOTTOM_PADDING, endDockHeight + spacing.xl),
+      },
+    ],
+    [endDockHeight],
+  );
 
   const hasSelectedPlayers = selectedPlayerKeys.length > 0;
   const hasUnfinishedGames = nonReadyGames.some(
@@ -654,7 +665,7 @@ export default function LiveSessionScreen() {
         <ScrollView
           ref={scrollRef}
           style={styles.scroll}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={contentContainerStyle}
           showsVerticalScrollIndicator={false}>
           <Pressable
             onPress={() => router.back()}
@@ -953,7 +964,12 @@ export default function LiveSessionScreen() {
           </View>
         </ScrollView>
 
-        <View style={styles.endDock}>
+        <View
+          style={styles.endDock}
+          onLayout={(event) => {
+            const nextHeight = Math.ceil(event.nativeEvent.layout.height) + spacing.md;
+            setEndDockHeight((current) => (current === nextHeight ? current : nextHeight));
+          }}>
           {!hasSelectedPlayers ? (
             <Text style={styles.dockNote}>Choose at least one player before ending the session.</Text>
           ) : selectionError ? (
@@ -1085,7 +1101,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     paddingTop: 18,
-    paddingBottom: 132,
+    paddingBottom: BASE_CONTENT_BOTTOM_PADDING,
     gap: spacing.md,
   },
   centeredWrap: {

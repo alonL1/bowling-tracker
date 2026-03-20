@@ -3,9 +3,13 @@ import { createClient } from "@supabase/supabase-js";
 import { getUserIdFromRequest } from "../utils/auth";
 import {
   normalizeLiveExtraction,
+  normalizeLivePlayers,
   normalizePlayerKey,
+  syncSelectedPlayerKeys,
   serializeLiveExtraction,
+  type RawLivePlayer,
 } from "../live-session/shared";
+import { syncLoggedGameSelection } from "../utils/logged-scoreboard";
 
 export const runtime = "nodejs";
 
@@ -19,6 +23,13 @@ type FrameUpdate = {
   frameId?: string | null;
   frameNumber: number;
   shots: ShotUpdate[];
+};
+
+type PatchPayload = {
+  gameId?: string;
+  playedAt?: string | null;
+  frames?: FrameUpdate[];
+  players?: RawLivePlayer[];
 };
 
 function isValidPins(value: number | null) {
@@ -259,15 +270,14 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const payload = (await request.json()) as {
-    gameId?: string;
-    playedAt?: string | null;
-    frames?: FrameUpdate[];
-  };
+  const payload = (await request.json()) as PatchPayload;
+  const nextPlayers = Array.isArray(payload.players)
+    ? normalizeLivePlayers(payload.players)
+    : [];
 
-  if (!payload.gameId || !payload.frames) {
+  if (!payload.gameId || (!payload.frames && nextPlayers.length === 0)) {
     return NextResponse.json(
-      { error: "gameId and frames are required." },
+      { error: "gameId and either frames or players are required." },
       { status: 400 }
     );
   }
@@ -292,7 +302,107 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const normalizedFrames = payload.frames.map((frame) => ({
+  const existingSelectedSelfPlayerKey =
+    typeof existingGame.selected_self_player_key === "string" &&
+    existingGame.selected_self_player_key.trim()
+      ? existingGame.selected_self_player_key.trim()
+      : normalizePlayerKey(
+          (typeof existingGame.selected_self_player_name === "string" &&
+          existingGame.selected_self_player_name.trim()
+            ? existingGame.selected_self_player_name
+            : existingGame.player_name) || "Player"
+        );
+
+  if (Array.isArray(payload.players)) {
+    if (nextPlayers.length === 0) {
+      return NextResponse.json(
+        { error: "At least one player is required." },
+        { status: 400 }
+      );
+    }
+
+    let playedAtIso: string | undefined;
+    if (payload.playedAt) {
+      const parsed = new Date(payload.playedAt);
+      if (Number.isNaN(parsed.getTime())) {
+        return NextResponse.json(
+          { error: "playedAt must be a valid datetime." },
+          { status: 400 }
+        );
+      }
+      playedAtIso = parsed.toISOString();
+    }
+
+    const previousPlayers = normalizeLiveExtraction(existingGame.scoreboard_extraction).players;
+    const nextSelectedKeys = syncSelectedPlayerKeys(
+      previousPlayers,
+      nextPlayers,
+      [existingSelectedSelfPlayerKey]
+    );
+    const nextSelectedPlayer =
+      nextPlayers.find((player) => player.playerKey === nextSelectedKeys[0]) ??
+      nextPlayers[0];
+
+    try {
+      await syncLoggedGameSelection({
+        supabase,
+        gameId: payload.gameId,
+        fullExtraction: { players: nextPlayers },
+        selectedPlayer: nextSelectedPlayer,
+      });
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error ? error.message : "Failed to update game.",
+        },
+        { status: 500 }
+      );
+    }
+
+    if (playedAtIso) {
+      const { error: playedAtError } = await supabase
+        .from("games")
+        .update({ played_at: playedAtIso })
+        .eq("id", payload.gameId)
+        .eq("user_id", userId);
+
+      if (playedAtError) {
+        return NextResponse.json(
+          { error: playedAtError.message || "Failed to update game time." },
+          { status: 500 }
+        );
+      }
+    }
+
+    const { data: updatedGame } = await supabase
+      .from("games")
+      .select("session_id")
+      .eq("id", payload.gameId)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (updatedGame?.session_id) {
+      const { data: earliestGame } = await supabase
+        .from("games")
+        .select("played_at")
+        .eq("session_id", updatedGame.session_id)
+        .eq("user_id", userId)
+        .order("played_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      await supabase
+        .from("bowling_sessions")
+        .update({ started_at: earliestGame?.played_at ?? null })
+        .eq("id", updatedGame.session_id)
+        .eq("user_id", userId);
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  const normalizedFrames = (payload.frames ?? []).map((frame) => ({
     ...frame,
     shots: normalizeFrameShots(frame)
   }));
@@ -416,11 +526,6 @@ export async function PATCH(request: Request) {
   updates.total_score = computeTotalScore(normalizedFrames);
   updates.status = "logged";
 
-  const selectedSelfPlayerKey =
-    typeof existingGame.selected_self_player_key === "string" &&
-    existingGame.selected_self_player_key.trim()
-      ? existingGame.selected_self_player_key.trim()
-      : null;
   const selectedSelfPlayerName =
     typeof existingGame.selected_self_player_name === "string" &&
     existingGame.selected_self_player_name.trim()
@@ -441,10 +546,10 @@ export async function PATCH(request: Request) {
     frames: selectedPlayerFrames,
   };
 
-  if (existingGame.scoreboard_extraction && selectedSelfPlayerKey) {
+  if (existingGame.scoreboard_extraction && existingSelectedSelfPlayerKey) {
     const players = normalizeLiveExtraction(existingGame.scoreboard_extraction).players.map(
       (player) =>
-        player.playerKey === selectedSelfPlayerKey
+        player.playerKey === existingSelectedSelfPlayerKey
           ? selectedPlayerExtraction
           : player
     );

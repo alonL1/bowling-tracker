@@ -95,7 +95,8 @@ export async function deleteGame(gameId: string) {
 export type GameUpdatePayload = {
   gameId: string;
   playedAt?: string | null;
-  frames: Array<{
+  players?: LivePlayer[];
+  frames?: Array<{
     frameId?: string | null;
     frameNumber: number;
     shots: Array<{

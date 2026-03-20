@@ -111,7 +111,7 @@ export default function RecordScreen() {
         addMultipleSessionsState === 'loading'
           ? 'Add Multiple Sessions'
           : addMultipleSessionsState === 'resume'
-            ? 'Resume Multiple Sessions'
+            ? 'Resume Adding Multiple Sessions'
             : 'Add Multiple Sessions',
       description:
         addMultipleSessionsState === 'loading'

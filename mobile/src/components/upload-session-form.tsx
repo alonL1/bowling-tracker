@@ -60,6 +60,7 @@ import { useAuth } from '@/providers/auth-provider';
 const DEFAULT_BUCKET = 'scoreboards-temp';
 const MAX_IMAGE_COUNT = 100;
 const NEW_SESSION_TARGET = '__new-session__';
+const BASE_CONTENT_BOTTOM_PADDING = 156;
 
 type UploadSessionFormProps = {
   title: string;
@@ -357,6 +358,7 @@ export default function UploadSessionForm({
   const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const [sessionPickerChoice, setSessionPickerChoice] = useState<string | null>(null);
   const [flatRows, setFlatRows] = useState<DraftFlatRow[]>([]);
+  const [bottomDockHeight, setBottomDockHeight] = useState(0);
 
   const draftQuery = useQuery({
     queryKey: queryKeys.recordingDraft(mode),
@@ -435,6 +437,16 @@ export default function UploadSessionForm({
 
   const sessions = sessionsQuery.data?.sessions ?? [];
   const groupedFlatRows = useMemo(() => buildDraftFlatRows(groups), [groups]);
+  const contentContainerStyle = useMemo(
+    () => [
+      styles.container,
+      mode === 'add_multiple_sessions' ? styles.draggableContainer : styles.scrollContainer,
+      draft
+        ? { paddingBottom: Math.max(BASE_CONTENT_BOTTOM_PADDING, bottomDockHeight + spacing.xl) }
+        : null,
+    ],
+    [bottomDockHeight, draft, mode],
+  );
 
   useEffect(() => {
     if (mode !== 'add_multiple_sessions') {
@@ -783,7 +795,7 @@ export default function UploadSessionForm({
   );
 
   const topContent = (
-    <>
+    <View style={styles.topContent}>
       <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
         <Ionicons name="chevron-back" size={16} color={palette.muted} />
         <Text style={styles.backText}>Back</Text>
@@ -869,13 +881,16 @@ export default function UploadSessionForm({
           )}
         </SurfaceCard>
       ) : null}
-    </>
+    </View>
   );
 
   const renderFlatRow = ({ item, drag, isActive, getIndex }: RenderItemParams<DraftFlatRow>) => {
+    const index = getIndex() ?? flatRows.findIndex((row) => row.key === item.key);
+    const previousRow = index > 0 ? flatRows[index - 1] : null;
+
     if (item.kind === 'header') {
       return (
-        <View style={[styles.flatHeaderRow, (getIndex() ?? 0) > 0 && styles.flatHeaderRowSpaced]}>
+        <View style={[styles.flatHeaderRow, index > 0 && styles.flatHeaderRowSpaced]}>
           {renderGroupHeader(item.group)}
         </View>
       );
@@ -883,7 +898,13 @@ export default function UploadSessionForm({
 
     return (
       <ScaleDecorator>
-        <View style={styles.flatGameRow}>
+        <View
+          style={[
+            styles.flatGameRow,
+            previousRow?.kind === 'header'
+              ? styles.flatGameRowAfterHeader
+              : styles.flatGameRowAfterGame,
+          ]}>
           {item.game.status === 'ready' ? (
             <RecordingDraftGameCard
               game={item.game}
@@ -916,7 +937,7 @@ export default function UploadSessionForm({
         <DraggableFlatList
           data={flatRows}
           keyExtractor={(item) => item.key}
-          contentContainerStyle={styles.container}
+          contentContainerStyle={contentContainerStyle}
           showsVerticalScrollIndicator={false}
           activationDistance={8}
           dragItemOverflow
@@ -958,7 +979,7 @@ export default function UploadSessionForm({
         />
       ) : (
         <KeyboardAwareScrollView
-          contentContainerStyle={styles.container}
+          contentContainerStyle={contentContainerStyle}
           showsVerticalScrollIndicator={false}>
           {topContent}
 
@@ -1008,7 +1029,12 @@ export default function UploadSessionForm({
       )}
 
       {draft ? (
-        <View style={styles.bottomDock}>
+        <View
+          style={styles.bottomDock}
+          onLayout={(event) => {
+            const nextHeight = Math.ceil(event.nativeEvent.layout.height) + spacing.md;
+            setBottomDockHeight((current) => (current === nextHeight ? current : nextHeight));
+          }}>
           {mode === 'upload_session' ? (
             <Text style={styles.dockNote}>All of these games will go into one session.</Text>
           ) : mode === 'add_multiple_sessions' ? (
@@ -1200,8 +1226,17 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: 156,
+    paddingBottom: BASE_CONTENT_BOTTOM_PADDING,
+  },
+  scrollContainer: {
     gap: spacing.md,
+  },
+  draggableContainer: {
+    gap: 0,
+  },
+  topContent: {
+    gap: spacing.md,
+    paddingBottom: spacing.md,
   },
   backButton: {
     alignSelf: 'flex-start',
@@ -1290,10 +1325,16 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   flatHeaderRowSpaced: {
-    paddingTop: spacing.lg,
+    marginTop: spacing.lg,
   },
   flatGameRow: {
-    gap: spacing.xs,
+    gap: 0,
+  },
+  flatGameRowAfterHeader: {
+    marginTop: spacing.sm,
+  },
+  flatGameRowAfterGame: {
+    marginTop: 8,
   },
   groupHeader: {
     flexDirection: 'row',

@@ -154,7 +154,7 @@ export default function SessionGameCard({
         ) : null}
       </View>
 
-      <GameEditSheet visible={editOpen} gameId={game.id} onClose={() => setEditOpen(false)} />
+      <GameEditSheet visible={editOpen} game={game} onClose={() => setEditOpen(false)} />
     </>
   );
 }
