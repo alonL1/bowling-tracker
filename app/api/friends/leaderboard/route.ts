@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 type LeaderboardMetrics = {
   bestGame: number;
   bestAverage: number;
+  bestSeries: number;
   bestSession: number;
   mostGames: number;
   mostSessions: number;
@@ -73,6 +74,7 @@ function createBlankMetrics(): MutableMetrics {
   return {
     bestGame: 0,
     bestAverage: 0,
+    bestSeries: 0,
     bestSession: 0,
     mostGames: 0,
     mostSessions: 0,
@@ -89,6 +91,22 @@ function createBlankMetrics(): MutableMetrics {
     sessionIds: new Set<string>(),
     totalFrames: 0
   };
+}
+
+function computeBestSeries(scores: number[]) {
+  if (scores.length < 3) {
+    return 0;
+  }
+
+  let bestSeries = 0;
+  for (let index = 0; index <= scores.length - 3; index += 1) {
+    const series = scores[index] + scores[index + 1] + scores[index + 2];
+    if (series > bestSeries) {
+      bestSeries = series;
+    }
+  }
+
+  return bestSeries;
 }
 
 export async function GET(request: Request) {
@@ -158,6 +176,7 @@ export async function GET(request: Request) {
   });
 
   const sessionAggregates = new Map<string, SessionAggregate>();
+  const scoresByUserSession = new Map<string, number[]>();
 
   ((games as GameRow[] | null) || []).forEach((game) => {
     const userId = game.user_id;
@@ -191,6 +210,9 @@ export async function GET(request: Request) {
       if (score !== null) {
         aggregate.total += score;
         aggregate.count += 1;
+        const scores = scoresByUserSession.get(key) ?? [];
+        scores.push(score);
+        scoresByUserSession.set(key, scores);
       }
       sessionAggregates.set(key, aggregate);
     }
@@ -234,19 +256,25 @@ export async function GET(request: Request) {
     }
   });
 
-  metricsByUser.forEach((metrics) => {
+  metricsByUser.forEach((metrics, userId) => {
     metrics.mostSessions = metrics.sessionIds.size;
     metrics.bestAverage =
       metrics.totalScoreCount > 0
         ? metrics.totalScoreSum / metrics.totalScoreCount
         : 0;
+    metrics.bestSeries = Array.from(scoresByUserSession.entries()).reduce((bestSeries, [key, scores]) => {
+      if (!key.startsWith(`${userId}:`)) {
+        return bestSeries;
+      }
+      return Math.max(bestSeries, computeBestSeries(scores));
+    }, 0);
     metrics.StrikeRate =
       metrics.totalFrames > 0
         ? (metrics.TotalStrikes / metrics.totalFrames) * 100
         : 0;
     metrics.SpareRate =
-      metrics.totalFrames > 0
-        ? (metrics.TotalSpares / metrics.totalFrames) * 100
+      metrics.totalFrames - metrics.TotalStrikes > 0
+        ? (metrics.TotalSpares / (metrics.totalFrames - metrics.TotalStrikes)) * 100
         : 0;
   });
 
@@ -264,6 +292,7 @@ export async function GET(request: Request) {
       const normalizedMetrics: LeaderboardMetrics = {
         bestGame: metrics.bestGame,
         bestAverage: roundToTwo(metrics.bestAverage),
+        bestSeries: metrics.bestSeries,
         bestSession: roundToTwo(metrics.bestSession),
         mostGames: metrics.mostGames,
         mostSessions: metrics.mostSessions,

@@ -32,7 +32,8 @@ export default function BowlingBallSpinner({
         toValue: 1,
         duration: 900,
         easing: Easing.linear,
-        useNativeDriver: Platform.OS !== 'web',
+        // iOS dev builds on RN 0.83 can emit noisy onAnimatedValueUpdate warnings here.
+        useNativeDriver: Platform.OS === 'android',
       }),
     );
 

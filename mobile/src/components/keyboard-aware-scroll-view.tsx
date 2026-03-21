@@ -52,9 +52,10 @@ const KeyboardAwareScrollView = forwardRef<
   const nativeKeyboardAwareRef = useRef<any>(null);
   const flattenedContentContainerStyle =
     StyleSheet.flatten(contentContainerStyle) ?? undefined;
+  const usePlainScrollView = Platform.OS !== 'android';
 
   useImperativeHandle(ref, () => {
-    if (Platform.OS === 'web') {
+    if (usePlainScrollView) {
       return (webScrollRef.current as KeyboardAwareScrollHandle | null) ?? {};
     }
 
@@ -76,7 +77,7 @@ const KeyboardAwareScrollView = forwardRef<
     };
   }, []);
 
-  if (Platform.OS === 'web') {
+  if (usePlainScrollView) {
     return (
       <ScrollView
         {...props}

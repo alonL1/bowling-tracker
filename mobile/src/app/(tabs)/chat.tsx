@@ -67,6 +67,8 @@ const PIN_IMAGES = {
 const MIN_INPUT_HEIGHT = 48;
 const MAX_INPUT_HEIGHT = 132;
 const HEADER_SPINNER_SIZE = 34;
+const INPUT_VERTICAL_PADDING = 24;
+const MIN_TEXTAREA_HEIGHT = MIN_INPUT_HEIGHT - INPUT_VERTICAL_PADDING;
 
 function renderInlineMessageContent(content: string) {
   const parts = content.split(/(\*\*.*?\*\*)/g);
@@ -112,9 +114,9 @@ export default function ChatScreen() {
   const queryClient = useQueryClient();
   const scrollRef = useRef<ScrollView | null>(null);
   const inputRef = useRef<TextInput | null>(null);
+  const questionRef = useRef('');
   const [question, setQuestion] = useState('');
-  const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
-  const [inputContentHeight, setInputContentHeight] = useState(MIN_INPUT_HEIGHT);
+  const [inputShellHeight, setInputShellHeight] = useState(MIN_INPUT_HEIGHT);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -125,6 +127,7 @@ export default function ChatScreen() {
   const [chatStatus, setChatStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [showExamples, setShowExamples] = useState(false);
   const [hasCompletedResponse, setHasCompletedResponse] = useState(false);
+  const inputCanScroll = inputShellHeight >= MAX_INPUT_HEIGHT;
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -151,16 +154,46 @@ export default function ChatScreen() {
     };
   }, []);
 
-  const handleAsk = async () => {
-    if (!question.trim() || chatStatus === 'loading') {
+  const resetComposer = () => {
+    setInputShellHeight(MIN_INPUT_HEIGHT);
+  };
+
+  const handleQuestionChange = (value: string) => {
+    if (Platform.OS === 'ios' && value.endsWith('\n')) {
+      const trimmedNewlineValue = value.replace(/\n+$/, '');
+      questionRef.current = trimmedNewlineValue;
+      setQuestion(trimmedNewlineValue);
+
+      if (trimmedNewlineValue.length === 0) {
+        resetComposer();
+        return;
+      }
+
+      requestAnimationFrame(() => {
+        void handleAsk();
+      });
       return;
     }
 
-    const userQuestion = question.trim();
+    questionRef.current = value;
+    setQuestion(value);
+
+    if (value.length === 0) {
+      resetComposer();
+    }
+  };
+
+  const handleAsk = async () => {
+    const nextQuestion = questionRef.current.trim();
+    if (!nextQuestion || chatStatus === 'loading') {
+      return;
+    }
+
+    const userQuestion = nextQuestion;
+    questionRef.current = '';
     setQuestion('');
     inputRef.current?.clear();
-    setInputHeight(MIN_INPUT_HEIGHT);
-    setInputContentHeight(MIN_INPUT_HEIGHT);
+    resetComposer();
     setMessages((prev) => [...prev, { role: 'user', content: userQuestion }]);
     setChatStatus('loading');
 
@@ -238,7 +271,6 @@ export default function ChatScreen() {
     return PIN_IMAGES.happy;
   }, [chatStatus, hasCompletedResponse]);
 
-  const inputCanScroll = inputContentHeight > MAX_INPUT_HEIGHT;
   const androidComposerLift =
     Platform.OS === 'android' ? Math.max(0, keyboardHeight - tabBarHeight) : 0;
   const keyboardOpen = Platform.OS === 'android' && keyboardHeight > 0;
@@ -246,6 +278,10 @@ export default function ChatScreen() {
     nativeEvent: { key?: string };
     preventDefault?: () => void;
   }) => {
+    if (Platform.OS !== 'web') {
+      return;
+    }
+
     if (event.nativeEvent.key !== 'Enter') {
       return;
     }
@@ -254,6 +290,10 @@ export default function ChatScreen() {
       event.preventDefault?.();
     }
 
+    void handleAsk();
+  };
+
+  const handleSubmitEditing = () => {
     void handleAsk();
   };
 
@@ -312,32 +352,70 @@ export default function ChatScreen() {
               androidComposerLift > 0 && { marginBottom: androidComposerLift },
             ]}>
             <View style={styles.composerRow}>
-              <TextInput
-                ref={inputRef}
-                multiline
-                scrollEnabled={inputCanScroll}
-                placeholder="Type here"
-                placeholderTextColor={palette.muted}
-                style={[
-                  styles.input,
-                  { height: inputHeight },
-                  !inputCanScroll && styles.inputClamped,
-                ]}
-                value={question}
-                onChangeText={setQuestion}
-                returnKeyType="send"
-                onKeyPress={handleInputKeyPress}
-                onContentSizeChange={(event) => {
-                  const measureBuffer = Platform.OS === 'web' ? 0 : 4;
-                  const measuredHeight = Math.max(
-                    MIN_INPUT_HEIGHT,
-                    Math.ceil(event.nativeEvent.contentSize.height) + measureBuffer,
-                  );
-                  setInputContentHeight(measuredHeight);
-                  const nextHeight = Math.min(measuredHeight, MAX_INPUT_HEIGHT);
-                  setInputHeight((current) => (current === nextHeight ? current : nextHeight));
-                }}
-              />
+              <View style={styles.inputWrap}>
+                {Platform.OS === 'ios' ? (
+                  <View pointerEvents="none" style={styles.inputMeasureWrap}>
+                    <View
+                      style={styles.inputMeasureShell}
+                      onLayout={(event) => {
+                        if (question.length === 0) {
+                          return;
+                        }
+
+                        const measuredShellHeight = Math.max(
+                          MIN_INPUT_HEIGHT,
+                          Math.min(Math.ceil(event.nativeEvent.layout.height), MAX_INPUT_HEIGHT),
+                        );
+                        setInputShellHeight((current) =>
+                          current === measuredShellHeight ? current : measuredShellHeight,
+                        );
+                      }}>
+                      <Text style={styles.inputMeasureText}>{question || ' '}</Text>
+                    </View>
+                  </View>
+                ) : null}
+                <View
+                  style={[
+                    styles.inputShell,
+                    { height: inputShellHeight },
+                    !inputCanScroll && styles.inputShellClamped,
+                  ]}>
+                  <TextInput
+                    ref={inputRef}
+                    multiline
+                    scrollEnabled={inputCanScroll}
+                    placeholder="Type here"
+                    placeholderTextColor={palette.muted}
+                    style={styles.input}
+                    value={question}
+                    onChangeText={handleQuestionChange}
+                    returnKeyType="send"
+                    submitBehavior={Platform.OS === 'ios' ? undefined : 'submit'}
+                    onSubmitEditing={Platform.OS === 'ios' ? undefined : handleSubmitEditing}
+                    onKeyPress={handleInputKeyPress}
+                    onContentSizeChange={(event) => {
+                      if (Platform.OS === 'ios') {
+                        return;
+                      }
+
+                      if (questionRef.current.length === 0) {
+                        resetComposer();
+                        return;
+                      }
+
+                      const measuredContentHeight = Math.ceil(event.nativeEvent.contentSize.height);
+                      const measuredShellHeight = Math.max(
+                        MIN_INPUT_HEIGHT,
+                        Math.min(measuredContentHeight + INPUT_VERTICAL_PADDING, MAX_INPUT_HEIGHT),
+                      );
+
+                      setInputShellHeight((current) =>
+                        current === measuredShellHeight ? current : measuredShellHeight,
+                      );
+                    }}
+                  />
+                </View>
+              </View>
               <Pressable
                 onPress={handleAsk}
                 disabled={chatStatus === 'loading' || !question.trim()}
@@ -372,6 +450,8 @@ export default function ChatScreen() {
                 <Pressable
                   key={example}
                   onPress={() => {
+                    questionRef.current = example;
+                    resetComposer();
                     setQuestion(example);
                     setShowExamples(false);
                   }}
@@ -512,21 +592,55 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: spacing.sm,
+    minWidth: 0,
   },
-  input: {
+  inputWrap: {
     flex: 1,
+    minWidth: 0,
+  },
+  inputMeasureWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    opacity: 0,
+  },
+  inputMeasureShell: {
+    minHeight: MIN_INPUT_HEIGHT,
+    maxHeight: MAX_INPUT_HEIGHT,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+  },
+  inputMeasureText: {
+    minHeight: MIN_TEXTAREA_HEIGHT,
+    color: 'transparent',
+    fontSize: 16,
+    fontFamily: fontFamilySans,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  inputShell: {
     minHeight: MIN_INPUT_HEIGHT,
     maxHeight: MAX_INPUT_HEIGHT,
     backgroundColor: palette.field,
-    color: palette.text,
     borderRadius: radii.lg,
     paddingHorizontal: spacing.md,
-    paddingTop: 12,
-    paddingBottom: 12,
+    paddingVertical: 12,
+  },
+  inputShellClamped: {
+    overflow: 'hidden',
+  },
+  input: {
+    flex: 1,
+    width: '100%',
+    minWidth: 0,
+    minHeight: MIN_TEXTAREA_HEIGHT,
+    color: palette.text,
     fontSize: 16,
-    lineHeight: 20,
     fontFamily: fontFamilySans,
     textAlignVertical: 'top',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     ...(Platform.OS === 'web'
       ? {
           outlineColor: 'transparent',
@@ -535,9 +649,11 @@ const styles = StyleSheet.create({
           boxShadow: 'none',
         }
       : null),
-  },
-  inputClamped: {
-    overflow: 'hidden',
+    ...(Platform.OS === 'ios'
+      ? null
+      : {
+          lineHeight: 20,
+        }),
   },
   sendButton: {
     width: 46,

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
-import { Share } from 'react-native';
+import { RefreshControl, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -30,16 +30,17 @@ const METRIC_TABS: Array<{
 }> = [
   { metric: 'bestGame', label: 'Score', description: 'Highest Scoring Game' },
   { metric: 'bestAverage', label: 'Average', description: 'Average Score Across All Games' },
+  { metric: 'bestSeries', label: 'Series', description: 'Best 3 Games Series' },
   { metric: 'bestSession', label: 'Best Session', description: 'Best Single Session Average Score' },
+  { metric: 'StrikeRate', label: 'Strike Rate', description: 'Strike Rate' },
+  { metric: 'SpareRate', label: 'Spare Rate', description: 'Spare Conversion Rate' },
+  { metric: 'TotalStrikes', label: 'Strikes', description: 'Total Number of Strikes' },
+  { metric: 'TotalSpares', label: 'Spares', description: 'Total Number of Spares' },
   { metric: 'mostGames', label: 'Games', description: 'Total Games Logged' },
   { metric: 'mostSessions', label: 'Sessions', description: 'Total Sessions Logged' },
   { metric: 'SessionScore', label: 'Session Score', description: 'Most Points Scored in a Session' },
   { metric: 'TotalPoints', label: 'Points', description: 'Total Points Across All Games' },
   { metric: 'SessionLength', label: 'Session Length', description: 'Most Games Played in a Session' },
-  { metric: 'StrikeRate', label: 'Strike Rate', description: 'Strike Rate' },
-  { metric: 'SpareRate', label: 'Spare Rate', description: 'Spare Rate' },
-  { metric: 'TotalStrikes', label: 'Strikes', description: 'Total Number of Strikes' },
-  { metric: 'TotalSpares', label: 'Spares', description: 'Total Number of Spares' },
   { metric: 'MostNines', label: '9 King', description: 'Total Frames with Score of 9' },
 ];
 
@@ -50,6 +51,9 @@ function getMetricValue(row: LeaderboardRow, metric: LeaderboardMetric) {
 function formatMetricValue(metric: LeaderboardMetric, value: number) {
   if (metric === 'bestAverage' || metric === 'bestSession') {
     return value.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+  }
+  if (metric === 'bestSeries') {
+    return Math.round(value).toLocaleString();
   }
   if (metric === 'StrikeRate' || metric === 'SpareRate') {
     return `${value.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}%`;
@@ -176,6 +180,15 @@ export default function FriendsScreen() {
     <ScreenShell
       title="Friends"
       bodyStyle={styles.body}
+      refreshControl={
+        !isGuest ? (
+          <RefreshControl
+            refreshing={leaderboardQuery.isRefetching}
+            onRefresh={() => void leaderboardQuery.refetch()}
+            tintColor={palette.spinner}
+          />
+        ) : undefined
+      }
       headerRight={
         <Pressable
           onPress={handleInvite}

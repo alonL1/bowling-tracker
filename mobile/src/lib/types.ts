@@ -71,6 +71,7 @@ export type StatusResponse = {
 export type LeaderboardMetric =
   | 'bestGame'
   | 'bestAverage'
+  | 'bestSeries'
   | 'bestSession'
   | 'mostGames'
   | 'mostSessions'
