@@ -5,6 +5,7 @@ export const palette = {
   nav: '#101925',
   accent: '#083A62',
   text: '#FFFFFF',
+  dotActive: '#a4acba',
   muted: '#BCC7DB',
   navIcon: '#C3C6CF',
   field: '#424853',

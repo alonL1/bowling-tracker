@@ -1062,7 +1062,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.field,
   },
   tabDotActive: {
-    backgroundColor: palette.text,
+    backgroundColor: palette.dotActive,
   },
   gameList: {
     gap: 8,

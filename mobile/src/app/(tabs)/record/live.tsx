@@ -1305,7 +1305,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.field,
   },
   tabDotActive: {
-    backgroundColor: palette.text,
+    backgroundColor: palette.dotActive,
   },
   tabButton: {
     flex: 1,

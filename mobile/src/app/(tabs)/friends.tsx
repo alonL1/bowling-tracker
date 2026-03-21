@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
@@ -36,6 +36,8 @@ type RankedRow = LeaderboardRow & {
 const TAB_HORIZONTAL_PADDING = 14;
 
 type MetricTabWidths = Partial<Record<LeaderboardMetric, number>>;
+type MetricTabLayout = { x: number; width: number };
+type RankedRowsByMetric = Partial<Record<LeaderboardMetric, RankedRow[]>>;
 
 const METRIC_TABS: Array<{
   metric: LeaderboardMetric;
@@ -87,6 +89,11 @@ export default function FriendsScreen() {
   const [inviteStatus, setInviteStatus] = useState('');
   const [invitePayload, setInvitePayload] = useState<InviteLinkResponse | null>(null);
   const [tabLabelWidths, setTabLabelWidths] = useState<MetricTabWidths>({});
+  const [pagerWidth, setPagerWidth] = useState(0);
+  const tabScrollRef = useRef<ScrollView | null>(null);
+  const pagerRef = useRef<ScrollView | null>(null);
+  const tabLayoutsRef = useRef<Partial<Record<LeaderboardMetric, MetricTabLayout>>>({});
+  const tabViewportWidthRef = useRef(0);
 
   const leaderboardQuery = useQuery({
     queryKey: queryKeys.leaderboard,
@@ -118,46 +125,54 @@ export default function FriendsScreen() {
   const participants = isGuest ? [] : leaderboardQuery.data?.participants ?? [];
   const selfUserId = isGuest ? '' : leaderboardQuery.data?.selfUserId ?? '';
 
-  const rankedRows = useMemo<RankedRow[]>(() => {
-    const sorted = [...participants].sort((left, right) => {
-      const delta = getMetricValue(right, selectedMetric) - getMetricValue(left, selectedMetric);
-      if (delta !== 0) {
-        return delta;
-      }
-      const nameDelta = left.displayName.localeCompare(right.displayName, undefined, {
-        sensitivity: 'base',
+  const rankedRowsByMetric = useMemo<RankedRowsByMetric>(() => {
+    return METRIC_TABS.reduce<RankedRowsByMetric>((accumulator, entry) => {
+      const sorted = [...participants].sort((left, right) => {
+        const delta = getMetricValue(right, entry.metric) - getMetricValue(left, entry.metric);
+        if (delta !== 0) {
+          return delta;
+        }
+        const nameDelta = left.displayName.localeCompare(right.displayName, undefined, {
+          sensitivity: 'base',
+        });
+        if (nameDelta !== 0) {
+          return nameDelta;
+        }
+        return left.userId.localeCompare(right.userId);
       });
-      if (nameDelta !== 0) {
-        return nameDelta;
-      }
-      return left.userId.localeCompare(right.userId);
-    });
 
-    let previousValue: number | null = null;
-    let previousRank = 0;
+      let previousValue: number | null = null;
+      let previousRank = 0;
 
-    return sorted.map((row, index) => {
-      const metricValue = getMetricValue(row, selectedMetric);
-      const rank =
-        index === 0
-          ? 1
-          : previousValue !== null && metricValue === previousValue
-            ? previousRank
-            : index + 1;
-      previousValue = metricValue;
-      previousRank = rank;
-      return { ...row, rank, metricValue };
-    });
-  }, [participants, selectedMetric]);
+      accumulator[entry.metric] = sorted.map((row, index) => {
+        const metricValue = getMetricValue(row, entry.metric);
+        const rank =
+          index === 0
+            ? 1
+            : previousValue !== null && metricValue === previousValue
+              ? previousRank
+              : index + 1;
+        previousValue = metricValue;
+        previousRank = rank;
+        return { ...row, rank, metricValue };
+      });
 
-  const selectedMetricDetail = useMemo(
-    () => METRIC_TABS.find((entry) => entry.metric === selectedMetric) ?? METRIC_TABS[0],
-    [selectedMetric],
+      return accumulator;
+    }, {});
+  }, [participants]);
+
+  const metricPages = useMemo(
+    () =>
+      METRIC_TABS.map((entry) => {
+        const rankedRows = rankedRowsByMetric[entry.metric] ?? [];
+        return {
+          ...entry,
+          rankedRows,
+          yourRank: rankedRows.find((row) => row.userId === selfUserId)?.rank ?? null,
+        };
+      }),
+    [rankedRowsByMetric, selfUserId],
   );
-
-  const yourRank = useMemo(() => {
-    return rankedRows.find((entry) => entry.userId === selfUserId)?.rank ?? null;
-  }, [rankedRows, selfUserId]);
 
   const handleTabLabelLayout = (metric: LeaderboardMetric, event: LayoutChangeEvent) => {
     const nextWidth = Math.ceil(event.nativeEvent.layout.width);
@@ -172,6 +187,55 @@ export default function FriendsScreen() {
       return { ...current, [metric]: nextWidth };
     });
   };
+
+  const handleTabLayout = (metric: LeaderboardMetric, event: LayoutChangeEvent) => {
+    const { x, width } = event.nativeEvent.layout;
+    tabLayoutsRef.current[metric] = { x, width };
+  };
+
+  const scrollMetricChipIntoView = (metric: LeaderboardMetric, animated: boolean) => {
+    const layout = tabLayoutsRef.current[metric];
+    if (!layout || !tabViewportWidthRef.current) {
+      return;
+    }
+
+    const targetX = Math.max(0, layout.x - (tabViewportWidthRef.current - layout.width) / 2);
+    tabScrollRef.current?.scrollTo({ x: targetX, y: 0, animated });
+  };
+
+  const scrollToMetricPage = (metric: LeaderboardMetric, animated: boolean) => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    const index = METRIC_TABS.findIndex((entry) => entry.metric === metric);
+    if (index === -1) {
+      return;
+    }
+
+    pagerRef.current?.scrollTo({
+      x: index * pagerWidth,
+      y: 0,
+      animated,
+    });
+  };
+
+  const handleSelectMetric = (metric: LeaderboardMetric, animated: boolean) => {
+    setSelectedMetric(metric);
+    scrollMetricChipIntoView(metric, animated);
+    scrollToMetricPage(metric, animated);
+  };
+
+  useEffect(() => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      scrollToMetricPage(selectedMetric, false);
+      scrollMetricChipIntoView(selectedMetric, false);
+    });
+  }, [pagerWidth, selectedMetric]);
 
   const handleInvite = async () => {
     if (isGuest) {
@@ -246,13 +310,18 @@ export default function FriendsScreen() {
         </View>
       ) : null}
       <ScrollView
+        ref={tabScrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.tabsRow}>
+        contentContainerStyle={styles.tabsRow}
+        onLayout={(event) => {
+          tabViewportWidthRef.current = event.nativeEvent.layout.width;
+        }}>
         {METRIC_TABS.map((tab) => (
           <Pressable
             key={tab.metric}
-            onPress={() => setSelectedMetric(tab.metric)}
+            onLayout={(event) => handleTabLayout(tab.metric, event)}
+            onPress={() => handleSelectMetric(tab.metric, true)}
             style={({ pressed }) => [
               styles.tab,
               isAndroid && tabLabelWidths[tab.metric]
@@ -275,9 +344,13 @@ export default function FriendsScreen() {
         ))}
       </ScrollView>
 
-      <View style={styles.metricSummary}>
-        <Text style={styles.metricDescription}>{selectedMetricDetail.description}</Text>
-        <Text style={styles.metricRank}>{yourRank ? `#${yourRank}` : '—'}</Text>
+      <View style={styles.tabDots}>
+        {METRIC_TABS.map((tab) => (
+          <View
+            key={`${tab.metric}-dot`}
+            style={[styles.tabDot, selectedMetric === tab.metric && styles.tabDotActive]}
+          />
+        ))}
       </View>
 
       {isGuest ? <InfoBanner text="Sign in with an account to invite friends and view leaderboards." /> : null}
@@ -295,36 +368,81 @@ export default function FriendsScreen() {
         />
       ) : null}
 
-      <View style={styles.leaderboardList}>
-        {rankedRows.length === 0 ? (
-          <SurfaceCard style={styles.emptyCard} tone="raised">
-            <Text style={styles.emptyTitle}>
-              {isGuest ? 'Sign in to view friends' : 'No leaderboard entries yet'}
-            </Text>
-            <Text style={styles.emptyText}>
-              {isGuest
-                ? 'Guests cannot have friends. Sign in with an account to invite friends and compare stats.'
-                : 'Invite a friend to start comparing stats.'}
-            </Text>
-          </SurfaceCard>
-        ) : (
-          rankedRows.map((row) => (
-            <View key={row.userId} style={styles.leaderboardRow}>
-              <Text style={styles.rankText}>{row.rank}</Text>
-              <Text
-                style={[
-                  styles.rowName,
-                  row.userId === selfUserId && styles.rowNameSelf,
-                ]}
-                numberOfLines={1}>
-                {row.displayName}
-              </Text>
-              <Text style={styles.rowValue}>
-                {formatMetricValue(selectedMetric, row.metricValue)}
-              </Text>
+      <View
+        style={styles.pagerViewport}
+        onLayout={(event) => {
+          const nextWidth = Math.round(event.nativeEvent.layout.width);
+          if (!nextWidth || nextWidth === pagerWidth) {
+            return;
+          }
+
+          setPagerWidth(nextWidth);
+        }}>
+        <ScrollView
+          ref={pagerRef}
+          horizontal
+          pagingEnabled
+          nestedScrollEnabled
+          directionalLockEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={(event) => {
+            if (!pagerWidth) {
+              return;
+            }
+
+            const nextIndex = Math.max(
+              0,
+              Math.min(
+                METRIC_TABS.length - 1,
+                Math.round(event.nativeEvent.contentOffset.x / pagerWidth),
+              ),
+            );
+            const nextMetric = METRIC_TABS[nextIndex]?.metric;
+            if (!nextMetric) {
+              return;
+            }
+
+            setSelectedMetric(nextMetric);
+            scrollMetricChipIntoView(nextMetric, true);
+          }}>
+          {metricPages.map((page) => (
+            <View key={page.metric} style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
+              <View style={styles.metricSummary}>
+                <Text style={styles.metricDescription}>{page.description}</Text>
+                <Text style={styles.metricRank}>{page.yourRank ? `#${page.yourRank}` : '—'}</Text>
+              </View>
+
+              <View style={styles.leaderboardList}>
+                {page.rankedRows.length === 0 ? (
+                  <SurfaceCard style={styles.emptyCard} tone="raised">
+                    <Text style={styles.emptyTitle}>
+                      {isGuest ? 'Sign in to view friends' : 'No leaderboard entries yet'}
+                    </Text>
+                    <Text style={styles.emptyText}>
+                      {isGuest
+                        ? 'Guests cannot have friends. Sign in with an account to invite friends and compare stats.'
+                        : 'Invite a friend to start comparing stats.'}
+                    </Text>
+                  </SurfaceCard>
+                ) : (
+                  page.rankedRows.map((row) => (
+                    <View key={row.userId} style={styles.leaderboardRow}>
+                      <Text style={styles.rankText}>{row.rank}</Text>
+                      <Text
+                        style={[styles.rowName, row.userId === selfUserId && styles.rowNameSelf]}
+                        numberOfLines={1}>
+                        {row.displayName}
+                      </Text>
+                      <Text style={styles.rowValue}>
+                        {formatMetricValue(page.metric, row.metricValue)}
+                      </Text>
+                    </View>
+                  ))
+                )}
+              </View>
             </View>
-          ))
-        )}
+          ))}
+        </ScrollView>
       </View>
 
       <Modal transparent animationType="fade" visible={invitePanelOpen}>
@@ -388,6 +506,23 @@ const styles = StyleSheet.create({
   hiddenMeasureText: {
     alignSelf: 'flex-start',
   },
+  tabDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 0,
+    marginBottom: -10,
+  },
+  tabDot: {
+    width: 8,
+    height: 8,
+    borderRadius: radii.pill,
+    backgroundColor: palette.field,
+  },
+  tabDotActive: {
+    backgroundColor: palette.dotActive,
+  },
   tab: {
     backgroundColor: palette.surface,
     borderRadius: radii.pill,
@@ -424,7 +559,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     paddingTop: 4,
-    paddingBottom: 6,
+    paddingBottom: 0,
   },
   metricDescription: {
     color: palette.muted,
@@ -445,6 +580,12 @@ const styles = StyleSheet.create({
   },
   leaderboardList: {
     gap: 4,
+  },
+  pagerViewport: {
+    overflow: 'visible',
+  },
+  pagerPage: {
+    gap: spacing.md,
   },
   emptyCard: {
     paddingHorizontal: spacing.lg,
