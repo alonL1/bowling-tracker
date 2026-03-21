@@ -54,8 +54,8 @@ type GameRow = {
   frames?: FrameRow[] | null;
 };
 
-function roundToTwo(value: number) {
-  return Math.round(value * 100) / 100;
+function roundToTenths(value: number) {
+  return Math.round(value * 10) / 10;
 }
 
 function getEmailPrefix(email?: string | null, fallbackUserId?: string) {
@@ -291,16 +291,16 @@ export async function GET(request: Request) {
 
       const normalizedMetrics: LeaderboardMetrics = {
         bestGame: metrics.bestGame,
-        bestAverage: roundToTwo(metrics.bestAverage),
+        bestAverage: roundToTenths(metrics.bestAverage),
         bestSeries: metrics.bestSeries,
-        bestSession: roundToTwo(metrics.bestSession),
+        bestSession: roundToTenths(metrics.bestSession),
         mostGames: metrics.mostGames,
         mostSessions: metrics.mostSessions,
         SessionScore: metrics.SessionScore,
         TotalPoints: metrics.TotalPoints,
         SessionLength: metrics.SessionLength,
-        StrikeRate: roundToTwo(metrics.StrikeRate),
-        SpareRate: roundToTwo(metrics.SpareRate),
+        StrikeRate: roundToTenths(metrics.StrikeRate),
+        SpareRate: roundToTenths(metrics.SpareRate),
         TotalStrikes: metrics.TotalStrikes,
         TotalSpares: metrics.TotalSpares,
         MostNines: metrics.MostNines

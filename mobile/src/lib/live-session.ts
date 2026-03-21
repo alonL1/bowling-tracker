@@ -1,4 +1,5 @@
 import { formatAverage } from '@/lib/bowling';
+import { formatTenths } from '@/lib/number-format';
 import type {
   GameListItem,
   LiveExtraction,
@@ -267,13 +268,11 @@ function formatPercentLabel(numerator: number, denominator: number) {
     return '—';
   }
   const value = (numerator / denominator) * 100;
-  const formatted = value.toFixed(1);
-  return `${formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted}%`;
+  return `${formatTenths(value)}%`;
 }
 
 function formatFrameAverageLabel(frameNumber: number, averageScore: number) {
-  const formatted = averageScore.toFixed(1);
-  return `Frame ${frameNumber} (${formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted})`;
+  return `Frame ${frameNumber} (${formatTenths(averageScore)})`;
 }
 
 function countNines(frames: LiveFrame[]) {

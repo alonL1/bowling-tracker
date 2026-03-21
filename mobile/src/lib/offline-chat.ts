@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { formatAverage, sortGamesByPlayedAtAsc } from '@/lib/bowling';
+import { sortGamesByPlayedAtAsc } from '@/lib/bowling';
+import { formatRoundedHundredths } from '@/lib/number-format';
 import type { GameListItem } from '@/lib/types';
 
 const OFFLINE_CHAT_GAMES_STORAGE_KEY = 'pinpoint-offline-chat-games-v1';
@@ -81,7 +82,9 @@ function buildHandledOfflineAnswer(question: string, games: GameListItem[]) {
         : 'You have no scored games yet.';
     }
 
-    return `Your average score${selection.label} is **${formatAverage(scoredGames.map((game) => game.total_score))}**.`;
+    const average =
+      scoredGames.reduce((sum, game) => sum + game.total_score, 0) / scoredGames.length;
+    return `Your average score${selection.label} is **${formatRoundedHundredths(average)}**.`;
   }
 
   if (lower.includes('total score')) {

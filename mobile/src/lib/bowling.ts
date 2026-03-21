@@ -1,3 +1,4 @@
+import { formatTenths } from '@/lib/number-format';
 import type { FrameDetail, GameDetail, GameListItem, SessionItem } from '@/lib/types';
 
 export type SessionGroup = {
@@ -46,8 +47,7 @@ export function formatAverage(scores: number[]) {
   }
 
   const avg = scores.reduce((sum, value) => sum + value, 0) / scores.length;
-  const formatted = avg.toFixed(2);
-  return formatted.endsWith('.00') ? formatted.slice(0, -3) : formatted;
+  return formatTenths(avg);
 }
 
 export function buildSessionGroups(games: GameListItem[]) {

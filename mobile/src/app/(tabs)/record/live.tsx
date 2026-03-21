@@ -46,6 +46,7 @@ import {
   canonicalizePlayerLabel,
   getFirstSelectionValidationError,
 } from '@/lib/live-session';
+import { formatTenths } from '@/lib/number-format';
 import { confirmAction } from '@/lib/confirm';
 import { deriveCapturedAtHint, sanitizeFilename } from '@/lib/upload';
 import { supabase } from '@/lib/supabase';
@@ -100,11 +101,6 @@ const comparisonCategories: Array<{ key: LivePlayerComparisonMetric; label: stri
   { key: 'bestFrame', label: 'Best Frame' },
   { key: 'worstFrame', label: 'Worst Frame' },
 ];
-
-function formatOneDecimal(value: number) {
-  const formatted = value.toFixed(1);
-  return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
-}
 
 function getComparisonMetricValue(
   row: LivePlayerComparisonRow,
@@ -174,7 +170,7 @@ function formatComparisonMetricValue(
     metric === 'strikeRate' ||
     metric === 'spareConversionRate'
   ) {
-    const formatted = formatOneDecimal(value);
+    const formatted = formatTenths(value);
     return metric === 'strikeRate' || metric === 'spareConversionRate'
       ? `${formatted}%`
       : formatted;

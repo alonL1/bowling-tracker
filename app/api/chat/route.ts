@@ -97,8 +97,7 @@ function summarizeGames(games: Game[]) {
     0
   );
   const scoredGames = games.filter((game) => game.total_score !== null).length;
-  const averageScore =
-    scoredGames > 0 ? Number((totalScore / scoredGames).toFixed(2)) : null;
+  const averageScore = scoredGames > 0 ? totalScore / scoredGames : null;
 
   const frames = games.flatMap((game) => game.frames || []);
   const totalFrames = frames.length;
@@ -130,14 +129,8 @@ function summarizeGames(games: Game[]) {
     .map(([frameNumber, entry]) => ({
       frame: frameNumber,
       frames: entry.frames,
-      strikeRate:
-        entry.frames > 0
-          ? Number((entry.strikes / entry.frames).toFixed(3))
-          : 0,
-      spareRate:
-        entry.frames > 0
-          ? Number((entry.spares / entry.frames).toFixed(3))
-          : 0
+      strikeRate: entry.frames > 0 ? entry.strikes / entry.frames : 0,
+      spareRate: entry.frames > 0 ? entry.spares / entry.frames : 0
     }));
 
   return {
@@ -145,10 +138,8 @@ function summarizeGames(games: Game[]) {
     scoredGames,
     averageScore,
     totalFrames,
-    strikeRate:
-      totalFrames > 0 ? Number((strikeFrames / totalFrames).toFixed(3)) : 0,
-    spareRate:
-      totalFrames > 0 ? Number((spareFrames / totalFrames).toFixed(3)) : 0,
+    strikeRate: totalFrames > 0 ? strikeFrames / totalFrames : 0,
+    spareRate: totalFrames > 0 ? spareFrames / totalFrames : 0,
     perFrame
   };
 }
@@ -193,14 +184,9 @@ function summarizeFrames(games: Game[]): FrameAggregate[] {
     .map(([frameNumber, entry]) => ({
       frame: frameNumber,
       frames: entry.frames,
-      averagePins:
-        entry.frames > 0
-          ? Number((entry.pinTotal / entry.frames).toFixed(2))
-          : null,
-      strikeRate:
-        entry.frames > 0 ? Number((entry.strikes / entry.frames).toFixed(3)) : 0,
-      spareRate:
-        entry.frames > 0 ? Number((entry.spares / entry.frames).toFixed(3)) : 0
+      averagePins: entry.frames > 0 ? entry.pinTotal / entry.frames : null,
+      strikeRate: entry.frames > 0 ? entry.strikes / entry.frames : 0,
+      spareRate: entry.frames > 0 ? entry.spares / entry.frames : 0
     }));
 }
 
@@ -255,6 +241,7 @@ Include just enough context in the answer but keep it consise, for example "What
 should be answered similarly to "Your average score across across games x to y is n."
 If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
 If a response is null, instead of using the word "null" use language such as "You have no games x to y"
+Only in the final written answer, round displayed decimal values to the nearest hundredth and omit trailing zeros. Keep full precision while reasoning from the provided data unless the user asked for more precision or it clearly matters.
 
 Scope: ${scope}
 Summary JSON:
@@ -329,6 +316,7 @@ should be answered similarly to "Your average score across across games x to y i
 Do not mention query limits.
 If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
 If a response is null, instead of using the word "null" use language such as "You have no games x to y"
+Only in the final written answer, round displayed decimal values to the nearest hundredth and omit trailing zeros. Keep full precision while reasoning from the provided data unless the user asked for more precision or it clearly matters.
 
 Scope: ${scope}
 Session/Game Index:
@@ -464,6 +452,7 @@ Answer with a direct response. Do not include "Answer:".
 Include just enough context in the answer but keep it consise, for example "What is my average score across games x to y",
 should be answered similarly to "Your average score across across games x to y is n."
 If a response is null, instead of using the word "null" use language such as "You have no games x to y"
+Only in the final written answer, round displayed decimal values to the nearest hundredth and omit trailing zeros. Keep full precision while reasoning from the provided data unless the user asked for more precision or it clearly matters.
 
 SQL:
 ${sql}
@@ -1111,7 +1100,11 @@ function formatRate(value: number | null) {
   if (value === null || !Number.isFinite(value)) {
     return "n/a";
   }
-  return `${Math.round(value * 100)}%`;
+  return `${formatRoundedHundredths(value * 100)}%`;
+}
+
+function formatRoundedHundredths(value: number) {
+  return value.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
 }
 
 function formatMinutesToTime(minutes: number) {
@@ -1318,7 +1311,7 @@ function tryShortcut(
     }
     return {
       handled: true,
-      answer: `Your average score${scopeSuffix || sessionSuffix} is **${summary.averageScore}**.`
+      answer: `Your average score${scopeSuffix || sessionSuffix} is **${formatRoundedHundredths(summary.averageScore)}**.`
     };
   }
 
@@ -1409,7 +1402,7 @@ function tryShortcut(
       .map((entry) =>
         entry.averagePins === null
           ? `Frame ${entry.frame}: n/a`
-          : `Frame ${entry.frame}: **${entry.averagePins}**`
+          : `Frame ${entry.frame}: **${formatRoundedHundredths(entry.averagePins)}**`
       );
     return {
       handled: true,

@@ -34,6 +34,7 @@ import {
   getResolvedPlayersForGame,
   normalizePlayerKey,
 } from '@/lib/live-session';
+import { formatTenths } from '@/lib/number-format';
 import {
   createSession,
   deleteSession,
@@ -59,11 +60,6 @@ const comparisonCategories: Array<{ key: LivePlayerComparisonMetric; label: stri
   { key: 'bestFrame', label: 'Best Frame' },
   { key: 'worstFrame', label: 'Worst Frame' },
 ];
-
-function formatOneDecimal(value: number) {
-  const formatted = value.toFixed(1);
-  return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
-}
 
 function getComparisonMetricValue(
   row: LivePlayerComparisonRow,
@@ -136,7 +132,7 @@ function formatComparisonMetricValue(
     metric === 'strikeRate' ||
     metric === 'spareConversionRate'
   ) {
-    const formatted = formatOneDecimal(value);
+    const formatted = formatTenths(value);
     return metric === 'strikeRate' || metric === 'spareConversionRate'
       ? `${formatted}%`
       : formatted;

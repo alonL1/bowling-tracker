@@ -13,6 +13,7 @@ import InfoBanner from '@/components/info-banner';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
 import { createInvite, fetchLeaderboard, queryKeys } from '@/lib/backend';
+import { formatTenths } from '@/lib/number-format';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import type { InviteLinkResponse, LeaderboardMetric, LeaderboardRow } from '@/lib/types';
@@ -49,14 +50,17 @@ function getMetricValue(row: LeaderboardRow, metric: LeaderboardMetric) {
 }
 
 function formatMetricValue(metric: LeaderboardMetric, value: number) {
+  if (!Number.isFinite(value)) {
+    return '—';
+  }
   if (metric === 'bestAverage' || metric === 'bestSession') {
-    return value.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+    return formatTenths(value);
   }
   if (metric === 'bestSeries') {
     return Math.round(value).toLocaleString();
   }
   if (metric === 'StrikeRate' || metric === 'SpareRate') {
-    return `${value.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}%`;
+    return `${formatTenths(value)}%`;
   }
   return Math.round(value).toLocaleString();
 }
@@ -359,6 +363,8 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontFamily: fontFamilySans,
     flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
   },
   metricRank: {
     color: palette.text,
@@ -366,6 +372,7 @@ const styles = StyleSheet.create({
     lineHeight: 48,
     fontWeight: '600',
     fontFamily: fontFamilySans,
+    flexShrink: 0,
   },
   leaderboardList: {
     gap: 4,
@@ -410,6 +417,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontFamily: fontFamilySans,
     flex: 1,
+    minWidth: 0,
   },
   rowNameSelf: {
     fontWeight: '700',
@@ -421,6 +429,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: fontFamilySans,
     minWidth: 56,
+    flexShrink: 0,
     textAlign: 'right',
   },
   modalBackdrop: {

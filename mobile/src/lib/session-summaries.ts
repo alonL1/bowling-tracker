@@ -38,8 +38,7 @@ function formatAverage(scores: number[]) {
   }
 
   const avg = scores.reduce((sum, value) => sum + value, 0) / scores.length;
-  const formatted = avg.toFixed(2);
-  return formatted.endsWith('.00') ? formatted.slice(0, -3) : formatted;
+  return formatTenths(avg);
 }
 
 export function buildSessionSummaries(
@@ -111,3 +110,4 @@ export function buildSessionSummaries(
     };
   });
 }
+import { formatTenths } from '@/lib/number-format';
