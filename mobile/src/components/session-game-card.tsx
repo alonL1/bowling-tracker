@@ -106,8 +106,14 @@ export default function SessionGameCard({
             />
             <IconAction
               accessibilityLabel="Delete game"
-              onPress={handleDelete}
-              icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
+              onPress={deleteMutation.isPending ? undefined : handleDelete}
+              icon={
+                deleteMutation.isPending ? (
+                  <BowlingBallSpinner size={18} holeColor={palette.field} />
+                ) : (
+                  <MaterialIcons name="delete" size={22} color={palette.text} />
+                )
+              }
             />
             <IconAction
               accessibilityLabel={expanded ? 'Collapse game' : 'Expand game'}

@@ -525,10 +525,6 @@ export default function SessionDetailScreen() {
               />
               <View style={styles.headerText}>
                 <Text style={styles.title}>{group.title}</Text>
-                <Text style={styles.meta}>
-                  {group.gameCount} {group.gameCount === 1 ? 'game' : 'games'} | Avg{' '}
-                  {group.averageLabel}
-                </Text>
               </View>
             </View>
           </View>
@@ -1003,12 +999,6 @@ const styles = StyleSheet.create({
     fontSize: 34,
     lineHeight: 38,
     fontWeight: '500',
-    fontFamily: fontFamilySans,
-  },
-  meta: {
-    color: palette.muted,
-    fontSize: 15,
-    lineHeight: 20,
     fontFamily: fontFamilySans,
   },
   topBarActions: {

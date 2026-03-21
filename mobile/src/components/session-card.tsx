@@ -7,14 +7,18 @@ import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import type { SessionGroup } from '@/lib/bowling';
 
+export type SessionMetaSegment = {
+  label: string;
+  emphasized?: boolean;
+};
+
 type SessionCardProps = {
   session: SessionGroup;
+  metaSegments: SessionMetaSegment[];
   onPress?: () => void;
 };
 
-export default function SessionCard({ session, onPress }: SessionCardProps) {
-  const gameLabel = session.gameCount === 1 ? 'game' : 'games';
-
+export default function SessionCard({ session, metaSegments, onPress }: SessionCardProps) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}>
       <SurfaceCard style={styles.card}>
@@ -22,7 +26,12 @@ export default function SessionCard({ session, onPress }: SessionCardProps) {
         <View style={styles.textBlock}>
           <Text style={styles.title}>{session.title}</Text>
           <Text style={styles.meta}>
-            {session.gameCount} {gameLabel} | Avg {session.averageLabel}
+            {metaSegments.map((segment, index) => (
+              <React.Fragment key={`${segment.label}-${index}`}>
+                {index > 0 ? <Text style={styles.metaSeparator}> | </Text> : null}
+                <Text style={segment.emphasized ? styles.metaEmphasized : null}>{segment.label}</Text>
+              </React.Fragment>
+            ))}
           </Text>
         </View>
       </SurfaceCard>
@@ -62,5 +71,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     fontFamily: fontFamilySans,
+  },
+  metaEmphasized: {
+    color: palette.text,
+    fontWeight: '700',
+  },
+  metaSeparator: {
+    color: palette.muted,
+    fontWeight: '400',
   },
 });
