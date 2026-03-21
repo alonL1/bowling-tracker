@@ -4,7 +4,16 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { RefreshControl, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 
 import ActionButton from '@/components/action-button';
 import CenteredState from '@/components/centered-state';
@@ -23,6 +32,10 @@ type RankedRow = LeaderboardRow & {
   rank: number;
   metricValue: number;
 };
+
+const TAB_HORIZONTAL_PADDING = 14;
+
+type MetricTabWidths = Partial<Record<LeaderboardMetric, number>>;
 
 const METRIC_TABS: Array<{
   metric: LeaderboardMetric;
@@ -68,10 +81,12 @@ function formatMetricValue(metric: LeaderboardMetric, value: number) {
 export default function FriendsScreen() {
   const router = useRouter();
   const { isGuest, loading: authLoading } = useAuth();
+  const isAndroid = Platform.OS === 'android';
   const [selectedMetric, setSelectedMetric] = useState<LeaderboardMetric>('bestGame');
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [inviteStatus, setInviteStatus] = useState('');
   const [invitePayload, setInvitePayload] = useState<InviteLinkResponse | null>(null);
+  const [tabLabelWidths, setTabLabelWidths] = useState<MetricTabWidths>({});
 
   const leaderboardQuery = useQuery({
     queryKey: queryKeys.leaderboard,
@@ -144,6 +159,20 @@ export default function FriendsScreen() {
     return rankedRows.find((entry) => entry.userId === selfUserId)?.rank ?? null;
   }, [rankedRows, selfUserId]);
 
+  const handleTabLabelLayout = (metric: LeaderboardMetric, event: LayoutChangeEvent) => {
+    const nextWidth = Math.ceil(event.nativeEvent.layout.width);
+    if (!Number.isFinite(nextWidth) || nextWidth <= 0) {
+      return;
+    }
+
+    setTabLabelWidths((current) => {
+      if (current[metric] === nextWidth) {
+        return current;
+      }
+      return { ...current, [metric]: nextWidth };
+    });
+  };
+
   const handleInvite = async () => {
     if (isGuest) {
       router.push('/login?next=/(tabs)/friends');
@@ -203,6 +232,19 @@ export default function FriendsScreen() {
           </Text>
         </Pressable>
       }>
+      {isAndroid ? (
+        <View pointerEvents="none" style={styles.hiddenMeasureContainer} collapsable={false}>
+          {METRIC_TABS.map((tab) => (
+            <View key={`${tab.metric}-measure`} collapsable={false}>
+              <Text
+                onLayout={(event) => handleTabLabelLayout(tab.metric, event)}
+                style={[styles.tabText, styles.tabTextAndroid, styles.hiddenMeasureText]}>
+                {tab.label}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -213,10 +255,20 @@ export default function FriendsScreen() {
             onPress={() => setSelectedMetric(tab.metric)}
             style={({ pressed }) => [
               styles.tab,
+              isAndroid && tabLabelWidths[tab.metric]
+                ? { minWidth: tabLabelWidths[tab.metric]! + TAB_HORIZONTAL_PADDING * 2 }
+                : null,
               selectedMetric === tab.metric && styles.tabActive,
               pressed && styles.pressed,
             ]}>
-            <Text style={[styles.tabText, selectedMetric === tab.metric && styles.tabTextActive]}>
+            <Text
+              numberOfLines={isAndroid ? 1 : undefined}
+              ellipsizeMode={isAndroid ? 'clip' : undefined}
+              style={[
+                styles.tabText,
+                isAndroid ? styles.tabTextAndroid : styles.tabTextDefault,
+                selectedMetric === tab.metric && styles.tabTextActive,
+              ]}>
               {tab.label}
             </Text>
           </Pressable>
@@ -325,16 +377,27 @@ const styles = StyleSheet.create({
   },
   tabsRow: {
     gap: 10,
-    paddingRight: spacing.lg,
+    paddingRight: spacing.xs,
+  },
+  hiddenMeasureContainer: {
+    position: 'absolute',
+    left: -10_000,
+    top: -10_000,
+    opacity: 0,
+  },
+  hiddenMeasureText: {
+    alignSelf: 'flex-start',
   },
   tab: {
     backgroundColor: palette.surface,
     borderRadius: radii.pill,
-    paddingHorizontal: 14,
+    paddingHorizontal: TAB_HORIZONTAL_PADDING,
     paddingVertical: 9,
     minHeight: 38,
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'flex-start',
+    flexShrink: 0,
   },
   tabActive: {
     backgroundColor: palette.accent,
@@ -342,9 +405,15 @@ const styles = StyleSheet.create({
   tabText: {
     color: palette.navIcon,
     fontSize: 14,
-    lineHeight: 18,
     fontWeight: '600',
+    flexShrink: 0,
+  },
+  tabTextDefault: {
+    lineHeight: 18,
     fontFamily: fontFamilySans,
+  },
+  tabTextAndroid: {
+    includeFontPadding: false,
   },
   tabTextActive: {
     color: palette.text,
