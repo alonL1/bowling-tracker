@@ -140,6 +140,26 @@ export async function fetchLeaderboard() {
   return apiJson<{ selfUserId: string; participants: LeaderboardRow[] }>('/api/friends/leaderboard');
 }
 
+export async function deleteOwnAccount() {
+  return apiJson<{
+    ok: boolean;
+    deleted: boolean;
+    counts: Record<string, number>;
+  }>('/api/account/delete', {
+    method: 'DELETE',
+  });
+}
+
+export async function deleteOwnData() {
+  return apiJson<{
+    ok: boolean;
+    deleted: boolean;
+    counts: Record<string, number>;
+  }>('/api/account/data', {
+    method: 'DELETE',
+  });
+}
+
 export async function createInvite() {
   return apiJson<InviteLinkResponse>('/api/friends/invite', {
     method: 'POST',

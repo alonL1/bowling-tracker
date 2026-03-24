@@ -1,9 +1,14 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import ActionButton from '@/components/action-button';
+import InfoBanner from '@/components/info-banner';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { deleteOwnAccount } from '@/lib/backend';
+import { useAuth } from '@/providers/auth-provider';
+import { useRouter } from 'expo-router';
 
 const WEBSITE_URL = 'https://bowling-tracker-six.vercel.app';
 const DELETE_ACCOUNT_URL = `${WEBSITE_URL}/delete-account`;
@@ -33,6 +38,43 @@ function Section({ title, children }: SectionProps) {
 }
 
 export default function DeleteAccountScreen() {
+  const router = useRouter();
+  const { isGuest, signOutToGuestSession } = useAuth();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleDelete = async () => {
+    if (busy) {
+      return;
+    }
+
+    if (isGuest) {
+      router.push('/login?next=/delete-account');
+      return;
+    }
+
+    if (!confirming) {
+      setConfirming(true);
+      setError('');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+
+    try {
+      await deleteOwnAccount();
+      await signOutToGuestSession();
+      router.replace('/(tabs)/sessions');
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error ? nextError.message : 'Failed to delete the account.',
+      );
+      setBusy(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
       <ScrollView
@@ -42,50 +84,82 @@ export default function DeleteAccountScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Delete Account</Text>
           <Text style={styles.subtitle}>PinPoint</Text>
-          <Text style={styles.meta}>Last updated: March 17, 2026</Text>
+          <Text style={styles.meta}>Last updated: March 24, 2026</Text>
         </View>
 
-        <Paragraph>
-          If you want to request deletion of your PinPoint account and associated account data,
-          email us at <Text style={styles.highlight}>{CONTACT_EMAIL}</Text> from the email address
-          associated with your PinPoint account.
-        </Paragraph>
-
-        <Section title="How to request deletion">
-          <Bullet>Send an email to {CONTACT_EMAIL}</Bullet>
-          <Bullet>Use the subject line: PinPoint Account Deletion Request</Bullet>
-          <Bullet>Send the request from the same email address used for your PinPoint account whenever possible</Bullet>
-          <Bullet>If you cannot email us from that address, include enough information for us to verify ownership before deletion</Bullet>
+        <Section title="Delete your account in the app">
+          <Paragraph>
+            You can permanently delete your PinPoint account and account-linked data by using the
+            button below. This replaces the old email-only request flow.
+          </Paragraph>
+          {isGuest ? (
+            <ActionButton
+              label="Sign in to delete an account"
+              onPress={() => router.push('/login?next=/delete-account')}
+            />
+          ) : (
+            <View style={styles.actionGroup}>
+              <ActionButton
+                label={
+                  busy
+                    ? 'Deleting account...'
+                    : confirming
+                      ? 'Permanently delete account'
+                      : 'Delete account'
+                }
+                onPress={handleDelete}
+                disabled={busy}
+                variant="danger"
+              />
+              {confirming ? (
+                <ActionButton
+                  label="Cancel"
+                  onPress={() => {
+                    if (!busy) {
+                      setConfirming(false);
+                    }
+                  }}
+                  disabled={busy}
+                  variant="secondary"
+                />
+              ) : null}
+            </View>
+          )}
+          {confirming && !isGuest ? (
+            <InfoBanner
+              tone="error"
+              text="This permanently deletes your account, sessions, games, friends data, drafts, and uploads."
+            />
+          ) : null}
+          {error ? <InfoBanner tone="error" text={error} /> : null}
         </Section>
 
         <Section title="What data will be deleted">
-          <Paragraph>When we process a verified deletion request, we will delete the account data associated with your PinPoint account, which may include:</Paragraph>
-          <Bullet>Account profile and authentication-related records we control</Bullet>
+          <Paragraph>
+            When you confirm account deletion in the app, PinPoint deletes account-linked data we
+            control, which may include:
+          </Paragraph>
+          <Bullet>Account profile and authentication records</Bullet>
           <Bullet>Bowling sessions, games, frame data, shot data, and related stats</Bullet>
-          <Bullet>Live session drafts and live-session game data</Bullet>
+          <Bullet>Live sessions, recording drafts, and associated processing jobs</Bullet>
           <Bullet>Friend relationships and invite-link records associated with your account</Bullet>
-          <Bullet>Processing-job records and account-linked usage records, where deletion is operationally feasible</Bullet>
+          <Bullet>Temporary uploaded scoreboard files associated with your account workflows</Bullet>
         </Section>
 
         <Section title="What may be retained">
-          <Paragraph>Some limited information may be retained after account deletion where necessary for legitimate business or legal reasons, such as:</Paragraph>
+          <Paragraph>
+            Some limited information may still be retained where necessary for legitimate business or
+            legal reasons, such as:
+          </Paragraph>
           <Bullet>Security, fraud-prevention, and abuse-prevention records</Bullet>
           <Bullet>Legal compliance records</Bullet>
           <Bullet>Residual copies in backups for a limited retention period</Bullet>
         </Section>
 
-        <Section title="Temporary uploads">
+        <Section title="Delete data without deleting the account">
           <Paragraph>
-            Scoreboard images uploaded for processing are generally stored temporarily and removed
-            after processing or when no longer needed for that purpose. They are not intended to be
-            retained as long-term account content.
-          </Paragraph>
-        </Section>
-
-        <Section title="Delete some data without deleting the account">
-          <Paragraph>
-            If you want to request deletion of some data without deleting your full account, use the
-            partial-data deletion instructions at {DELETE_DATA_URL}.
+            If you want to remove all account-linked PinPoint data but keep your login, use the
+            in-app data-deletion controls at {DELETE_DATA_URL}.
           </Paragraph>
         </Section>
 
@@ -160,10 +234,8 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     fontFamily: fontFamilySans,
   },
-  highlight: {
-    color: palette.text,
-    fontWeight: '700',
-    fontFamily: fontFamilySans,
+  actionGroup: {
+    gap: spacing.sm,
   },
   contactLine: {
     color: palette.muted,

@@ -1,9 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import ActionButton from '@/components/action-button';
+import InfoBanner from '@/components/info-banner';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { deleteOwnData } from '@/lib/backend';
+import { clearOfflineChatGames } from '@/lib/offline-chat';
+import { queryClient } from '@/lib/query-client';
+import { useAuth } from '@/providers/auth-provider';
+import { useRouter } from 'expo-router';
 
 const WEBSITE_URL = 'https://bowling-tracker-six.vercel.app';
 const DELETE_DATA_URL = `${WEBSITE_URL}/delete-data`;
@@ -32,6 +39,47 @@ function Section({ title, children }: SectionProps) {
 }
 
 export default function DeleteDataScreen() {
+  const router = useRouter();
+  const { isGuest } = useAuth();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const handleDeleteData = async () => {
+    if (busy) {
+      return;
+    }
+
+    if (isGuest) {
+      router.push('/login?next=/delete-data');
+      return;
+    }
+
+    if (!confirming) {
+      setConfirming(true);
+      setError('');
+      setSuccess('');
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      await deleteOwnData();
+      await clearOfflineChatGames();
+      queryClient.clear();
+      setConfirming(false);
+      setSuccess('All account-linked PinPoint data has been deleted. Your account remains active.');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to delete account data.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
       <ScrollView
@@ -41,36 +89,80 @@ export default function DeleteDataScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>Delete Data</Text>
           <Text style={styles.subtitle}>PinPoint</Text>
-          <Text style={styles.meta}>Last updated: March 17, 2026</Text>
+          <Text style={styles.meta}>Last updated: March 24, 2026</Text>
         </View>
 
-        <Paragraph>
-          If you want to request deletion of some or all of your PinPoint data without deleting your
-          full account, email us at <Text style={styles.highlight}>{CONTACT_EMAIL}</Text>.
-        </Paragraph>
-
-        <Section title="How to request partial data deletion">
-          <Bullet>Send an email to {CONTACT_EMAIL}</Bullet>
-          <Bullet>Use the subject line: PinPoint Data Deletion Request</Bullet>
-          <Bullet>Send the request from the email address associated with your PinPoint account whenever possible</Bullet>
-          <Bullet>Clearly describe the data you want deleted</Bullet>
+        <Section title="Delete your account data in the app">
+          <Paragraph>
+            You can remove all account-linked PinPoint data without deleting your login by using the
+            button below. This replaces the old email-only request flow.
+          </Paragraph>
+          {isGuest ? (
+            <ActionButton
+              label="Sign in to delete account data"
+              onPress={() => router.push('/login?next=/delete-data')}
+            />
+          ) : (
+            <View style={styles.actionGroup}>
+              <ActionButton
+                label={
+                  busy
+                    ? 'Deleting data...'
+                    : confirming
+                      ? 'Permanently delete all account data'
+                      : 'Delete all account data'
+                }
+                onPress={handleDeleteData}
+                disabled={busy}
+                variant="danger"
+              />
+              {confirming ? (
+                <ActionButton
+                  label="Cancel"
+                  onPress={() => {
+                    if (!busy) {
+                      setConfirming(false);
+                    }
+                  }}
+                  disabled={busy}
+                  variant="secondary"
+                />
+              ) : null}
+            </View>
+          )}
+          {confirming && !isGuest ? (
+            <InfoBanner
+              tone="error"
+              text="This deletes your sessions, games, friends data, drafts, and uploads but keeps your account login."
+            />
+          ) : null}
+          {success ? <InfoBanner text={success} /> : null}
+          {error ? <InfoBanner tone="error" text={error} /> : null}
         </Section>
 
-        <Section title="Examples of data you can request to delete">
-          <Bullet>Specific bowling sessions or games</Bullet>
-          <Bullet>Live session drafts</Bullet>
-          <Bullet>Friend connections or invite-link records</Bullet>
-          <Bullet>Chat-related data associated with your account, where deletion is operationally feasible</Bullet>
+        <Section title="What data will be deleted">
+          <Paragraph>
+            When you confirm data deletion in the app, PinPoint deletes account-linked app data we
+            control, which may include:
+          </Paragraph>
+          <Bullet>Bowling sessions, games, frame data, shot data, and related stats</Bullet>
+          <Bullet>Live sessions, recording drafts, and associated processing jobs</Bullet>
+          <Bullet>Friend relationships and invite-link records associated with your account</Bullet>
+          <Bullet>Temporary uploaded scoreboard files associated with your account workflows</Bullet>
         </Section>
 
-        <Section title="What to include in your request">
-          <Bullet>Your account email address</Bullet>
-          <Bullet>A clear description of the data you want removed</Bullet>
-          <Bullet>Any useful identifiers, such as session names, dates, or other details that help us locate the data</Bullet>
+        <Section title="What stays">
+          <Paragraph>
+            This action keeps your PinPoint login account active. You can continue using the app and
+            log new data after the deletion completes.
+          </Paragraph>
         </Section>
 
         <Section title="What may be retained">
-          <Paragraph>Some limited information may still be retained after a verified deletion request where necessary for legitimate business or legal reasons, such as:</Paragraph>
+          <Paragraph>
+            Some limited information may still be retained after deletion where necessary for
+            legitimate business or legal reasons, such as:
+          </Paragraph>
           <Bullet>Security, fraud-prevention, and abuse-prevention records</Bullet>
           <Bullet>Legal compliance records</Bullet>
           <Bullet>Residual copies in backups for a limited retention period</Bullet>
@@ -78,9 +170,9 @@ export default function DeleteDataScreen() {
 
         <Section title="In-app controls">
           <Paragraph>
-            PinPoint already lets users manually remove some content inside the app, such as sessions
-            and games. This page exists for additional deletion requests that are not handled
-            entirely by those in-app controls.
+            PinPoint already lets users manually remove some content inside the app, such as
+            individual sessions and games. This page covers full account-data deletion without
+            deleting the login itself.
           </Paragraph>
         </Section>
 
@@ -154,10 +246,8 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     fontFamily: fontFamilySans,
   },
-  highlight: {
-    color: palette.text,
-    fontWeight: '700',
-    fontFamily: fontFamilySans,
+  actionGroup: {
+    gap: spacing.sm,
   },
   contactLine: {
     color: palette.muted,

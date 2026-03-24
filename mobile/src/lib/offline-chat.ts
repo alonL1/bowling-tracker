@@ -129,6 +129,14 @@ export async function cacheOfflineChatGames(games: GameListItem[]) {
   }
 }
 
+export async function clearOfflineChatGames() {
+  try {
+    await AsyncStorage.removeItem(OFFLINE_CHAT_GAMES_STORAGE_KEY);
+  } catch {
+    // Ignore cache clear failures; deletion should still succeed server-side.
+  }
+}
+
 export async function loadOfflineChatGames() {
   try {
     const raw = await AsyncStorage.getItem(OFFLINE_CHAT_GAMES_STORAGE_KEY);
