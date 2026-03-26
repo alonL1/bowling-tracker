@@ -1,7 +1,8 @@
 import type { Session, User } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import { queryClient } from '@/lib/query-client';
+import { queryClient, QUERY_CACHE_OWNER_STORAGE_KEY } from '@/lib/query-client';
 import { ensureMobileSession, isGuestUser, signOutToGuest, supabase } from '@/lib/supabase';
 
 type AuthContextValue = {
@@ -25,13 +26,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
+    const syncQueryCacheOwner = async (nextUserId: string | null) => {
+      try {
+        const currentOwner = await AsyncStorage.getItem(QUERY_CACHE_OWNER_STORAGE_KEY);
+        if (currentOwner !== nextUserId) {
+          queryClient.clear();
+        }
+
+        if (nextUserId) {
+          await AsyncStorage.setItem(QUERY_CACHE_OWNER_STORAGE_KEY, nextUserId);
+        } else {
+          await AsyncStorage.removeItem(QUERY_CACHE_OWNER_STORAGE_KEY);
+        }
+      } catch (error) {
+        console.error('Failed to sync query cache owner.', error);
+      }
+    };
+
     ensureMobileSession()
-      .then((snapshot) => {
+      .then(async (snapshot) => {
         if (!mounted) {
           return;
         }
+        const nextUserId = snapshot.session?.user?.id ?? null;
+        await syncQueryCacheOwner(nextUserId);
         setSession(snapshot.session ?? null);
-        lastUserIdRef.current = snapshot.session?.user?.id ?? null;
+        lastUserIdRef.current = nextUserId;
       })
       .catch((error) => {
         console.error('Failed to initialize mobile auth session.', error);
@@ -47,6 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (lastUserIdRef.current !== undefined && lastUserIdRef.current !== nextUserId) {
         queryClient.clear();
       }
+      void syncQueryCacheOwner(nextUserId);
       lastUserIdRef.current = nextUserId;
       setSession(nextSession);
       setLoading(false);

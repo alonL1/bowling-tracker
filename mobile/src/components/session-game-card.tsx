@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import GameEditSheet from '@/components/game-edit-sheet';
@@ -10,7 +10,7 @@ import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
 import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
 import StackBadge from '@/components/stack-badge';
-import { deleteGame, fetchGameById, queryKeys } from '@/lib/backend';
+import { deleteGame, queryKeys } from '@/lib/backend';
 import { confirmAction } from '@/lib/confirm';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
@@ -48,12 +48,6 @@ export default function SessionGameCard({
   const [editOpen, setEditOpen] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
-  const gameQuery = useQuery({
-    queryKey: queryKeys.game(game.id),
-    queryFn: () => fetchGameById(game.id),
-    enabled: expanded,
-  });
-
   const deleteMutation = useMutation({
     mutationFn: async () => deleteGame(game.id),
     onSuccess: async () => {
@@ -70,6 +64,15 @@ export default function SessionGameCard({
 
   const scoreLabel = typeof game.total_score === 'number' ? String(game.total_score) : '—';
   const badgeLines = useMemo(() => getCollapsedBadgeLines(title), [title]);
+  const scoreboardPlayers = useMemo(
+    () =>
+      game.scoreboard_extraction
+        ? getResolvedPlayersForGame({
+            extraction: game.scoreboard_extraction,
+          })
+        : [],
+    [game.scoreboard_extraction],
+  );
 
   const handleDelete = () => {
     confirmAction({
@@ -132,34 +135,16 @@ export default function SessionGameCard({
         {expanded ? (
           <View style={styles.expandedBody}>
             <Text style={styles.metaLine}>{meta}</Text>
-            {gameQuery.isPending ? (
-              <View style={styles.loadingRow}>
-                <BowlingBallSpinner size={20} />
-                <Text style={styles.loadingText}>Loading scoreboard...</Text>
-              </View>
-            ) : gameQuery.error ? (
-              <InfoBanner
-                tone="error"
-                text={
-                  gameQuery.error instanceof Error ? gameQuery.error.message : 'Failed to load game.'
-                }
-              />
-            ) : gameQuery.data?.game?.scoreboard_extraction ? (
+            {game.scoreboard_extraction ? (
               <MultiPlayerFrameGrid
-                players={getResolvedPlayersForGame({
-                  extraction: gameQuery.data.game.scoreboard_extraction,
-                })}
-                selectedPlayerKeys={
-                  gameQuery.data.game.selected_self_player_key
-                    ? [gameQuery.data.game.selected_self_player_key]
-                    : []
-                }
+                players={scoreboardPlayers}
+                selectedPlayerKeys={game.selected_self_player_key ? [game.selected_self_player_key] : []}
                 onHorizontalGestureStart={onScoreboardGestureStart}
                 onHorizontalGestureEnd={onScoreboardGestureEnd}
               />
-            ) : gameQuery.data?.game ? (
+            ) : (
               <Text style={styles.loadingText}>No scoreboard data available for this game.</Text>
-            ) : null}
+            )}
 
             {deleteError ? <InfoBanner tone="error" text={deleteError} /> : null}
           </View>
@@ -222,11 +207,6 @@ const styles = StyleSheet.create({
   expandedBody: {
     gap: 8,
     paddingLeft: 6,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
   },
   loadingText: {
     color: palette.muted,

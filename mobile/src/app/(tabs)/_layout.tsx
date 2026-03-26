@@ -1,14 +1,56 @@
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
+import { Asset } from 'expo-asset';
 import { Redirect, Tabs } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import CenteredState from '@/components/centered-state';
 import MobileTabBar from '@/components/mobile-tab-bar';
 import { palette } from '@/constants/palette';
+import { fetchGames, fetchLeaderboard, fetchRecordEntryStatus, queryKeys } from '@/lib/backend';
 import { useAuth } from '@/providers/auth-provider';
 
 export default function TabsLayout() {
-  const { user, loading } = useAuth();
+  const { user, loading, isGuest } = useAuth();
+  const queryClient = useQueryClient();
+  const warmedUserIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      warmedUserIdRef.current = null;
+      return;
+    }
+
+    if (warmedUserIdRef.current === user.id) {
+      return;
+    }
+
+    warmedUserIdRef.current = user.id;
+
+    void Promise.allSettled([
+      queryClient.prefetchQuery({
+        queryKey: queryKeys.games,
+        queryFn: fetchGames,
+      }),
+      queryClient.prefetchQuery({
+        queryKey: queryKeys.recordEntryStatus,
+        queryFn: fetchRecordEntryStatus,
+      }),
+      Asset.loadAsync([
+        require('../../../assets/pins/happy_pin.png'),
+        require('../../../assets/pins/thinking_pin.png'),
+        require('../../../assets/pins/idea_pin.png'),
+      ]),
+      ...(isGuest
+        ? []
+        : [
+            queryClient.prefetchQuery({
+              queryKey: queryKeys.leaderboard,
+              queryFn: fetchLeaderboard,
+            }),
+          ]),
+    ]);
+  }, [isGuest, queryClient, user]);
 
   if (loading) {
     return <CenteredState title="Loading account..." loading />;
@@ -23,6 +65,8 @@ export default function TabsLayout() {
       tabBar={(props) => <MobileTabBar {...props} />}
       screenOptions={{
         headerShown: false,
+        lazy: true,
+        freezeOnBlur: true,
         sceneStyle: {
           backgroundColor: palette.background,
         },
