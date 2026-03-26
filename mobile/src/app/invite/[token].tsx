@@ -27,9 +27,10 @@ export default function InviteScreen() {
   const [acceptMessage, setAcceptMessage] = useState('');
   const [acceptError, setAcceptError] = useState('');
   const [showOpenInAppHint, setShowOpenInAppHint] = useState(false);
+  const [browserModeOverride, setBrowserModeOverride] = useState(false);
   const isWeb = Platform.OS === 'web';
   const appInviteUrl = token ? getAppInviteUrl(token) : '';
-  const browserMode = isWeb && browser === '1';
+  const browserMode = isWeb && (browser === '1' || browserModeOverride);
 
   useEffect(() => {
     if (authLoading || isWeb) {
@@ -57,14 +58,13 @@ export default function InviteScreen() {
   }, [appInviteUrl, browserMode, isWeb, token]);
 
   const enableBrowserMode = () => {
-    if (!isWeb || typeof window === 'undefined' || !token) {
+    if (!isWeb || !token) {
       return;
     }
 
-    const nextUrl = new URL(window.location.href);
-    nextUrl.searchParams.set('browser', '1');
-    window.history.replaceState({}, '', nextUrl.toString());
+    setBrowserModeOverride(true);
     setShowOpenInAppHint(true);
+    router.replace(`/invite/${encodeURIComponent(token)}?browser=1`);
   };
 
   const inviteQuery = useQuery({
