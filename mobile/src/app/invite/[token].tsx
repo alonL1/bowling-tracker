@@ -72,6 +72,8 @@ export default function InviteScreen() {
     queryFn: () => lookupInvite(token),
     enabled: Boolean(token) && !authLoading && (isWeb || !isGuest),
   });
+  const canGoToFriends =
+    (!isWeb || browserMode) && (Boolean(acceptMessage) || Boolean(inviteQuery.data?.alreadyFriends));
 
   const acceptMutation = useMutation({
     mutationFn: () => acceptInvite(token),
@@ -174,7 +176,7 @@ export default function InviteScreen() {
         {acceptMessage ? <Text style={styles.bodyText}>{acceptMessage}</Text> : null}
         {acceptError ? <Text style={styles.errorText}>{acceptError}</Text> : null}
 
-        {!isWeb ? (
+        {canGoToFriends ? (
           <Pressable onPress={() => router.replace('/(tabs)/friends')} style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}>
             <Text style={styles.secondaryButtonText}>Go to Friends</Text>
           </Pressable>
