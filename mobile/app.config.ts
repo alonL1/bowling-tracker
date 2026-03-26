@@ -13,6 +13,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     'expo-router',
     'expo-web-browser',
     [
+      'expo-image-picker',
+      {
+        cameraPermission:
+          'PinPoint uses the camera to take photos of bowling scoreboards so the app can read the scores and create games or sessions for you.',
+        photosPermission:
+          'PinPoint uses your photo library so you can choose bowling scoreboard photos, for example a scoreboard image from your camera roll, and import it into a session or live capture.',
+      },
+    ],
+    [
       'expo-splash-screen',
       {
         backgroundColor: '#000000',

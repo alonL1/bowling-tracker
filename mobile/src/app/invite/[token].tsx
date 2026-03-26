@@ -22,13 +22,14 @@ function getAppInviteUrl(token: string) {
 
 export default function InviteScreen() {
   const router = useRouter();
-  const { token } = useLocalSearchParams<{ token: string }>();
+  const { token, browser } = useLocalSearchParams<{ token: string; browser?: string }>();
   const { loading: authLoading, isGuest } = useAuth();
   const [acceptMessage, setAcceptMessage] = useState('');
   const [acceptError, setAcceptError] = useState('');
   const [showOpenInAppHint, setShowOpenInAppHint] = useState(false);
   const isWeb = Platform.OS === 'web';
   const appInviteUrl = token ? getAppInviteUrl(token) : '';
+  const browserMode = isWeb && browser === '1';
 
   useEffect(() => {
     if (authLoading || isWeb) {
@@ -40,7 +41,7 @@ export default function InviteScreen() {
   }, [authLoading, isGuest, isWeb, router, token]);
 
   useEffect(() => {
-    if (!isWeb || !token || !appInviteUrl) {
+    if (!isWeb || !token || !appInviteUrl || browserMode) {
       return;
     }
 
@@ -53,7 +54,18 @@ export default function InviteScreen() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [appInviteUrl, isWeb, token]);
+  }, [appInviteUrl, browserMode, isWeb, token]);
+
+  const enableBrowserMode = () => {
+    if (!isWeb || typeof window === 'undefined' || !token) {
+      return;
+    }
+
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set('browser', '1');
+    window.history.replaceState({}, '', nextUrl.toString());
+    setShowOpenInAppHint(true);
+  };
 
   const inviteQuery = useQuery({
     queryKey: queryKeys.inviteLookup(token),
@@ -84,23 +96,47 @@ export default function InviteScreen() {
         {isWeb ? (
           <View style={styles.openInAppPanel}>
             <Text style={styles.bodyText}>
-              {showOpenInAppHint ? 'If the app did not open automatically, use the button below.' : 'Opening invite in PinPoint...'}
+              {browserMode
+                ? 'Continue below in your browser or open PinPoint instead.'
+                : showOpenInAppHint
+                  ? 'If the app did not open automatically, use one of the buttons below.'
+                  : 'Opening invite in PinPoint...'}
             </Text>
-            <Pressable
-              onPress={() => {
-                if (!appInviteUrl || typeof window === 'undefined') {
-                  return;
-                }
-                window.location.assign(appInviteUrl);
-              }}
-              style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
-              <Text style={styles.primaryButtonText}>Open in PinPoint</Text>
-            </Pressable>
+            <View style={styles.browserActionGroup}>
+              <Pressable
+                onPress={() => {
+                  if (!appInviteUrl || typeof window === 'undefined') {
+                    return;
+                  }
+                  window.location.assign(appInviteUrl);
+                }}
+                style={({ pressed }) => [styles.primaryButton, styles.browserActionButton, pressed && styles.pressed]}>
+                <Text style={styles.primaryButtonText}>Open in PinPoint</Text>
+              </Pressable>
+              <Pressable
+                onPress={enableBrowserMode}
+                style={({ pressed }) => [styles.secondaryButton, styles.browserActionButton, pressed && styles.pressed]}>
+                <Text style={styles.secondaryButtonText}>Continue in Browser</Text>
+              </Pressable>
+            </View>
           </View>
         ) : null}
 
         {isWeb && inviteQuery.data?.authRequired ? (
-          <Text style={styles.bodyText}>Sign in in the PinPoint app to accept this invite.</Text>
+          browserMode ? (
+            <View style={styles.browserAuthPanel}>
+              <Text style={styles.bodyText}>Sign in in the browser to accept this invite.</Text>
+              <Pressable
+                onPress={() =>
+                  router.push(`/login?next=${encodeURIComponent(`/invite/${token}?browser=1`)}`)
+                }
+                style={({ pressed }) => [styles.primaryButton, pressed && styles.pressed]}>
+                <Text style={styles.primaryButtonText}>Sign In</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={styles.bodyText}>Sign in in the PinPoint app to accept this invite.</Text>
+          )
         ) : null}
 
         {inviteQuery.error ? (
@@ -124,7 +160,7 @@ export default function InviteScreen() {
           <Text style={styles.bodyText}>You are already friends.</Text>
         ) : null}
 
-        {!isWeb && inviteQuery.data?.canAccept ? (
+        {((!isWeb || browserMode) && inviteQuery.data?.canAccept) ? (
           <Pressable
             onPress={() => acceptMutation.mutate()}
             disabled={acceptMutation.isPending}
@@ -157,6 +193,15 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   openInAppPanel: {
+    gap: spacing.sm,
+  },
+  browserActionGroup: {
+    gap: spacing.sm,
+  },
+  browserActionButton: {
+    width: '100%',
+  },
+  browserAuthPanel: {
     gap: spacing.sm,
   },
   bodyText: {
