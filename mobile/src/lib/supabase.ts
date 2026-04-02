@@ -1,11 +1,16 @@
 import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { makeRedirectUri } from 'expo-auth-session';
+import * as QueryParams from 'expo-auth-session/build/QueryParams';
+import * as WebBrowser from 'expo-web-browser';
 import { createClient, type Session, type User } from '@supabase/supabase-js';
 import { AppState, Platform } from 'react-native';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+WebBrowser.maybeCompleteAuthSession();
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
@@ -51,6 +56,77 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: false,
   },
 });
+
+function getOAuthRedirectUri() {
+  return makeRedirectUri({
+    path: 'login',
+    preferLocalhost: true,
+  });
+}
+
+export async function createSessionFromUrl(url: string) {
+  const { params, errorCode } = QueryParams.getQueryParams(url);
+
+  if (errorCode) {
+    throw new Error(errorCode);
+  }
+
+  const accessToken = typeof params.access_token === 'string' ? params.access_token : null;
+  const refreshToken = typeof params.refresh_token === 'string' ? params.refresh_token : null;
+  const code = typeof params.code === 'string' ? params.code : null;
+
+  if (accessToken && refreshToken) {
+    const { data, error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data.session;
+  }
+
+  if (code) {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+    if (error) {
+      throw error;
+    }
+
+    return data.session;
+  }
+
+  return null;
+}
+
+export async function signInWithGoogleOAuth() {
+  const redirectTo = getOAuthRedirectUri();
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.url) {
+    throw new Error('Google sign-in did not return an auth URL.');
+  }
+
+  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  if (result.type !== 'success') {
+    return false;
+  }
+
+  await createSessionFromUrl(result.url);
+  return true;
+}
 
 function getProviderNames(user: User | null) {
   if (!user) {

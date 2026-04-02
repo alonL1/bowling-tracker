@@ -3,7 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "npm run sync:expo-web && next dev",
+    "dev": "node ./scripts/dev.mjs",
+    "dev:next": "next dev",
     "dev:expo-web": "npm --prefix mobile run web",
     "sync:expo-web": "node ./scripts/sync-expo-web.mjs",
     "build": "node -e \"require('fs').rmSync('.next', { recursive: true, force: true })\" && npm run sync:expo-web && next build",

@@ -34,6 +34,7 @@ type RankedRow = LeaderboardRow & {
 };
 
 const TAB_HORIZONTAL_PADDING = 14;
+const BOTTOM_DOTS_DOCK_HEIGHT = 34;
 
 type MetricTabWidths = Partial<Record<LeaderboardMetric, number>>;
 type MetricTabLayout = { x: number; width: number };
@@ -85,6 +86,7 @@ export default function FriendsScreen() {
   const { isGuest, loading: authLoading } = useAuth();
   const isAndroid = Platform.OS === 'android';
   const [selectedMetric, setSelectedMetric] = useState<LeaderboardMetric>('bestGame');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [inviteStatus, setInviteStatus] = useState('');
   const [invitePayload, setInvitePayload] = useState<InviteLinkResponse | null>(null);
@@ -269,6 +271,15 @@ export default function FriendsScreen() {
     }
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await leaderboardQuery.refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   if (leaderboardQuery.isPending && !isGuest) {
     return <CenteredState title="Loading leaderboard..." loading />;
   }
@@ -277,11 +288,28 @@ export default function FriendsScreen() {
     <ScreenShell
       title="Friends"
       bodyStyle={styles.body}
+      contentStyle={{
+        paddingBottom: BOTTOM_DOTS_DOCK_HEIGHT + spacing.xl,
+      }}
+      overlay={
+        <View pointerEvents="none" style={styles.bottomOverlay}>
+          <View style={styles.bottomDotsDock}>
+            <View style={styles.tabDots}>
+              {METRIC_TABS.map((tab) => (
+                <View
+                  key={`${tab.metric}-dot`}
+                  style={[styles.tabDot, selectedMetric === tab.metric && styles.tabDotActive]}
+                />
+              ))}
+            </View>
+          </View>
+        </View>
+      }
       refreshControl={
         !isGuest ? (
           <RefreshControl
-            refreshing={leaderboardQuery.isRefetching}
-            onRefresh={() => void leaderboardQuery.refetch()}
+            refreshing={isRefreshing}
+            onRefresh={() => void handleRefresh()}
             tintColor={palette.spinner}
           />
         ) : undefined
@@ -343,15 +371,6 @@ export default function FriendsScreen() {
           </Pressable>
         ))}
       </ScrollView>
-
-      <View style={styles.tabDots}>
-        {METRIC_TABS.map((tab) => (
-          <View
-            key={`${tab.metric}-dot`}
-            style={[styles.tabDot, selectedMetric === tab.metric && styles.tabDotActive]}
-          />
-        ))}
-      </View>
 
       {isGuest ? <InfoBanner text="Sign in with an account to invite friends and view leaderboards." /> : null}
 
@@ -511,8 +530,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 0,
-    marginBottom: -10,
+    alignItems: 'center',
   },
   tabDot: {
     width: 8,
@@ -586,6 +604,20 @@ const styles = StyleSheet.create({
   },
   pagerPage: {
     gap: spacing.md,
+  },
+  bottomOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: BOTTOM_DOTS_DOCK_HEIGHT,
+  },
+  bottomDotsDock: {
+    height: BOTTOM_DOTS_DOCK_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: palette.background,
+    paddingHorizontal: spacing.lg,
   },
   emptyCard: {
     paddingHorizontal: spacing.lg,

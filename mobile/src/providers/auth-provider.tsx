@@ -3,7 +3,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { queryClient, QUERY_CACHE_OWNER_STORAGE_KEY } from '@/lib/query-client';
-import { ensureMobileSession, isGuestUser, signOutToGuest, supabase } from '@/lib/supabase';
+import {
+  ensureMobileSession,
+  isGuestUser,
+  signInWithGoogleOAuth,
+  signOutToGuest,
+  supabase,
+} from '@/lib/supabase';
 
 type AuthContextValue = {
   user: User | null;
@@ -12,6 +18,7 @@ type AuthContextValue = {
   isGuest: boolean;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   signUpWithPassword: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<boolean>;
   continueAsGuest: () => Promise<void>;
   signOutToGuestSession: () => Promise<void>;
 };
@@ -102,6 +109,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error) {
           throw error;
         }
+      },
+      async signInWithGoogle() {
+        return signInWithGoogleOAuth();
       },
       async continueAsGuest() {
         const { error } = await supabase.auth.signInAnonymously();

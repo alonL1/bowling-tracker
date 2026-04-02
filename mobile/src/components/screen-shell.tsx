@@ -21,6 +21,7 @@ type ScreenShellProps = {
   headerRight?: ReactNode;
   bodyStyle?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
+  overlay?: ReactNode;
 };
 
 export default function ScreenShell({
@@ -31,6 +32,7 @@ export default function ScreenShell({
   headerRight,
   bodyStyle,
   contentStyle,
+  overlay,
 }: ScreenShellProps) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -50,6 +52,11 @@ export default function ScreenShell({
         </View>
         <View style={[styles.body, bodyStyle]}>{children}</View>
       </KeyboardAwareScrollView>
+      {overlay ? (
+        <View pointerEvents="box-none" style={styles.overlay}>
+          {overlay}
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -102,5 +109,8 @@ const styles = StyleSheet.create({
   },
   body: {
     gap: spacing.lg,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
   },
 });

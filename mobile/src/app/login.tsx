@@ -1,4 +1,5 @@
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import React, { useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -44,7 +45,15 @@ function getSafeNextPath(raw: string | string[] | undefined) {
 export default function LoginScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ next?: string }>();
-  const { user, loading, isGuest, signInWithPassword, signUpWithPassword, continueAsGuest } = useAuth();
+  const {
+    user,
+    loading,
+    isGuest,
+    signInWithPassword,
+    signUpWithPassword,
+    signInWithGoogle,
+    continueAsGuest,
+  } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signIn');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -62,9 +71,40 @@ export default function LoginScreen() {
     return <CenteredState title="Loading account..." loading />;
   }
 
-  if (user && !isGuest && !transferPrompt) {
+  if (user && !isGuest && !transferPrompt && !busy && !transferBusy) {
     return <Redirect href={nextPath} />;
   }
+
+  const finishAuthentication = async (guestAccessToken: string, guestUserId: string) => {
+    const afterSession = await getSessionSnapshot();
+    const nextUser = afterSession.user;
+
+    if (nextUser && !isGuestUser(nextUser)) {
+      if (guestUserId !== nextUser.id) {
+        let hasGuestData = true;
+        try {
+          const check = await claimGuest(guestAccessToken, 'check');
+          hasGuestData = (check.check?.total ?? 0) > 0;
+        } catch {
+          hasGuestData = true;
+        }
+
+        if (hasGuestData) {
+          setTransferPrompt({
+            guestAccessToken,
+            guestUserId,
+          });
+          setInfo("You're signed in. Choose what to do with your guest logs.");
+          return true;
+        }
+      }
+
+      router.replace(nextPath);
+      return true;
+    }
+
+    return false;
+  };
 
   const handleSubmit = async () => {
     if (busy || transferBusy) {
@@ -92,29 +132,16 @@ export default function LoginScreen() {
         await signUpWithPassword(email.trim(), password);
       }
 
+      if (
+        guestBefore &&
+        (await finishAuthentication(guestBefore.guestAccessToken, guestBefore.guestUserId))
+      ) {
+        return;
+      }
+
       const afterSession = await getSessionSnapshot();
       const nextUser = afterSession.user;
-
       if (nextUser && !isGuestUser(nextUser)) {
-        if (guestBefore && guestBefore.guestUserId !== nextUser.id) {
-          let hasGuestData = true;
-          try {
-            const check = await claimGuest(guestBefore.guestAccessToken, 'check');
-            hasGuestData = (check.check?.total ?? 0) > 0;
-          } catch {
-            hasGuestData = true;
-          }
-
-          if (hasGuestData) {
-            setTransferPrompt({
-              guestAccessToken: guestBefore.guestAccessToken,
-              guestUserId: guestBefore.guestUserId,
-            });
-            setInfo("You're signed in. Choose what to do with your guest logs.");
-            return;
-          }
-        }
-
         router.replace(nextPath);
         return;
       }
@@ -126,6 +153,52 @@ export default function LoginScreen() {
       }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Authentication failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleGoogle = async () => {
+    if (busy || transferBusy) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setInfo('');
+    setTransferError('');
+
+    try {
+      const beforeSession = await getSessionSnapshot();
+      const guestBefore =
+        beforeSession.user && beforeSession.accessToken && isGuestUser(beforeSession.user)
+          ? {
+              guestAccessToken: beforeSession.accessToken,
+              guestUserId: beforeSession.user.id,
+            }
+          : null;
+
+      const completed = await signInWithGoogle();
+      if (!completed) {
+        return;
+      }
+
+      if (
+        guestBefore &&
+        (await finishAuthentication(guestBefore.guestAccessToken, guestBefore.guestUserId))
+      ) {
+        return;
+      }
+
+      const afterSession = await getSessionSnapshot();
+      if (afterSession.user && !isGuestUser(afterSession.user)) {
+        router.replace(nextPath);
+        return;
+      }
+
+      setError('Google sign-in did not finish yet. Try again.');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Google sign-in failed.');
     } finally {
       setBusy(false);
     }
@@ -261,6 +334,14 @@ export default function LoginScreen() {
               label={busy ? 'Working...' : mode === 'signIn' ? 'Sign In' : 'Create Account'}
               onPress={handleSubmit}
               disabled={busy || transferBusy || !email.trim() || !password}
+            />
+
+            <ActionButton
+              label="Continue with Google"
+              onPress={handleGoogle}
+              disabled={busy || transferBusy}
+              variant="secondary"
+              leftIcon={<Ionicons name="logo-google" size={18} color={palette.text} />}
             />
 
             <ActionButton

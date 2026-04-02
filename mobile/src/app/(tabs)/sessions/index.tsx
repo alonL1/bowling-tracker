@@ -142,6 +142,7 @@ export default function SessionsScreen() {
   const { isGuest } = useAuth();
   const [sortOption, setSortOption] = useState<SessionSortOption>('createdAt');
   const [sortOpen, setSortOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [sortButtonAnchor, setSortButtonAnchor] = useState<{
     x: number;
     y: number;
@@ -257,6 +258,15 @@ export default function SessionsScreen() {
     });
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await gamesQuery.refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   if (gamesQuery.isPending) {
     return <CenteredState title="Loading sessions..." loading />;
   }
@@ -277,8 +287,8 @@ export default function SessionsScreen() {
         }
         refreshControl={
           <RefreshControl
-            refreshing={gamesQuery.isRefetching}
-            onRefresh={() => void gamesQuery.refetch()}
+            refreshing={isRefreshing}
+            onRefresh={() => void handleRefresh()}
             tintColor={palette.spinner}
           />
         }>
