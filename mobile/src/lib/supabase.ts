@@ -1,16 +1,19 @@
 import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { makeRedirectUri } from 'expo-auth-session';
-import * as QueryParams from 'expo-auth-session/build/QueryParams';
-import * as WebBrowser from 'expo-web-browser';
 import { createClient, type Session, type User } from '@supabase/supabase-js';
 import { AppState, Platform } from 'react-native';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-WebBrowser.maybeCompleteAuthSession();
+if (Platform.OS === 'web') {
+  import('expo-web-browser')
+    .then((WebBrowser) => WebBrowser.maybeCompleteAuthSession())
+    .catch(() => {
+      // Ignore web auth session bootstrapping failures outside browser environments.
+    });
+}
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
@@ -57,7 +60,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
-function getOAuthRedirectUri() {
+async function getOAuthRedirectUri() {
+  const { makeRedirectUri } = await import('expo-auth-session');
+
   return makeRedirectUri({
     path: 'login',
     preferLocalhost: true,
@@ -65,6 +70,7 @@ function getOAuthRedirectUri() {
 }
 
 export async function createSessionFromUrl(url: string) {
+  const QueryParams = await import('expo-auth-session/build/QueryParams');
   const { params, errorCode } = QueryParams.getQueryParams(url);
 
   if (errorCode) {
@@ -102,7 +108,8 @@ export async function createSessionFromUrl(url: string) {
 }
 
 export async function signInWithGoogleOAuth() {
-  const redirectTo = getOAuthRedirectUri();
+  const WebBrowser = await import('expo-web-browser');
+  const redirectTo = await getOAuthRedirectUri();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {

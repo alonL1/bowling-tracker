@@ -73,9 +73,17 @@ export const queryPersistOptions = {
   persister: queryPersister,
   maxAge: QUERY_PERSIST_MAX_AGE,
   dehydrateOptions: {
-    shouldDehydrateQuery: (query: { queryKey: readonly unknown[] }) => {
+    shouldDehydrateQuery: (query: {
+      queryKey: readonly unknown[];
+      state: { status: string; fetchStatus: string };
+    }) => {
       const [rootKey] = query.queryKey;
-      return typeof rootKey === 'string' && PERSISTED_QUERY_ROOT_KEYS.has(rootKey);
+      return (
+        typeof rootKey === 'string' &&
+        PERSISTED_QUERY_ROOT_KEYS.has(rootKey) &&
+        query.state.status === 'success' &&
+        query.state.fetchStatus === 'idle'
+      );
     },
   },
 };

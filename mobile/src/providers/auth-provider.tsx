@@ -33,11 +33,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
+    const resetQueryCache = async () => {
+      try {
+        await queryClient.cancelQueries();
+      } catch (error) {
+        console.error('Failed to cancel active queries during auth reset.', error);
+      }
+
+      queryClient.clear();
+    };
+
     const syncQueryCacheOwner = async (nextUserId: string | null) => {
       try {
         const currentOwner = await AsyncStorage.getItem(QUERY_CACHE_OWNER_STORAGE_KEY);
         if (currentOwner !== nextUserId) {
-          queryClient.clear();
+          await resetQueryCache();
         }
 
         if (nextUserId) {
@@ -72,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       const nextUserId = nextSession?.user?.id ?? null;
       if (lastUserIdRef.current !== undefined && lastUserIdRef.current !== nextUserId) {
-        queryClient.clear();
+        void resetQueryCache();
       }
       void syncQueryCacheOwner(nextUserId);
       lastUserIdRef.current = nextUserId;
@@ -120,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       },
       async signOutToGuestSession() {
+        await queryClient.cancelQueries();
         await signOutToGuest();
       },
     }),
