@@ -75,6 +75,35 @@ async function getOAuthRedirectUri() {
   });
 }
 
+async function signInWithBrowserOAuth(provider: 'apple' | 'google') {
+  const WebBrowser = await import('expo-web-browser');
+  const redirectTo = await getOAuthRedirectUri();
+  const providerLabel = provider === 'apple' ? 'Apple' : 'Google';
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.url) {
+    throw new Error(`${providerLabel} sign-in did not return an auth URL.`);
+  }
+
+  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  if (result.type !== 'success') {
+    return false;
+  }
+
+  await createSessionFromUrl(result.url);
+  return true;
+}
+
 export async function createSessionFromUrl(url: string) {
   const QueryParams = await import('expo-auth-session/build/QueryParams');
   const { params, errorCode } = QueryParams.getQueryParams(url);
@@ -114,31 +143,7 @@ export async function createSessionFromUrl(url: string) {
 }
 
 export async function signInWithGoogleOAuth() {
-  const WebBrowser = await import('expo-web-browser');
-  const redirectTo = await getOAuthRedirectUri();
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo,
-      skipBrowserRedirect: true,
-    },
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  if (!data?.url) {
-    throw new Error('Google sign-in did not return an auth URL.');
-  }
-
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-  if (result.type !== 'success') {
-    return false;
-  }
-
-  await createSessionFromUrl(result.url);
-  return true;
+  return signInWithBrowserOAuth('google');
 }
 
 function getAppleProfileUpdates(fullName: AppleFullName) {
@@ -181,9 +186,9 @@ async function syncAppleProfile(fullName: AppleFullName) {
   }
 }
 
-export async function signInWithAppleId() {
+async function signInWithNativeAppleId() {
   if (Platform.OS !== 'ios') {
-    throw new Error('Apple sign-in is only available on iPhone and iPad.');
+    throw new Error('Native Apple sign-in is only available on iPhone and iPad.');
   }
 
   const AppleAuthentication = await import('expo-apple-authentication');
@@ -232,6 +237,18 @@ export async function signInWithAppleId() {
 
     throw error;
   }
+}
+
+export async function signInWithApple() {
+  if (Platform.OS === 'ios') {
+    return signInWithNativeAppleId();
+  }
+
+  if (Platform.OS === 'web') {
+    return signInWithBrowserOAuth('apple');
+  }
+
+  throw new Error('Apple sign-in is only available on iPhone, iPad, and web.');
 }
 
 function getProviderNames(user: User | null) {

@@ -6,7 +6,7 @@ import { queryClient, QUERY_CACHE_OWNER_STORAGE_KEY } from '@/lib/query-client';
 import {
   ensureMobileSession,
   isGuestUser,
-  signInWithAppleId,
+  signInWithApple as signInWithAppleFlow,
   signInWithGoogleOAuth,
   signOutToGuest,
   supabase,
@@ -123,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       },
       async signInWithApple() {
-        return signInWithAppleId();
+        return signInWithAppleFlow();
       },
       async signInWithGoogle() {
         return signInWithGoogleOAuth();

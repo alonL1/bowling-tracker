@@ -68,10 +68,15 @@ export default function LoginScreen() {
   const [transferError, setTransferError] = useState('');
 
   const nextPath = useMemo(() => getSafeNextPath(params.next) as Href, [params.next]);
-  const title = mode === 'signIn' ? 'Sign In' : 'Create Account';
-
   useEffect(() => {
     let active = true;
+
+    if (Platform.OS === 'web') {
+      setAppleSignInAvailable(true);
+      return () => {
+        active = false;
+      };
+    }
 
     if (Platform.OS !== 'ios') {
       setAppleSignInAvailable(false);
@@ -343,11 +348,13 @@ export default function LoginScreen() {
           <View style={styles.header}>
             <Text style={styles.headerTitle}>PinPoint</Text>
             <Text style={styles.headerSubtitle}>
-              Sign in to access your sessions, uploads, chat, and friends on mobile.
+              {mode === 'signIn'
+                ? 'Sign in to access your sessions, uploads, chat, and friends.'
+                : 'Create an account to save your sessions, uploads, chat, and friends, and access them on every device.'}
             </Text>
           </View>
 
-          <SurfaceCard style={styles.card}>
+          <View style={styles.formSection}>
             <View style={styles.modeRow}>
               <View style={styles.modeGroup}>
                 <Text
@@ -361,19 +368,10 @@ export default function LoginScreen() {
                 <Text
                   onPress={() => setMode('signUp')}
                   style={[styles.modeButtonText, mode === 'signUp' && styles.modeButtonTextActive]}>
-                  Sign Up
+                  Create Account
                 </Text>
                 {mode === 'signUp' ? <View style={styles.modeIndicator} /> : <View style={styles.modeSpacer} />}
               </View>
-            </View>
-
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{title}</Text>
-              <Text style={styles.cardSubtitle}>
-                {mode === 'signIn'
-                  ? 'Use your PinPoint account to keep everything in sync.'
-                  : 'Create an account to save your logs and access them on every device.'}
-              </Text>
             </View>
 
             <View style={styles.formGroup}>
@@ -412,7 +410,7 @@ export default function LoginScreen() {
               disabled={busy || transferBusy || !email.trim() || !password}
             />
 
-            {appleSignInAvailable ? (
+            {Platform.OS === 'ios' && appleSignInAvailable ? (
               <View
                 pointerEvents={busy || transferBusy ? 'none' : 'auto'}
                 style={busy || transferBusy ? styles.oauthButtonDisabled : undefined}>
@@ -424,6 +422,16 @@ export default function LoginScreen() {
                   style={styles.appleButton}
                 />
               </View>
+            ) : null}
+
+            {Platform.OS === 'web' && appleSignInAvailable ? (
+              <ActionButton
+                label="Continue with Apple"
+                onPress={handleApple}
+                disabled={busy || transferBusy}
+                variant="secondary"
+                leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
+              />
             ) : null}
 
             <ActionButton
@@ -440,7 +448,7 @@ export default function LoginScreen() {
               disabled={busy || transferBusy}
               variant="secondary"
             />
-          </SurfaceCard>
+          </View>
         </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
 
@@ -508,13 +516,13 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilySans,
     maxWidth: 480,
   },
-  card: {
-    padding: spacing.lg,
+  formSection: {
     gap: spacing.lg,
   },
   modeRow: {
     flexDirection: 'row',
-    gap: spacing.lg,
+    gap: spacing.xl,
+    alignSelf: 'center',
   },
   modeGroup: {
     gap: spacing.xs,
@@ -530,29 +538,14 @@ const styles = StyleSheet.create({
   },
   modeButtonText: {
     color: palette.muted,
-    fontSize: 16,
-    lineHeight: 20,
+    fontSize: 22,
+    lineHeight: 28,
     fontWeight: '600',
     fontFamily: fontFamilySans,
   },
   modeButtonTextActive: {
     color: palette.text,
-  },
-  cardHeader: {
-    gap: spacing.xs,
-  },
-  cardTitle: {
-    color: palette.text,
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: '600',
-    fontFamily: fontFamilySans,
-  },
-  cardSubtitle: {
-    color: palette.muted,
-    fontSize: 15,
-    lineHeight: 21,
-    fontFamily: fontFamilySans,
+    fontWeight: '700',
   },
   formGroup: {
     gap: spacing.sm,
