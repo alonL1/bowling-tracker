@@ -27,7 +27,7 @@ export default function AccountScreen() {
 
     try {
       await signOutToGuestSession();
-      router.replace('/(tabs)/sessions');
+      router.replace('/login');
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to sign out.');
     } finally {
@@ -64,9 +64,10 @@ export default function AccountScreen() {
       ) : (
         <View style={styles.actions}>
           <ActionButton
-            label={busy ? 'Signing out...' : 'Sign out'}
+            label="Sign out"
             onPress={handleSignOut}
             disabled={busy}
+            loading={busy}
             variant="secondary"
           />
         </View>

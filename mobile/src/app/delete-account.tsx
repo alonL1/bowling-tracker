@@ -66,7 +66,7 @@ export default function DeleteAccountScreen() {
     try {
       await deleteOwnAccount();
       await signOutToGuestSession();
-      router.replace('/(tabs)/sessions');
+      router.replace('/login');
     } catch (nextError) {
       setError(
         nextError instanceof Error ? nextError.message : 'Failed to delete the account.',
@@ -100,15 +100,10 @@ export default function DeleteAccountScreen() {
           ) : (
             <View style={styles.actionGroup}>
               <ActionButton
-                label={
-                  busy
-                    ? 'Deleting account...'
-                    : confirming
-                      ? 'Permanently delete account'
-                      : 'Delete account'
-                }
+                label={confirming ? 'Permanently delete account' : 'Delete account'}
                 onPress={handleDelete}
                 disabled={busy}
+                loading={busy}
                 variant="danger"
               />
               {confirming ? (

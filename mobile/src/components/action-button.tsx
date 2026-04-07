@@ -10,6 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import { palette, radii } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 
@@ -17,6 +18,7 @@ type ActionButtonProps = {
   label: string;
   onPress?: (event: GestureResponderEvent) => void;
   disabled?: boolean;
+  loading?: boolean;
   variant?: 'primary' | 'secondary' | 'danger';
   leftIcon?: ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -27,26 +29,44 @@ export default function ActionButton({
   label,
   onPress,
   disabled = false,
+  loading = false,
   variant = 'primary',
   leftIcon,
   style,
   textStyle,
 }: ActionButtonProps) {
+  const isDisabled = disabled || loading;
+  const spinnerHoleColor =
+    variant === 'secondary'
+      ? palette.surfaceRaised
+      : variant === 'danger'
+        ? palette.danger
+        : palette.accent;
+  const icon =
+    loading ? (
+      <BowlingBallSpinner
+        size={18}
+        holeColor={spinnerHoleColor}
+      />
+    ) : (
+      leftIcon
+    );
+
   return (
     <Pressable
       accessibilityRole="button"
-      disabled={disabled}
+      disabled={isDisabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
         variant === 'secondary' && styles.secondaryButton,
         variant === 'danger' && styles.dangerButton,
-        disabled && styles.disabled,
+        isDisabled && styles.disabled,
         pressed && styles.pressed,
         style,
       ]}>
       <View style={styles.content}>
-        {leftIcon ? <View style={styles.iconWrap}>{leftIcon}</View> : null}
+        {icon ? <View style={styles.iconWrap}>{icon}</View> : null}
         <Text
           style={[
             styles.text,

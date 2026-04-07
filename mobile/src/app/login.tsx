@@ -31,6 +31,8 @@ type TransferPrompt = {
   guestUserId: string;
 };
 
+type AuthAction = 'password' | 'apple' | 'google' | 'guest' | null;
+
 function getSafeNextPath(raw: string | string[] | undefined) {
   const value = Array.isArray(raw) ? raw[0] : raw;
   const trimmed = typeof value === 'string' ? value.trim() : '';
@@ -60,6 +62,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [activeAction, setActiveAction] = useState<AuthAction>(null);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
@@ -147,6 +150,7 @@ export default function LoginScreen() {
     }
 
     setBusy(true);
+    setActiveAction('password');
     setError('');
     setInfo('');
     setTransferError('');
@@ -190,6 +194,7 @@ export default function LoginScreen() {
       setError(nextError instanceof Error ? nextError.message : 'Authentication failed.');
     } finally {
       setBusy(false);
+      setActiveAction(null);
     }
   };
 
@@ -199,6 +204,7 @@ export default function LoginScreen() {
     }
 
     setBusy(true);
+    setActiveAction('google');
     setError('');
     setInfo('');
     setTransferError('');
@@ -236,6 +242,7 @@ export default function LoginScreen() {
       setError(nextError instanceof Error ? nextError.message : 'Google sign-in failed.');
     } finally {
       setBusy(false);
+      setActiveAction(null);
     }
   };
 
@@ -245,6 +252,7 @@ export default function LoginScreen() {
     }
 
     setBusy(true);
+    setActiveAction('apple');
     setError('');
     setInfo('');
     setTransferError('');
@@ -282,6 +290,7 @@ export default function LoginScreen() {
       setError(nextError instanceof Error ? nextError.message : 'Apple sign-in failed.');
     } finally {
       setBusy(false);
+      setActiveAction(null);
     }
   };
 
@@ -291,6 +300,7 @@ export default function LoginScreen() {
     }
 
     setBusy(true);
+    setActiveAction('guest');
     setError('');
     setInfo('');
 
@@ -303,6 +313,7 @@ export default function LoginScreen() {
       setError(nextError instanceof Error ? nextError.message : 'Failed to start guest session.');
     } finally {
       setBusy(false);
+      setActiveAction(null);
     }
   };
 
@@ -405,23 +416,35 @@ export default function LoginScreen() {
             {isGuest ? <InfoBanner text="You are currently using a guest session." /> : null}
 
             <ActionButton
-              label={busy ? 'Working...' : mode === 'signIn' ? 'Sign In' : 'Create Account'}
+              label={mode === 'signIn' ? 'Sign In' : 'Create Account'}
               onPress={handleSubmit}
               disabled={busy || transferBusy || !email.trim() || !password}
+              loading={activeAction === 'password'}
             />
 
             {Platform.OS === 'ios' && appleSignInAvailable ? (
-              <View
-                pointerEvents={busy || transferBusy ? 'none' : 'auto'}
-                style={busy || transferBusy ? styles.oauthButtonDisabled : undefined}>
-                <AppleAuthentication.AppleAuthenticationButton
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                  cornerRadius={14}
+              activeAction === 'apple' ? (
+                <ActionButton
+                  label="Continue with Apple"
                   onPress={handleApple}
-                  style={styles.appleButton}
+                  disabled={busy || transferBusy}
+                  loading
+                  variant="secondary"
+                  leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
                 />
-              </View>
+              ) : (
+                <View
+                  pointerEvents={busy || transferBusy ? 'none' : 'auto'}
+                  style={busy || transferBusy ? styles.oauthButtonDisabled : undefined}>
+                  <AppleAuthentication.AppleAuthenticationButton
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                    cornerRadius={14}
+                    onPress={handleApple}
+                    style={styles.appleButton}
+                  />
+                </View>
+              )
             ) : null}
 
             {Platform.OS === 'web' && appleSignInAvailable ? (
@@ -429,6 +452,7 @@ export default function LoginScreen() {
                 label="Continue with Apple"
                 onPress={handleApple}
                 disabled={busy || transferBusy}
+                loading={activeAction === 'apple'}
                 variant="secondary"
                 leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
               />
@@ -438,6 +462,7 @@ export default function LoginScreen() {
               label="Continue with Google"
               onPress={handleGoogle}
               disabled={busy || transferBusy}
+              loading={activeAction === 'google'}
               variant="secondary"
               leftIcon={<Ionicons name="logo-google" size={18} color={palette.text} />}
             />
@@ -446,6 +471,7 @@ export default function LoginScreen() {
               label="Continue as Guest"
               onPress={handleGuest}
               disabled={busy || transferBusy}
+              loading={activeAction === 'guest'}
               variant="secondary"
             />
           </View>
@@ -464,9 +490,10 @@ export default function LoginScreen() {
             {transferError ? <InfoBanner text={transferError} tone="error" /> : null}
 
             <ActionButton
-              label={transferBusy ? 'Saving logs...' : 'Save my logs'}
+              label="Save my logs"
               onPress={handleSaveLogs}
               disabled={transferBusy}
+              loading={transferBusy}
             />
 
             <ActionButton
