@@ -6,6 +6,7 @@ import { queryClient, QUERY_CACHE_OWNER_STORAGE_KEY } from '@/lib/query-client';
 import {
   ensureMobileSession,
   isGuestUser,
+  signInWithAppleId,
   signInWithGoogleOAuth,
   signOutToGuest,
   supabase,
@@ -18,6 +19,7 @@ type AuthContextValue = {
   isGuest: boolean;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   signUpWithPassword: (email: string, password: string) => Promise<void>;
+  signInWithApple: () => Promise<boolean>;
   signInWithGoogle: () => Promise<boolean>;
   continueAsGuest: () => Promise<void>;
   signOutToGuestSession: () => Promise<void>;
@@ -119,6 +121,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error) {
           throw error;
         }
+      },
+      async signInWithApple() {
+        return signInWithAppleId();
       },
       async signInWithGoogle() {
         return signInWithGoogleOAuth();

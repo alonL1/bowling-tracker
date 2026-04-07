@@ -1,6 +1,7 @@
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -49,6 +50,7 @@ export default function LoginScreen() {
     user,
     loading,
     isGuest,
+    signInWithApple,
     signInWithPassword,
     signUpWithPassword,
     signInWithGoogle,
@@ -60,12 +62,40 @@ export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
   const [transferPrompt, setTransferPrompt] = useState<TransferPrompt | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferError, setTransferError] = useState('');
 
   const nextPath = useMemo(() => getSafeNextPath(params.next) as Href, [params.next]);
   const title = mode === 'signIn' ? 'Sign In' : 'Create Account';
+
+  useEffect(() => {
+    let active = true;
+
+    if (Platform.OS !== 'ios') {
+      setAppleSignInAvailable(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    AppleAuthentication.isAvailableAsync()
+      .then((available) => {
+        if (active) {
+          setAppleSignInAvailable(available);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAppleSignInAvailable(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   if (loading) {
     return <CenteredState title="Loading account..." loading />;
@@ -204,6 +234,52 @@ export default function LoginScreen() {
     }
   };
 
+  const handleApple = async () => {
+    if (busy || transferBusy) {
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    setInfo('');
+    setTransferError('');
+
+    try {
+      const beforeSession = await getSessionSnapshot();
+      const guestBefore =
+        beforeSession.user && beforeSession.accessToken && isGuestUser(beforeSession.user)
+          ? {
+              guestAccessToken: beforeSession.accessToken,
+              guestUserId: beforeSession.user.id,
+            }
+          : null;
+
+      const completed = await signInWithApple();
+      if (!completed) {
+        return;
+      }
+
+      if (
+        guestBefore &&
+        (await finishAuthentication(guestBefore.guestAccessToken, guestBefore.guestUserId))
+      ) {
+        return;
+      }
+
+      const afterSession = await getSessionSnapshot();
+      if (afterSession.user && !isGuestUser(afterSession.user)) {
+        router.replace(nextPath);
+        return;
+      }
+
+      setError('Apple sign-in did not finish yet. Try again.');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Apple sign-in failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleGuest = async () => {
     if (busy || transferBusy) {
       return;
@@ -335,6 +411,20 @@ export default function LoginScreen() {
               onPress={handleSubmit}
               disabled={busy || transferBusy || !email.trim() || !password}
             />
+
+            {appleSignInAvailable ? (
+              <View
+                pointerEvents={busy || transferBusy ? 'none' : 'auto'}
+                style={busy || transferBusy ? styles.oauthButtonDisabled : undefined}>
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={14}
+                  onPress={handleApple}
+                  style={styles.appleButton}
+                />
+              </View>
+            ) : null}
 
             <ActionButton
               label="Continue with Google"
@@ -483,6 +573,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
     fontFamily: fontFamilySans,
+  },
+  appleButton: {
+    width: '100%',
+    height: 52,
+  },
+  oauthButtonDisabled: {
+    opacity: 0.5,
   },
   modalBackdrop: {
     flex: 1,

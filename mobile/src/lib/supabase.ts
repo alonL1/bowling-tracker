@@ -60,6 +60,12 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+type AppleFullName = {
+  givenName: string | null;
+  middleName: string | null;
+  familyName: string | null;
+} | null;
+
 async function getOAuthRedirectUri() {
   const { makeRedirectUri } = await import('expo-auth-session');
 
@@ -133,6 +139,99 @@ export async function signInWithGoogleOAuth() {
 
   await createSessionFromUrl(result.url);
   return true;
+}
+
+function getAppleProfileUpdates(fullName: AppleFullName) {
+  if (!fullName) {
+    return null;
+  }
+
+  const givenName = fullName.givenName?.trim() ?? '';
+  const middleName = fullName.middleName?.trim() ?? '';
+  const familyName = fullName.familyName?.trim() ?? '';
+  const fullNameValue = [givenName, middleName, familyName].filter(Boolean).join(' ').trim();
+
+  const updates: Record<string, string> = {};
+
+  if (fullNameValue) {
+    updates.full_name = fullNameValue;
+  }
+  if (givenName) {
+    updates.given_name = givenName;
+  }
+  if (familyName) {
+    updates.family_name = familyName;
+  }
+
+  return Object.keys(updates).length > 0 ? updates : null;
+}
+
+async function syncAppleProfile(fullName: AppleFullName) {
+  const updates = getAppleProfileUpdates(fullName);
+  if (!updates) {
+    return;
+  }
+
+  const { error } = await supabase.auth.updateUser({
+    data: updates,
+  });
+
+  if (error) {
+    console.error('Failed to persist Apple profile details.', error);
+  }
+}
+
+export async function signInWithAppleId() {
+  if (Platform.OS !== 'ios') {
+    throw new Error('Apple sign-in is only available on iPhone and iPad.');
+  }
+
+  const AppleAuthentication = await import('expo-apple-authentication');
+  const appleSignInAvailable = await AppleAuthentication.isAvailableAsync();
+  if (!appleSignInAvailable) {
+    throw new Error('Apple sign-in is not available on this device.');
+  }
+
+  const Crypto = await import('expo-crypto');
+
+  try {
+    const nonce = Crypto.randomUUID();
+    const credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+      nonce,
+    });
+
+    if (!credential.identityToken) {
+      throw new Error('Apple sign-in did not return an identity token.');
+    }
+
+    const { error } = await supabase.auth.signInWithIdToken({
+      provider: 'apple',
+      token: credential.identityToken,
+      nonce,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    await syncAppleProfile(credential.fullName);
+    return true;
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error && 'code' in error
+        ? (error as { code?: string }).code
+        : undefined;
+
+    if (code === 'ERR_REQUEST_CANCELED') {
+      return false;
+    }
+
+    throw error;
+  }
 }
 
 function getProviderNames(user: User | null) {

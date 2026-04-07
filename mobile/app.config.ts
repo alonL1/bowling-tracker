@@ -11,6 +11,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const isDevelopment = appVariant === 'development';
   const plugins: ExpoConfig['plugins'] = [
     'expo-router',
+    'expo-apple-authentication',
     'expo-web-browser',
     [
       'expo-image-picker',
@@ -48,10 +49,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     userInterfaceStyle: 'dark',
     ios: {
       icon: './assets/images/icon.png',
+      usesAppleSignIn: true,
       bundleIdentifier: isDevelopment
         ? 'com.alonl.pinpoint.dev'
         : 'com.alonl.pinpoint',
       infoPlist: {
+        CFBundleAllowMixedLocalizations: true,
         ITSAppUsesNonExemptEncryption: false,
       },
     },
