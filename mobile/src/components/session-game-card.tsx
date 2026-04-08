@@ -64,6 +64,12 @@ export default function SessionGameCard({
 
   const scoreLabel = typeof game.total_score === 'number' ? String(game.total_score) : '—';
   const badgeLines = useMemo(() => getCollapsedBadgeLines(title), [title]);
+  const isReadOnlyUntilSynced = Boolean(game.local_sync?.isReadOnlyUntilSynced);
+  const syncBadgeLabel = game.local_sync
+    ? game.local_sync.syncState === 'failed'
+      ? 'Needs attention'
+      : 'Syncing'
+    : null;
   const scoreboardPlayers = useMemo(
     () =>
       game.scoreboard_extraction
@@ -90,34 +96,47 @@ export default function SessionGameCard({
         <View style={styles.row}>
           <Pressable
             onPress={() => setExpanded((current) => !current)}
-            onLongPress={() => onRequestMove(game.id)}
+            onLongPress={isReadOnlyUntilSynced ? undefined : () => onRequestMove(game.id)}
             delayLongPress={240}
             style={({ pressed }) => [styles.summaryPressable, pressed && styles.pressed]}>
             <View style={styles.summary}>
               <StackBadge lines={badgeLines} />
               <View style={styles.scoreBlock}>
                 <Text style={styles.scoreValue}>{scoreLabel}</Text>
+                {syncBadgeLabel ? (
+                  <Text
+                    style={[
+                      styles.syncBadge,
+                      game.local_sync?.syncState === 'failed' && styles.syncBadgeFailed,
+                    ]}>
+                    {syncBadgeLabel}
+                  </Text>
+                ) : null}
               </View>
             </View>
           </Pressable>
 
           <View style={styles.actions}>
-            <IconAction
-              accessibilityLabel="Edit game"
-              onPress={() => setEditOpen(true)}
-              icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
-            />
-            <IconAction
-              accessibilityLabel="Delete game"
-              onPress={deleteMutation.isPending ? undefined : handleDelete}
-              icon={
-                deleteMutation.isPending ? (
-                  <BowlingBallSpinner size={18} holeColor={palette.field} />
-                ) : (
-                  <MaterialIcons name="delete" size={22} color={palette.text} />
-                )
-              }
-            />
+            {!isReadOnlyUntilSynced ? (
+              <>
+                <IconAction
+                  accessibilityLabel="Edit game"
+                  onPress={() => setEditOpen(true)}
+                  icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
+                />
+                <IconAction
+                  accessibilityLabel="Delete game"
+                  onPress={deleteMutation.isPending ? undefined : handleDelete}
+                  icon={
+                    deleteMutation.isPending ? (
+                      <BowlingBallSpinner size={18} holeColor={palette.field} />
+                    ) : (
+                      <MaterialIcons name="delete" size={22} color={palette.text} />
+                    )
+                  }
+                />
+              </>
+            ) : null}
             <IconAction
               accessibilityLabel={expanded ? 'Collapse game' : 'Expand game'}
               onPress={() => setExpanded((current) => !current)}
@@ -135,6 +154,11 @@ export default function SessionGameCard({
         {expanded ? (
           <View style={styles.expandedBody}>
             <Text style={styles.metaLine}>{meta}</Text>
+            {isReadOnlyUntilSynced ? (
+              <Text style={styles.readOnlyHint}>
+                This game is read-only until background sync finishes.
+              </Text>
+            ) : null}
             {game.scoreboard_extraction ? (
               <MultiPlayerFrameGrid
                 players={scoreboardPlayers}
@@ -183,6 +207,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     minHeight: 52,
     justifyContent: 'center',
+    gap: 6,
   },
   scoreValue: {
     color: palette.text,
@@ -216,5 +241,28 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.92,
+  },
+  syncBadge: {
+    alignSelf: 'flex-start',
+    color: palette.text,
+    backgroundColor: palette.field,
+    borderRadius: 999,
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+    fontFamily: fontFamilySans,
+  },
+  syncBadgeFailed: {
+    backgroundColor: palette.danger,
+    color: palette.error,
+  },
+  readOnlyHint: {
+    color: palette.muted,
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: fontFamilySans,
   },
 });

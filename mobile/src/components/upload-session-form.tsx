@@ -1,5 +1,4 @@
 import * as ImagePicker from 'expo-image-picker';
-import { File as ExpoFile } from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
@@ -25,6 +24,7 @@ import RecordingDraftGameCard from '@/components/recording-draft-game-card';
 import RecordingDraftGameEditSheet from '@/components/recording-draft-game-edit-sheet';
 import StackBadge from '@/components/stack-badge';
 import SurfaceCard from '@/components/surface-card';
+import UploadsProcessingBanner from '@/components/uploads-processing-banner';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { confirmAction } from '@/lib/confirm';
@@ -39,7 +39,6 @@ import {
   updateRecordingDraft,
   updateRecordingDraftGame,
   updateRecordingDraftGroup,
-  uploadToRecordingDraft,
   reorderRecordingDraftGame,
 } from '@/lib/backend';
 import {
@@ -54,10 +53,8 @@ import type {
   SessionItem,
   SessionMode,
 } from '@/lib/types';
-import { buildAutoGroupMap, deriveCapturedAtHint, sanitizeFilename } from '@/lib/upload';
 import { useAuth } from '@/providers/auth-provider';
-
-const DEFAULT_BUCKET = 'scoreboards-temp';
+import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
 const MAX_IMAGE_COUNT = 100;
 const NEW_SESSION_TARGET = '__new-session__';
 const BASE_CONTENT_BOTTOM_PADDING = 156;
@@ -266,15 +263,6 @@ function formatTargetSessionLabel(
   return session?.name?.trim() || 'Untitled Session';
 }
 
-async function getUploadBody(asset: ImagePicker.ImagePickerAsset) {
-  if (asset.file) {
-    return asset.file;
-  }
-
-  const file = new ExpoFile(asset.uri);
-  return file.arrayBuffer();
-}
-
 function PendingDraftGameCard({
   gameNumber,
   game,
@@ -347,6 +335,14 @@ export default function UploadSessionForm({
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const {
+    deleteDraftCapture,
+    discardDraftLocal,
+    enqueueDraftCaptures,
+    finalizeDraftLocal,
+    updateDraftGroupLocal,
+    updateDraftLocal,
+  } = useUploadsProcessing();
   const mode = useMemo(() => getDraftMode(sessionMode), [sessionMode]);
 
   const [error, setError] = useState('');
@@ -404,8 +400,6 @@ export default function UploadSessionForm({
   const hasFailedGames = allGames.some((game) => game.status === 'error');
   const canFinalize =
     readyGames.length > 0 &&
-    !hasProcessing &&
-    !hasFailedGames &&
     !selectionError &&
     (mode !== 'add_existing_session' || Boolean(targetSessionId));
 
@@ -541,65 +535,20 @@ export default function UploadSessionForm({
       if (!user) {
         throw new Error('You must be signed in before uploading scoreboards.');
       }
-
-      const autoGroupMap =
-        mode === 'add_multiple_sessions' ? buildAutoGroupMap(assets) : new Map();
-      const storageItems: Array<{
-        storageKey: string;
-        capturedAtHint?: string;
-        fileSizeBytes?: number;
-        autoGroupIndex?: number;
-      }> = [];
-
-      for (let index = 0; index < assets.length; index += 1) {
-        const asset = assets[index];
-        const filename = sanitizeFilename(asset.fileName ?? undefined, index);
-        const storageKey = `${user.id}/${Date.now()}-${index}-${filename}`;
-
-        let uploadBody: ArrayBuffer | File;
-        try {
-          uploadBody = await getUploadBody(asset);
-        } catch {
-          continue;
-        }
-
-        const upload = await supabase.storage.from(DEFAULT_BUCKET).upload(storageKey, uploadBody, {
-          contentType: asset.mimeType ?? 'image/jpeg',
-          upsert: false,
-        });
-        if (upload.error) {
-          continue;
-        }
-
-        const autoMeta = autoGroupMap.get(asset.uri);
-        storageItems.push({
-          storageKey,
-          capturedAtHint: deriveCapturedAtHint(asset),
-          fileSizeBytes: asset.fileSize,
-          autoGroupIndex:
-            mode === 'add_multiple_sessions' ? autoMeta?.autoGroupIndex : undefined,
-        });
-      }
-
-      if (storageItems.length === 0) {
-        throw new Error('All uploads failed before they could be submitted.');
-      }
-
-      return uploadToRecordingDraft({
+      await enqueueDraftCaptures({
         mode,
-        timezoneOffsetMinutes: new Date().getTimezoneOffset(),
-        storageItems,
+        draft,
+        assets,
       });
+      return true;
     },
-    onSuccess: async (response) => {
-      const currentGameIds = new Set(allGames.map((game) => game.id));
-      const newGames = flattenDraftGames((response as { draft: typeof draft }).draft?.groups ?? []).filter(
-        (game) => !currentGameIds.has(game.id),
-      );
-      pendingScrollGameIdRef.current = newGames[0]?.id ?? null;
+    onSuccess: async (didQueue) => {
+      if (!didQueue) {
+        return;
+      }
+      pendingScrollGameIdRef.current = null;
       setError('');
-      setDraftCache(response as { draft: typeof draft });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus });
+      await Promise.resolve();
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to upload scoreboards.');
@@ -640,7 +589,14 @@ export default function UploadSessionForm({
   });
 
   const deleteGameMutation = useMutation({
-    mutationFn: (draftGameId: string) => deleteRecordingDraftGame(mode, draftGameId),
+    mutationFn: async (draftGameId: string) => {
+      const deletedLocally = await deleteDraftCapture({ mode, visibleGameId: draftGameId });
+      if (deletedLocally) {
+        return { deletedLocally: true };
+      }
+      const response = await deleteRecordingDraftGame(mode, draftGameId);
+      return { ...response, deletedLocally: false };
+    },
     onMutate: (draftGameId) => {
       setDeletingGameIds((current) =>
         current.includes(draftGameId) ? current : [...current, draftGameId],
@@ -648,8 +604,10 @@ export default function UploadSessionForm({
     },
     onSuccess: async (response) => {
       setError('');
-      setDraftCache(response as { draft: typeof draft });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus });
+      if (!response.deletedLocally) {
+        setDraftCache(response as { draft: typeof draft });
+        await queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus });
+      }
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to delete draft game.');
@@ -660,7 +618,14 @@ export default function UploadSessionForm({
   });
 
   const discardMutation = useMutation({
-    mutationFn: () => discardRecordingDraft(mode),
+    mutationFn: async () => {
+      const discardedLocally = await discardDraftLocal({ mode, draft });
+      if (discardedLocally) {
+        return { discardedLocally: true };
+      }
+      const response = await discardRecordingDraft(mode);
+      return { ...response, discardedLocally: false };
+    },
     onSuccess: async () => {
       setError('');
       setFinalizeOpen(false);
@@ -681,6 +646,13 @@ export default function UploadSessionForm({
       if (!editingGroup) {
         throw new Error('Group was not selected.');
       }
+
+      updateDraftGroupLocal({
+        mode,
+        draftGroupId: editingGroup.id,
+        name: groupDraftName,
+        description: groupDraftDescription,
+      });
 
       return updateRecordingDraftGroup({
         mode,
@@ -761,9 +733,14 @@ export default function UploadSessionForm({
 
   const finalizeMutation = useMutation({
     mutationFn: () =>
-      finalizeRecordingDraft({
+      finalizeDraftLocal({
         mode,
+        draft,
         targetSessionId: mode === 'add_existing_session' ? targetSessionId : undefined,
+        targetSessionName:
+          mode === 'add_existing_session'
+            ? formatTargetSessionLabel(targetSessionId, sessions)
+            : undefined,
         name: mode === 'upload_session' ? finalizeName : undefined,
         description: mode === 'upload_session' ? finalizeDescription : undefined,
       }),
@@ -771,14 +748,13 @@ export default function UploadSessionForm({
       setError('');
       setFinalizeOpen(false);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.recordingDraft(mode) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
       ]);
 
-      if (response.primarySessionId) {
-        router.replace(`/sessions/${response.primarySessionId}` as never);
+      if (response.routeSessionId) {
+        router.replace(`/sessions/${response.routeSessionId}` as never);
         return;
       }
 
@@ -820,6 +796,11 @@ export default function UploadSessionForm({
         ...draft,
         selectedPlayerKeys: nextSelectedPlayerKeys,
       },
+    });
+    updateDraftLocal({
+      mode,
+      draftId: draft.local_sync?.localId ?? draft.id,
+      selectedPlayerKeys: nextSelectedPlayerKeys,
     });
 
     selectionMutation.mutate(nextSelectedPlayerKeys);
@@ -910,6 +891,7 @@ export default function UploadSessionForm({
           text={draftQuery.error instanceof Error ? draftQuery.error.message : 'Failed to load draft.'}
         />
       ) : null}
+      <UploadsProcessingBanner />
 
       <SurfaceCard style={styles.sectionCard}>
         <Text style={styles.sectionBody}>{helperText}</Text>
@@ -1157,10 +1139,10 @@ export default function UploadSessionForm({
 
           {selectionError ? <Text style={styles.dockNote}>{selectionError}</Text> : null}
           {!selectionError && hasProcessing ? (
-            <Text style={styles.dockNote}>Wait for all scoreboards to finish processing.</Text>
+            <Text style={styles.dockNote}>You can continue now. Remaining scoreboards will keep syncing in the background.</Text>
           ) : null}
           {!selectionError && !hasProcessing && hasFailedGames ? (
-            <Text style={styles.dockNote}>Remove or fix failed scoreboards before continuing.</Text>
+            <Text style={styles.dockNote}>You can continue now. Failed scoreboards will stay in Uploads & Processing until you retry or delete them.</Text>
           ) : null}
           {addToLogHelperText ? <Text style={styles.dockSubnote}>{addToLogHelperText}</Text> : null}
           <ActionButton
@@ -1212,6 +1194,13 @@ export default function UploadSessionForm({
                 if (!sessionPickerChoice) {
                   return;
                 }
+                setTargetSessionId(sessionPickerChoice);
+                updateDraftLocal({
+                  mode,
+                  draftId: draft?.local_sync?.localId ?? draft?.id,
+                  targetSessionId: sessionPickerChoice,
+                  targetSessionName: formatTargetSessionLabel(sessionPickerChoice, sessions),
+                });
                 chooseTargetSessionMutation.mutate(sessionPickerChoice);
               }}
               disabled={!sessionPickerChoice || chooseTargetSessionMutation.isPending}
@@ -1234,8 +1223,8 @@ export default function UploadSessionForm({
             <Text style={styles.modalTitle}>{getFinalizeButtonLabel(mode)}</Text>
             <Text style={styles.modalBody}>
               {mode === 'add_existing_session'
-                ? `Add these scoreboards to ${formatTargetSessionLabel(targetSessionId, sessions)}.`
-                : 'This will log the processed scoreboards below.'}
+                ? `Add these scoreboards to ${formatTargetSessionLabel(targetSessionId, sessions)}. Any remaining uploads or processing will continue in the background.`
+                : 'The session will appear in your log immediately. Any remaining uploads or processing will continue in the background.'}
             </Text>
             <View style={styles.summaryList}>
               <Text style={styles.summaryLine}>Ready scoreboards: {readyGames.length}</Text>
@@ -1253,7 +1242,14 @@ export default function UploadSessionForm({
                   placeholderTextColor={palette.muted}
                   style={styles.input}
                   value={finalizeName}
-                  onChangeText={setFinalizeName}
+                  onChangeText={(value) => {
+                    setFinalizeName(value);
+                    updateDraftLocal({
+                      mode,
+                      draftId: draft?.local_sync?.localId ?? draft?.id,
+                      name: value,
+                    });
+                  }}
                 />
                 <TextInput
                   placeholder="Description (optional)"
@@ -1261,7 +1257,14 @@ export default function UploadSessionForm({
                   style={[styles.input, styles.descriptionInput]}
                   multiline
                   value={finalizeDescription}
-                  onChangeText={setFinalizeDescription}
+                  onChangeText={(value) => {
+                    setFinalizeDescription(value);
+                    updateDraftLocal({
+                      mode,
+                      draftId: draft?.local_sync?.localId ?? draft?.id,
+                      description: value,
+                    });
+                  }}
                 />
               </>
             ) : null}

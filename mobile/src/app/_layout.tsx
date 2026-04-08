@@ -8,6 +8,7 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 import { palette } from '@/constants/palette';
 import { queryClient, queryPersistOptions } from '@/lib/query-client';
 import { AuthProvider } from '@/providers/auth-provider';
+import { UploadsProcessingProvider } from '@/providers/uploads-processing-provider';
 
 export default function RootLayout() {
   return (
@@ -15,15 +16,17 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <PersistQueryClientProvider client={queryClient} persistOptions={queryPersistOptions}>
           <AuthProvider>
-            <StatusBar style="light" backgroundColor={palette.background} />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: {
-                  backgroundColor: palette.background,
-                },
-              }}
-            />
+            <UploadsProcessingProvider>
+              <StatusBar style="light" backgroundColor={palette.background} />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: {
+                    backgroundColor: palette.background,
+                  },
+                }}
+              />
+            </UploadsProcessingProvider>
           </AuthProvider>
         </PersistQueryClientProvider>
       </SafeAreaProvider>

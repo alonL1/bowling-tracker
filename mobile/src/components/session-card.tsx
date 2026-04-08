@@ -19,12 +19,29 @@ type SessionCardProps = {
 };
 
 export default function SessionCard({ session, metaSegments, onPress }: SessionCardProps) {
+  const syncBadgeLabel = session.session?.local_sync
+    ? session.session.local_sync.syncState === 'failed'
+      ? 'Needs attention'
+      : 'Syncing'
+    : null;
+
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}>
       <SurfaceCard style={styles.card}>
         <StackBadge lines={[session.dateMonth, session.dateDay]} />
         <View style={styles.textBlock}>
-          <Text style={styles.title}>{session.title}</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>{session.title}</Text>
+            {syncBadgeLabel ? (
+              <Text
+                style={[
+                  styles.syncBadge,
+                  session.session?.local_sync?.syncState === 'failed' && styles.syncBadgeFailed,
+                ]}>
+                {syncBadgeLabel}
+              </Text>
+            ) : null}
+          </View>
           <Text style={styles.meta}>
             {metaSegments.map((segment, index) => (
               <React.Fragment key={`${segment.label}-${index}`}>
@@ -59,7 +76,13 @@ const styles = StyleSheet.create({
     gap: 2,
     minWidth: 0,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   title: {
+    flex: 1,
     color: palette.text,
     fontSize: 22,
     lineHeight: 26,
@@ -79,5 +102,21 @@ const styles = StyleSheet.create({
   metaSeparator: {
     color: palette.muted,
     fontWeight: '400',
+  },
+  syncBadge: {
+    color: palette.text,
+    backgroundColor: palette.field,
+    borderRadius: 999,
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+    fontFamily: fontFamilySans,
+  },
+  syncBadgeFailed: {
+    backgroundColor: palette.danger,
+    color: palette.error,
   },
 });

@@ -3,6 +3,7 @@ create extension if not exists "pgcrypto";
 create table if not exists bowling_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid,
+  client_finalize_operation_id text,
   name text,
   description text,
   started_at timestamptz,
@@ -13,6 +14,7 @@ create table if not exists games (
   id uuid primary key default gen_random_uuid(),
   user_id uuid,
   session_id uuid references bowling_sessions(id) on delete set null,
+  client_finalize_operation_id text,
   game_name text,
   player_name text not null,
   total_score integer,
@@ -61,6 +63,7 @@ create unique index if not exists idx_live_sessions_one_active_per_user
 create table if not exists live_session_games (
   id uuid primary key default gen_random_uuid(),
   live_session_id uuid not null references live_sessions(id) on delete cascade,
+  client_capture_id text,
   capture_order integer not null,
   storage_key text not null,
   captured_at_hint timestamptz,
@@ -76,6 +79,10 @@ create table if not exists live_session_games (
 
 create index if not exists idx_live_session_games_live_session_id
   on live_session_games(live_session_id, capture_order);
+
+create unique index if not exists idx_live_session_games_client_capture_id
+  on live_session_games(client_capture_id)
+  where client_capture_id is not null;
 
 create table if not exists recording_drafts (
   id uuid primary key default gen_random_uuid(),
@@ -101,6 +108,7 @@ create unique index if not exists idx_recording_drafts_one_active_per_user_mode
 create table if not exists recording_draft_groups (
   id uuid primary key default gen_random_uuid(),
   draft_id uuid not null references recording_drafts(id) on delete cascade,
+  client_group_id text,
   display_order integer not null default 0,
   name text,
   description text,
@@ -112,10 +120,15 @@ create table if not exists recording_draft_groups (
 create index if not exists idx_recording_draft_groups_draft_id
   on recording_draft_groups(draft_id, display_order);
 
+create unique index if not exists idx_recording_draft_groups_client_group_id
+  on recording_draft_groups(draft_id, client_group_id)
+  where client_group_id is not null;
+
 create table if not exists recording_draft_games (
   id uuid primary key default gen_random_uuid(),
   draft_id uuid not null references recording_drafts(id) on delete cascade,
   group_id uuid references recording_draft_groups(id) on delete set null,
+  client_capture_id text,
   capture_order integer not null,
   storage_key text not null,
   captured_at_hint timestamptz,
@@ -135,6 +148,18 @@ create index if not exists idx_recording_draft_games_draft_id
 
 create index if not exists idx_recording_draft_games_group_id
   on recording_draft_games(group_id, sort_at, capture_order);
+
+create unique index if not exists idx_recording_draft_games_client_capture_id
+  on recording_draft_games(client_capture_id)
+  where client_capture_id is not null;
+
+create index if not exists idx_bowling_sessions_client_finalize_operation
+  on bowling_sessions(user_id, client_finalize_operation_id)
+  where client_finalize_operation_id is not null;
+
+create index if not exists idx_games_client_finalize_operation
+  on games(user_id, client_finalize_operation_id)
+  where client_finalize_operation_id is not null;
 
 create table if not exists analysis_jobs (
   id uuid primary key default gen_random_uuid(),
@@ -158,6 +183,25 @@ create table if not exists analysis_jobs (
   updated_at timestamptz not null default now(),
   constraint analysis_jobs_job_type_check check (job_type in ('standard', 'live_session', 'recording_draft'))
 );
+
+create table if not exists mobile_sync_operations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  scope text not null,
+  operation_key text not null,
+  status text not null default 'pending',
+  response jsonb,
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint mobile_sync_operations_scope_check
+    check (scope in ('live_session_end', 'recording_draft_finalize')),
+  constraint mobile_sync_operations_status_check
+    check (status in ('pending', 'completed', 'failed'))
+);
+
+create unique index if not exists idx_mobile_sync_operations_user_scope_key
+  on mobile_sync_operations(user_id, scope, operation_key);
 
 create table if not exists submit_request_logs (
   id uuid primary key default gen_random_uuid(),
@@ -539,6 +583,34 @@ create policy "recording_draft_games_delete_own"
         and recording_drafts.user_id = auth.uid()
     )
   );
+
+-- Row Level Security for mobile_sync_operations
+alter table mobile_sync_operations enable row level security;
+
+drop policy if exists "mobile_sync_operations_select_own" on mobile_sync_operations;
+create policy "mobile_sync_operations_select_own"
+  on mobile_sync_operations
+  for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "mobile_sync_operations_insert_own" on mobile_sync_operations;
+create policy "mobile_sync_operations_insert_own"
+  on mobile_sync_operations
+  for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "mobile_sync_operations_update_own" on mobile_sync_operations;
+create policy "mobile_sync_operations_update_own"
+  on mobile_sync_operations
+  for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "mobile_sync_operations_delete_own" on mobile_sync_operations;
+create policy "mobile_sync_operations_delete_own"
+  on mobile_sync_operations
+  for delete
+  using (auth.uid() = user_id);
 
 -- Row Level Security for friendships
 alter table friendships enable row level security;

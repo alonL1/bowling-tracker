@@ -5,12 +5,72 @@ import {
 } from "../shared";
 import { getActiveLiveSessionRecord, getLiveUserId, getServerSupabase } from "../server";
 import {
+  beginMobileSyncOperation,
+  completeMobileSyncOperation,
+  failMobileSyncOperation,
+  MOBILE_SYNC_SCOPE,
+  normalizeClientOperationKey,
+} from "../../utils/mobile-sync-operations";
+import {
   buildSelectionError,
   getSelectedPlayersForExtraction,
   insertLoggedGameFromSelectedPlayer,
 } from "../../utils/logged-scoreboard";
 
 export const runtime = "nodejs";
+
+type EndLiveSessionPayload = {
+  clientOperationId?: string | null;
+};
+
+type ExistingLiveSessionEndResponse = {
+  ok: true;
+  sessionId: string;
+  loggedGameCount: number;
+};
+
+async function reconcileEndedLiveSession(
+  supabase: NonNullable<ReturnType<typeof getServerSupabase>>,
+  userId: string,
+  clientOperationId: string
+) {
+  const { data: existingGames, error: existingGamesError } = await supabase
+    .from("games")
+    .select("id,session_id")
+    .eq("user_id", userId)
+    .eq("client_finalize_operation_id", clientOperationId)
+    .order("created_at", { ascending: true });
+
+  if (existingGamesError) {
+    throw new Error(
+      existingGamesError.message || "Failed to load existing finalized live session."
+    );
+  }
+
+  if (!existingGames || existingGames.length === 0) {
+    return null;
+  }
+
+  const sessionId =
+    existingGames.find(
+      (game) => typeof game.session_id === "string" && game.session_id.length > 0
+    )?.session_id ?? null;
+
+  if (!sessionId) {
+    return null;
+  }
+
+  const activeLiveSession = await getActiveLiveSessionRecord(supabase, userId);
+  if (activeLiveSession?.session_id === sessionId) {
+    return null;
+  }
+
+  return {
+    ok: true,
+    sessionId,
+    loggedGameCount: existingGames.length,
+  } satisfies ExistingLiveSessionEndResponse;
+}
 
 export async function POST(request: Request) {
   const supabase = getServerSupabase();
@@ -26,9 +86,51 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
+  const payload = (await request.json().catch(() => ({}))) as EndLiveSessionPayload;
+  const clientOperationId = normalizeClientOperationKey(payload.clientOperationId);
   const createdGameIds: string[] = [];
+  let claimedOperation = false;
 
   try {
+    if (clientOperationId) {
+      const reconciledResponse = await reconcileEndedLiveSession(
+        supabase,
+        userId,
+        clientOperationId
+      );
+
+      if (reconciledResponse) {
+        await completeMobileSyncOperation(
+          supabase,
+          userId,
+          MOBILE_SYNC_SCOPE.liveSessionEnd,
+          clientOperationId,
+          reconciledResponse
+        );
+        return NextResponse.json(reconciledResponse);
+      }
+
+      const operation = await beginMobileSyncOperation<ExistingLiveSessionEndResponse>(
+        supabase,
+        userId,
+        MOBILE_SYNC_SCOPE.liveSessionEnd,
+        clientOperationId
+      );
+
+      if (operation.kind === "completed") {
+        return NextResponse.json(operation.response);
+      }
+
+      if (operation.kind === "in_progress") {
+        return NextResponse.json(
+          { error: "This live session is already being finalized. Retry in a moment." },
+          { status: 409 }
+        );
+      }
+
+      claimedOperation = true;
+    }
+
     const active = await getActiveLiveSessionRecord(supabase, userId);
     if (!active?.id || !active.session_id) {
       return NextResponse.json(
@@ -116,6 +218,7 @@ export async function POST(request: Request) {
         source: liveGame,
         selectedPlayer: selectedPlayers[0],
         fullExtraction,
+        clientFinalizeOperationId: clientOperationId,
       });
       createdGameIds.push(created.gameId);
 
@@ -156,17 +259,38 @@ export async function POST(request: Request) {
       .eq("id", active.id)
       .eq("user_id", userId);
 
-    return NextResponse.json({
+    const responsePayload = {
       ok: true,
       sessionId: active.session_id,
       loggedGameCount: createdGameIds.length,
-    });
+    } satisfies ExistingLiveSessionEndResponse;
+
+    if (clientOperationId) {
+      await completeMobileSyncOperation(
+        supabase,
+        userId,
+        MOBILE_SYNC_SCOPE.liveSessionEnd,
+        clientOperationId,
+        responsePayload
+      );
+    }
+
+    return NextResponse.json(responsePayload);
   } catch (error) {
     if (createdGameIds.length > 0) {
       await supabase.from("games").delete().in("id", createdGameIds);
     }
     const message =
       error instanceof Error ? error.message : "Failed to end live session.";
+    if (clientOperationId && claimedOperation) {
+      await failMobileSyncOperation(
+        supabase,
+        userId,
+        MOBILE_SYNC_SCOPE.liveSessionEnd,
+        clientOperationId,
+        message
+      ).catch(() => undefined);
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

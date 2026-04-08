@@ -17,6 +17,7 @@ import InfoBanner from '@/components/info-banner';
 import ScreenShell from '@/components/screen-shell';
 import SessionCard, { type SessionMetaSegment } from '@/components/session-card';
 import SurfaceCard from '@/components/surface-card';
+import UploadsProcessingBanner from '@/components/uploads-processing-banner';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { fetchGames, queryKeys } from '@/lib/backend';
@@ -302,6 +303,7 @@ export default function SessionsScreen() {
             text={gamesQuery.error instanceof Error ? gamesQuery.error.message : 'Failed to load sessions.'}
           />
         ) : null}
+        <UploadsProcessingBanner />
 
         <View style={styles.list}>
           {sessionSortEntries.length === 0 ? (

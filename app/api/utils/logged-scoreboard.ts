@@ -62,6 +62,7 @@ export async function insertLoggedGameFromSelectedPlayer({
   source,
   selectedPlayer,
   fullExtraction,
+  clientFinalizeOperationId,
 }: {
   supabase: SupabaseClient;
   userId: string;
@@ -69,6 +70,7 @@ export async function insertLoggedGameFromSelectedPlayer({
   source: ScoreboardSource;
   selectedPlayer: NormalizedLivePlayer;
   fullExtraction: ReturnType<typeof normalizeLiveExtraction>;
+  clientFinalizeOperationId?: string | null;
 }) {
   const playedAt = computePlayedAt(source);
 
@@ -77,6 +79,7 @@ export async function insertLoggedGameFromSelectedPlayer({
     .insert({
       user_id: userId,
       session_id: sessionId,
+      client_finalize_operation_id: clientFinalizeOperationId ?? null,
       game_name: null,
       player_name: selectedPlayer.playerName,
       total_score: selectedPlayer.totalScore,

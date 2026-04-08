@@ -1,6 +1,22 @@
 export type JobStatus = 'queued' | 'processing' | 'logged' | 'error';
 
 export type SessionMode = 'auto' | 'new' | 'existing';
+export type LocalSyncSourceFlow =
+  | 'live_session'
+  | 'upload_session'
+  | 'add_multiple_sessions'
+  | 'add_existing_session';
+
+export type LocalSyncState = 'syncing' | 'failed';
+
+export type LocalSyncMetadata = {
+  localId?: string | null;
+  syncState?: LocalSyncState | null;
+  sourceFlow?: LocalSyncSourceFlow | null;
+  linkedQueueItemIds?: string[] | null;
+  isReadOnlyUntilSynced?: boolean;
+  lastSyncError?: string | null;
+};
 
 export type SessionItem = {
   id: string;
@@ -8,6 +24,7 @@ export type SessionItem = {
   description?: string | null;
   started_at?: string | null;
   created_at?: string | null;
+  local_sync?: LocalSyncMetadata | null;
 };
 
 export type ShotDetail = {
@@ -38,6 +55,7 @@ export type GameDetail = {
   selected_self_player_key?: string | null;
   selected_self_player_name?: string | null;
   frames?: FrameDetail[];
+  local_sync?: LocalSyncMetadata | null;
 };
 
 export type GameListItem = {
@@ -53,6 +71,7 @@ export type GameListItem = {
   selected_self_player_key?: string | null;
   selected_self_player_name?: string | null;
   session?: SessionItem | null;
+  local_sync?: LocalSyncMetadata | null;
 };
 
 export type QueuedJob = {
@@ -144,6 +163,7 @@ export type LiveSessionGame = {
   created_at?: string | null;
   updated_at?: string | null;
   extraction?: LiveExtraction | null;
+  local_sync?: LocalSyncMetadata | null;
 };
 
 export type LiveSession = {
@@ -157,6 +177,7 @@ export type LiveSession = {
   selectedPlayerKeys: string[];
   playerOptions: LiveSessionPlayerOption[];
   games: LiveSessionGame[];
+  local_sync?: LocalSyncMetadata | null;
 };
 
 export type LiveSessionResponse = {
@@ -207,6 +228,7 @@ export type RecordingDraftGame = {
   created_at?: string | null;
   updated_at?: string | null;
   extraction?: LiveExtraction | null;
+  local_sync?: LocalSyncMetadata | null;
 };
 
 export type RecordingDraftGroup = {
@@ -239,6 +261,7 @@ export type RecordingDraft = {
   description?: string | null;
   groups: RecordingDraftGroup[];
   progress: RecordingDraftProgress;
+  local_sync?: LocalSyncMetadata | null;
 };
 
 export type RecordingDraftResponse = {

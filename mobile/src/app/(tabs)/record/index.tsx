@@ -11,6 +11,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
+import UploadsProcessingBanner from '@/components/uploads-processing-banner';
 import { fetchRecordEntryStatus, queryKeys } from '@/lib/backend';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
@@ -156,6 +157,7 @@ export default function RecordScreen() {
   return (
     <ScreenShell title="Record">
       <View style={styles.list}>
+        <UploadsProcessingBanner />
         {options.map((option) => (
           <Pressable
             key={option.route}

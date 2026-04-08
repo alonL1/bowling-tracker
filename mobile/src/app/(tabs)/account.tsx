@@ -10,10 +10,12 @@ import SurfaceCard from '@/components/surface-card';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { useAuth } from '@/providers/auth-provider';
+import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
 
 export default function AccountScreen() {
   const router = useRouter();
   const { user, isGuest, signOutToGuestSession } = useAuth();
+  const { summary } = useUploadsProcessing();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -78,6 +80,25 @@ export default function AccountScreen() {
       ) : null}
 
       {error ? <InfoBanner text={error} tone="error" /> : null}
+
+      <SurfaceCard style={styles.linksCard} tone="raised">
+        <Text style={styles.linksTitle}>Uploads & Processing</Text>
+        <Text style={styles.linksDescription}>
+          Pending uploads and failed scoreboards stay here until they finish, retry, or are deleted.
+        </Text>
+
+        <Pressable
+          onPress={() => router.push('/uploads-processing' as never)}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}>
+          <View style={styles.linkRowText}>
+            <Text style={styles.linkLabel}>Open Uploads & Processing</Text>
+            <Text style={styles.linkMeta}>
+              {summary.pendingCount} pending • {summary.failedCount} failed
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={palette.muted} />
+        </Pressable>
+      </SurfaceCard>
 
       <SurfaceCard style={styles.linksCard} tone="raised">
         <Text style={styles.linksTitle}>Legal & Data</Text>
@@ -193,6 +214,10 @@ const styles = StyleSheet.create({
   linkList: {
     gap: spacing.sm,
   },
+  linkRowText: {
+    flex: 1,
+    gap: 2,
+  },
   linkRow: {
     minHeight: 52,
     borderRadius: 14,
@@ -209,6 +234,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 20,
     fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
+  linkMeta: {
+    color: palette.muted,
+    fontSize: 13,
+    lineHeight: 18,
     fontFamily: fontFamilySans,
   },
   pressed: {

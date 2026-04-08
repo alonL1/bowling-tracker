@@ -25,6 +25,7 @@ import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import SessionGameCard from '@/components/session-game-card';
 import StackBadge from '@/components/stack-badge';
 import SurfaceCard from '@/components/surface-card';
+import UploadsProcessingBanner from '@/components/uploads-processing-banner';
 import {
   buildLivePlayerComparisons,
   buildLoggedSessionStats,
@@ -423,6 +424,10 @@ export default function SessionDetailScreen() {
       })),
     [draftSelectedPlayerKeys, group.games, grouping.gameTitleMap],
   );
+  const readOnlyUntilSynced = Boolean(
+    group.session?.local_sync?.isReadOnlyUntilSynced ||
+      group.games.some((game) => game.local_sync?.isReadOnlyUntilSynced),
+  );
 
   const handleDeleteSession = () => {
     if (!group.sessionId || group.isSessionless) {
@@ -494,7 +499,7 @@ export default function SessionDetailScreen() {
             <Text style={styles.backText}>Back</Text>
           </Pressable>
 
-          {!group.isSessionless ? (
+          {!group.isSessionless && !readOnlyUntilSynced ? (
             <View style={styles.topBarActions}>
               <IconAction
                 accessibilityLabel="Edit session"
@@ -527,6 +532,10 @@ export default function SessionDetailScreen() {
         </View>
 
         {error ? <InfoBanner tone="error" text={error} /> : null}
+        {readOnlyUntilSynced ? (
+          <InfoBanner text="This session is still syncing in the background. Editing and deletion are disabled until it finishes." />
+        ) : null}
+        <UploadsProcessingBanner />
 
         {group.description ? <Text style={styles.description}>{group.description}</Text> : null}
 
@@ -593,7 +602,9 @@ export default function SessionDetailScreen() {
             }}>
             <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
               <Text style={styles.guidance}>
-                Tap on a game to see more info. Hold down on a game to move it into a different session.
+                {readOnlyUntilSynced
+                  ? 'This session is read-only while Uploads & Processing finishes syncing it.'
+                  : 'Tap on a game to see more info. Hold down on a game to move it into a different session.'}
               </Text>
 
               <View style={styles.gameList}>

@@ -1,5 +1,13 @@
 import { apiJson } from '@/lib/api';
 import { cacheOfflineChatGames } from '@/lib/offline-chat';
+import {
+  loadUploadsProcessingStore,
+  mergeGamesWithUploadsProcessing,
+  mergeLiveSessionWithUploadsProcessing,
+  mergeRecordingDraftWithUploadsProcessing,
+  mergeRecordEntryStatusWithUploadsProcessing,
+  mergeSessionsWithUploadsProcessing,
+} from '@/lib/uploads-processing-store';
 import type {
   GameDetail,
   GameListItem,
@@ -31,8 +39,13 @@ export const queryKeys = {
 
 export async function fetchGames() {
   const payload = await apiJson<{ games: GameListItem[]; count: number | null }>('/api/games');
-  void cacheOfflineChatGames(payload.games);
-  return payload;
+  const store = await loadUploadsProcessingStore();
+  const games = mergeGamesWithUploadsProcessing(payload.games, store);
+  void cacheOfflineChatGames(games);
+  return {
+    ...payload,
+    games,
+  };
 }
 
 export async function fetchGameById(gameId: string) {
@@ -44,7 +57,12 @@ export async function fetchGameFromJobId(jobId: string) {
 }
 
 export async function fetchSessions() {
-  return apiJson<{ sessions: SessionItem[] }>('/api/sessions');
+  const payload = await apiJson<{ sessions: SessionItem[] }>('/api/sessions');
+  const store = await loadUploadsProcessingStore();
+  return {
+    ...payload,
+    sessions: mergeSessionsWithUploadsProcessing(payload.sessions, store),
+  };
 }
 
 export async function createSession(name = '', description = '') {
@@ -221,7 +239,9 @@ export async function fetchStatus(jobId: string) {
 }
 
 export async function fetchLiveSession() {
-  return apiJson<LiveSessionResponse>('/api/live-session');
+  const payload = await apiJson<LiveSessionResponse>('/api/live-session');
+  const store = await loadUploadsProcessingStore();
+  return mergeLiveSessionWithUploadsProcessing(payload, store);
 }
 
 export async function discardLiveSession() {
@@ -231,11 +251,20 @@ export async function discardLiveSession() {
 }
 
 export async function fetchRecordEntryStatus() {
-  return apiJson<RecordEntryStatusResponse>('/api/record-entry-status');
+  const payload = await apiJson<RecordEntryStatusResponse>('/api/record-entry-status');
+  const store = await loadUploadsProcessingStore();
+  return {
+    ...payload,
+    status: mergeRecordEntryStatusWithUploadsProcessing(payload.status, store),
+  };
 }
 
 export async function fetchRecordingDraft(mode: RecordingDraftMode) {
-  return apiJson<RecordingDraftResponse>(`/api/recording-draft?mode=${encodeURIComponent(mode)}`);
+  const payload = await apiJson<RecordingDraftResponse>(
+    `/api/recording-draft?mode=${encodeURIComponent(mode)}`,
+  );
+  const store = await loadUploadsProcessingStore();
+  return mergeRecordingDraftWithUploadsProcessing(payload, store, mode);
 }
 
 export async function updateRecordingDraft(payload: {
@@ -264,9 +293,25 @@ export async function discardRecordingDraft(mode: RecordingDraftMode) {
 export async function uploadToRecordingDraft(payload: {
   mode: RecordingDraftMode;
   timezoneOffsetMinutes: number;
-  storageItems: SubmitStorageItem[];
+  storageItems: Array<
+    SubmitStorageItem & {
+      clientCaptureId?: string;
+      localDraftId?: string;
+      localGroupId?: string | null;
+    }
+  >;
 }) {
-  return apiJson<RecordingDraftResponse>('/api/recording-draft/upload', {
+  return apiJson<
+    RecordingDraftResponse & {
+      createdGames?: Array<{
+        clientCaptureId?: string | null;
+        draftId: string;
+        groupId?: string | null;
+        draftGameId: string;
+        captureOrder: number;
+      }>;
+    }
+  >('/api/recording-draft/upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -337,6 +382,7 @@ export async function finalizeRecordingDraft(payload: {
   targetSessionId?: string | null;
   name?: string | null;
   description?: string | null;
+  clientOperationId?: string;
 }) {
   return apiJson<{
     ok: boolean;
@@ -368,6 +414,7 @@ export async function queueLiveSessionCapture(payload: {
   timezoneOffsetMinutes: number;
   name?: string;
   description?: string;
+  clientCaptureId?: string;
 }) {
   return apiJson<LiveSessionCaptureResponse>('/api/live-session/capture', {
     method: 'POST',
@@ -396,8 +443,10 @@ export async function deleteLiveSessionGame(liveGameId: string) {
   });
 }
 
-export async function endLiveSession() {
+export async function endLiveSession(clientOperationId?: string) {
   return apiJson<LiveSessionEndResponse>('/api/live-session/end', {
     method: 'POST',
+    headers: clientOperationId ? { 'Content-Type': 'application/json' } : undefined,
+    body: clientOperationId ? JSON.stringify({ clientOperationId }) : undefined,
   });
 }

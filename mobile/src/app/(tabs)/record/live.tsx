@@ -1,4 +1,3 @@
-import { File as ExpoFile } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -27,13 +26,12 @@ import LiveGameEditSheet from '@/components/live-game-edit-sheet';
 import LiveSessionGameCard from '@/components/live-session-game-card';
 import StackBadge from '@/components/stack-badge';
 import SurfaceCard from '@/components/surface-card';
+import UploadsProcessingBanner from '@/components/uploads-processing-banner';
 import {
   deleteLiveSessionGame,
   discardLiveSession,
-  endLiveSession,
   fetchLiveSession,
   queryKeys,
-  queueLiveSessionCapture,
   updateLiveSession,
   updateLiveSessionGame,
 } from '@/lib/backend';
@@ -48,24 +46,12 @@ import {
 } from '@/lib/live-session';
 import { formatTenths } from '@/lib/number-format';
 import { confirmAction } from '@/lib/confirm';
-import { deriveCapturedAtHint, sanitizeFilename } from '@/lib/upload';
-import { supabase } from '@/lib/supabase';
 import type { LiveSessionGame, LiveSessionResponse, LiveSessionStats } from '@/lib/types';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { useAuth } from '@/providers/auth-provider';
-
-const DEFAULT_BUCKET = 'scoreboards-temp';
+import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
 const BASE_CONTENT_BOTTOM_PADDING = 132;
-
-async function getUploadBody(asset: ImagePicker.ImagePickerAsset) {
-  if (asset.file) {
-    return asset.file;
-  }
-
-  const file = new ExpoFile(asset.uri);
-  return file.arrayBuffer();
-}
 
 function updateLiveSessionCache(
   current: LiveSessionResponse | undefined,
@@ -216,6 +202,13 @@ export default function LiveSessionScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user, loading: authLoading } = useAuth();
+  const {
+    deleteLiveCapture,
+    discardLiveSessionLocal,
+    enqueueLiveCapture,
+    finalizeLiveSessionLocal,
+    updateLiveSessionLocal,
+  } = useUploadsProcessing();
   const scrollRef = useRef<ScrollView | null>(null);
   const pagerRef = useRef<ScrollView | null>(null);
   const comparisonCategoryScrollRef = useRef<ScrollView | null>(null);
@@ -380,6 +373,7 @@ export default function LiveSessionScreen() {
     (game) => game.status === 'queued' || game.status === 'processing',
   );
   const hasFailedGames = nonReadyGames.some((game) => game.status === 'error');
+  const hasAnyVisibleGames = (liveSession?.games?.length ?? 0) > 0;
 
   const selectionMutation = useMutation({
     mutationFn: async ({
@@ -441,49 +435,28 @@ export default function LiveSessionScreen() {
       setSourceOpen(false);
       setActiveTab('games');
       scrollToTab('games', true);
-      const filename = sanitizeFilename(asset.fileName ?? undefined, 0);
-      const storageKey = `${user.id}/${Date.now()}-${filename}`;
-      const uploadBody = await getUploadBody(asset);
-
-      const upload = await supabase.storage.from(DEFAULT_BUCKET).upload(storageKey, uploadBody, {
-        contentType: asset.mimeType ?? 'image/jpeg',
-        upsert: false,
+      await enqueueLiveCapture({
+        asset,
+        liveSession,
+        name: draftName,
+        description: draftDescription,
       });
-
-      if (upload.error) {
-        throw new Error(upload.error.message || 'Failed to upload scoreboard image.');
-      }
-
-      try {
-        return queueLiveSessionCapture({
-          storageKey,
-          capturedAtHint: deriveCapturedAtHint(asset),
-          timezoneOffsetMinutes: new Date().getTimezoneOffset(),
-          name: liveSession ? undefined : draftName,
-          description: liveSession ? undefined : draftDescription,
-        });
-      } catch (nextError) {
-        await supabase.storage.from(DEFAULT_BUCKET).remove([storageKey]);
-        throw nextError;
-      }
+      return true;
     },
-    onSuccess: async (payload) => {
-      if (!payload) {
+    onSuccess: async (didQueue) => {
+      if (!didQueue) {
         return;
       }
 
       setSourceOpen(false);
       setError('');
-      pendingScrollGameIdRef.current = payload.liveGameId;
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
-      ]);
+      pendingScrollGameIdRef.current = null;
+      await Promise.resolve();
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to add scoreboard.');
     },
-  });
+  },);
 
   const editGameMutation = useMutation({
     mutationFn: updateLiveSessionGame,
@@ -501,7 +474,14 @@ export default function LiveSessionScreen() {
   });
 
   const deleteGameMutation = useMutation({
-    mutationFn: (liveGameId: string) => deleteLiveSessionGame(liveGameId),
+    mutationFn: async (liveGameId: string) => {
+      const deletedLocally = await deleteLiveCapture(liveGameId);
+      if (deletedLocally) {
+        return { deletedLocally: true, deletedSession: false };
+      }
+      const response = await deleteLiveSessionGame(liveGameId);
+      return { ...response, deletedLocally: false };
+    },
     onMutate: (liveGameId) => {
       setDeletingGameIds((current) =>
         current.includes(liveGameId) ? current : [...current, liveGameId],
@@ -513,10 +493,12 @@ export default function LiveSessionScreen() {
         setDraftDescription('');
       }
       setError('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
-      ]);
+      if (!payload.deletedLocally) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
+        ]);
+      }
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to delete live game.');
@@ -527,7 +509,14 @@ export default function LiveSessionScreen() {
   });
 
   const discardLiveSessionMutation = useMutation({
-    mutationFn: discardLiveSession,
+    mutationFn: async () => {
+      const discardedLocally = await discardLiveSessionLocal({ liveSession });
+      if (discardedLocally) {
+        return { ok: true, discarded: true, discardedLocally: true };
+      }
+      const response = await discardLiveSession();
+      return { ...response, discardedLocally: false };
+    },
     onSuccess: async () => {
       setError('');
       setDraftName('');
@@ -549,31 +538,21 @@ export default function LiveSessionScreen() {
       if (!liveSession) {
         throw new Error('No active live session was found.');
       }
-
-      const trimmedName = draftName.trim();
-      const trimmedDescription = draftDescription.trim();
-      const currentName = liveSession.name?.trim() || '';
-      const currentDescription = liveSession.description?.trim() || '';
-
-      if (trimmedName !== currentName || trimmedDescription !== currentDescription) {
-        await updateLiveSession({
-          name: trimmedName,
-          description: trimmedDescription,
-        });
-      }
-
-      return endLiveSession();
+      return finalizeLiveSessionLocal({
+        liveSession,
+        name: draftName,
+        description: draftDescription,
+      });
     },
     onSuccess: async (payload) => {
       setError('');
       setEndSessionOpen(false);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
       ]);
-      router.replace(`/sessions/${payload.sessionId}` as never);
+      router.replace(`/sessions/${payload.routeSessionId}` as never);
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to end live session.');
@@ -595,6 +574,10 @@ export default function LiveSessionScreen() {
         selectedPlayerKeys: nextSelectedPlayerKeys,
       })),
     );
+    updateLiveSessionLocal({
+      liveSession,
+      selectedPlayerKeys: nextSelectedPlayerKeys,
+    });
 
     selectionRevisionRef.current += 1;
     selectionMutation.mutate({
@@ -769,6 +752,7 @@ export default function LiveSessionScreen() {
               }
             />
           ) : null}
+          <UploadsProcessingBanner />
 
           <SurfaceCard style={styles.sectionCard}>
             <Text style={styles.sectionBody}>
@@ -1070,9 +1054,9 @@ export default function LiveSessionScreen() {
           ) : selectionError ? (
             <Text style={styles.dockNote}>{selectionError}</Text>
           ) : hasUnfinishedGames ? (
-            <Text style={styles.dockNote}>Wait for all scoreboards to finish processing.</Text>
+            <Text style={styles.dockNote}>You can end now. Remaining scoreboards will keep syncing in the background.</Text>
           ) : hasFailedGames ? (
-            <Text style={styles.dockNote}>Remove or fix failed scoreboards before ending the session.</Text>
+            <Text style={styles.dockNote}>You can end now. Failed scoreboards will stay in Uploads & Processing until you retry or delete them.</Text>
           ) : projectedLoggedGameCount > 0 ? (
             <Text style={styles.dockNote}>
               Ending this session will log {projectedLoggedGameCount} games from {readyGames.length} scoreboards.
@@ -1085,11 +1069,8 @@ export default function LiveSessionScreen() {
               endSessionMutation.isPending ||
               !liveSession ||
               !hasSelectedPlayers ||
-              readyGames.length === 0 ||
-              hasUnfinishedGames ||
-              hasFailedGames ||
               Boolean(selectionError) ||
-              projectedLoggedGameCount === 0
+              !hasAnyVisibleGames
             }
           />
         </View>
@@ -1128,7 +1109,9 @@ export default function LiveSessionScreen() {
           style={styles.modalBackdrop}>
           <SurfaceCard style={styles.modalCard} tone="raised">
             <Text style={styles.modalTitle}>End Session</Text>
-            <Text style={styles.modalBody}>Ending this session is final.</Text>
+            <Text style={styles.modalBody}>
+              The session will appear in your log immediately. Any remaining uploads or processing will continue in the background.
+            </Text>
             <View style={styles.summaryList}>
               <Text style={styles.summaryLine}>
                 Selected names: {selectedLabels.join(', ') || 'None'}

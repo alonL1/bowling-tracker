@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 
 import { normalizeOptionalTimestamp } from "../shared";
+import { isUniqueViolation } from "../../utils/mobile-sync-operations";
 import {
   cleanupLiveSessionIfEmpty,
   getActiveLiveSessionRecord,
@@ -18,10 +19,20 @@ type CapturePayload = {
   timezoneOffsetMinutes?: number | string | null;
   name?: string;
   description?: string;
+  clientCaptureId?: string | null;
 };
 
 type StorageObjectRow = {
   name: string;
+};
+
+type ExistingLiveCapture = {
+  jobId: string | null;
+  liveSessionId: string;
+  liveGameId: string;
+  sessionId: string;
+  storageKey: string;
+  capturedAtHint: string | null;
 };
 
 function normalizeOptionalInteger(value: unknown) {
@@ -59,6 +70,102 @@ async function storageObjectExists(
   );
 }
 
+async function findExistingLiveCapture(
+  supabase: NonNullable<ReturnType<typeof getServerSupabase>>,
+  userId: string,
+  clientCaptureId: string
+) {
+  const { data: liveGame, error: liveGameError } = await supabase
+    .from("live_session_games")
+    .select("id,live_session_id,storage_key,captured_at_hint")
+    .eq("client_capture_id", clientCaptureId)
+    .maybeSingle();
+
+  if (liveGameError) {
+    throw new Error(
+      liveGameError.message || "Failed to load existing live capture."
+    );
+  }
+
+  if (!liveGame) {
+    return null;
+  }
+
+  const { data: liveSession, error: liveSessionError } = await supabase
+    .from("live_sessions")
+    .select("id,session_id,user_id")
+    .eq("id", liveGame.live_session_id)
+    .maybeSingle();
+
+  if (liveSessionError) {
+    throw new Error(
+      liveSessionError.message || "Failed to load existing live session."
+    );
+  }
+
+  if (!liveSession || liveSession.user_id !== userId) {
+    return null;
+  }
+
+  const { data: analysisJob, error: analysisJobError } = await supabase
+    .from("analysis_jobs")
+    .select("id")
+    .eq("live_session_game_id", liveGame.id)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (analysisJobError) {
+    throw new Error(
+      analysisJobError.message || "Failed to load existing live session job."
+    );
+  }
+
+  return {
+    jobId: analysisJob?.id ?? null,
+    liveSessionId: liveSession.id as string,
+    liveGameId: liveGame.id as string,
+    sessionId: liveSession.session_id as string,
+    storageKey: liveGame.storage_key as string,
+    capturedAtHint:
+      typeof liveGame.captured_at_hint === "string"
+        ? liveGame.captured_at_hint
+        : null,
+  };
+}
+
+async function ensureLiveCaptureJob(
+  supabase: NonNullable<ReturnType<typeof getServerSupabase>>,
+  existingCapture: ExistingLiveCapture,
+  userId: string,
+  timezoneOffsetMinutes: number | null
+) {
+  if (existingCapture.jobId) {
+    return existingCapture.jobId;
+  }
+
+  const jobId = randomUUID();
+  const { error } = await supabase.from("analysis_jobs").insert({
+    id: jobId,
+    storage_key: existingCapture.storageKey,
+    status: "queued",
+    player_name: "live-session",
+    user_id: userId,
+    session_id: existingCapture.sessionId,
+    live_session_id: existingCapture.liveSessionId,
+    live_session_game_id: existingCapture.liveGameId,
+    timezone_offset_minutes: timezoneOffsetMinutes,
+    captured_at_hint: existingCapture.capturedAtHint,
+    job_type: "live_session",
+  });
+
+  if (error) {
+    throw new Error(error.message || "Failed to queue live session capture.");
+  }
+
+  await triggerWorkerIfConfigured(1);
+  return jobId;
+}
+
 export async function POST(request: Request) {
   const supabase = getServerSupabase();
   if (!supabase) {
@@ -76,6 +183,10 @@ export async function POST(request: Request) {
   const payload = (await request.json()) as CapturePayload;
   const storageKey =
     typeof payload.storageKey === "string" ? payload.storageKey.trim() : "";
+  const clientCaptureId =
+    typeof payload.clientCaptureId === "string"
+      ? payload.clientCaptureId.trim() || null
+      : null;
   if (!storageKey) {
     return NextResponse.json(
       { error: "storageKey is required." },
@@ -92,8 +203,37 @@ export async function POST(request: Request) {
   }
 
   const bucket = process.env.SUPABASE_STORAGE_BUCKET || "scoreboards-temp";
+  const capturedAtHint = normalizeOptionalTimestamp(payload.capturedAtHint);
+  const timezoneOffsetMinutes = normalizeOptionalInteger(
+    payload.timezoneOffsetMinutes
+  );
 
   try {
+    if (clientCaptureId) {
+      const existingCapture = await findExistingLiveCapture(
+        supabase,
+        userId,
+        clientCaptureId
+      );
+
+      if (existingCapture) {
+        const jobId = await ensureLiveCaptureJob(
+          supabase,
+          existingCapture,
+          userId,
+          timezoneOffsetMinutes
+        );
+
+        return NextResponse.json({
+          ok: true,
+          jobId,
+          liveSessionId: existingCapture.liveSessionId,
+          liveGameId: existingCapture.liveGameId,
+          sessionId: existingCapture.sessionId,
+        });
+      }
+    }
+
     const exists = await storageObjectExists(supabase, bucket, userId, storageKey);
     if (!exists) {
       return NextResponse.json(
@@ -180,15 +320,12 @@ export async function POST(request: Request) {
     }
 
     const captureOrder = (lastGame?.capture_order ?? 0) + 1;
-    const capturedAtHint = normalizeOptionalTimestamp(payload.capturedAtHint);
-    const timezoneOffsetMinutes = normalizeOptionalInteger(
-      payload.timezoneOffsetMinutes
-    );
 
     const { data: liveGame, error: liveGameError } = await supabase
       .from("live_session_games")
       .insert({
         live_session_id: liveSessionId,
+        client_capture_id: clientCaptureId,
         capture_order: captureOrder,
         storage_key: storageKey,
         captured_at_hint: capturedAtHint,
@@ -198,6 +335,31 @@ export async function POST(request: Request) {
       .single();
 
     if (liveGameError || !liveGame) {
+      if (clientCaptureId && isUniqueViolation(liveGameError)) {
+        const existingCapture = await findExistingLiveCapture(
+          supabase,
+          userId,
+          clientCaptureId
+        );
+
+        if (existingCapture) {
+          const jobId = await ensureLiveCaptureJob(
+            supabase,
+            existingCapture,
+            userId,
+            timezoneOffsetMinutes
+          );
+
+          return NextResponse.json({
+            ok: true,
+            jobId,
+            liveSessionId: existingCapture.liveSessionId,
+            liveGameId: existingCapture.liveGameId,
+            sessionId: existingCapture.sessionId,
+          });
+        }
+      }
+
       if (liveSessionId && sessionId) {
         await cleanupLiveSessionIfEmpty(
           supabase,
