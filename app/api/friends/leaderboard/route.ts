@@ -304,6 +304,7 @@ export async function GET(request: Request) {
 
       return {
         userId: participantId,
+        displayName: publicProfile?.displayName || publicProfile?.username || "bowler",
         username: publicProfile?.username || "bowler",
         avatarKind: publicProfile?.avatarKind || "initials",
         avatarPresetId: publicProfile?.avatarPresetId || null,

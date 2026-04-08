@@ -94,6 +94,7 @@ export async function GET(
     valid: true,
     inviter: {
       userId: inviterUserId,
+      displayName: inviter?.displayName || inviter?.username || "bowler",
       username: inviter?.username || "bowler",
       avatarKind: inviter?.avatarKind || "initials",
       avatarPresetId: inviter?.avatarPresetId || null,

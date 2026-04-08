@@ -34,6 +34,7 @@ export type ProfileRow = {
 export type PublicProfilePayload = {
   userId: string;
   username: string;
+  displayName: string;
   avatarKind: AvatarKind;
   avatarPresetId: AvatarPresetId | null;
   avatarUrl: string | null;
@@ -217,6 +218,28 @@ export function buildInitials(input: {
   return "P";
 }
 
+export function buildLegacyDisplayName(input: {
+  username?: string | null;
+  email?: string | null;
+  userId?: string | null;
+}) {
+  const username = trimNullable(input.username);
+  if (username) {
+    return username;
+  }
+
+  const emailPrefix = trimNullable(input.email?.split("@")[0] ?? null);
+  if (emailPrefix) {
+    return emailPrefix;
+  }
+
+  if (input.userId) {
+    return `bowler_${input.userId.slice(0, 8).toLowerCase()}`;
+  }
+
+  return "bowler";
+}
+
 export function isProfileComplete(profile: Pick<ProfileRow, "username" | "first_name"> | null) {
   if (!profile) {
     return false;
@@ -277,13 +300,15 @@ export async function ensureProfileForAuthUser(
   if (!existing) {
     const { data: inserted, error: insertError } = await supabase
       .from("profiles")
-      .insert({
+      .upsert({
         user_id: authUser.id,
         username: seed.username,
         username_normalized: seed.username,
         first_name: seed.firstName,
         last_name: seed.lastName,
         avatar_kind: "initials"
+      }, {
+        onConflict: "user_id"
       })
       .select(PROFILE_SELECT)
       .single<ProfileRow>();
@@ -405,10 +430,16 @@ export async function buildPublicProfilesByUserId(
           email: fallbackEmail ?? undefined,
           user_metadata: null
         });
+      const displayName = buildLegacyDisplayName({
+        username: trimNullable(profile?.username ?? null),
+        email: fallbackEmail,
+        userId
+      });
 
       results.set(userId, {
         userId,
         username,
+        displayName,
         avatarKind: profile?.avatar_kind || "initials",
         avatarPresetId: profile?.avatar_preset_id || null,
         avatarUrl: buildAvatarUrl(
