@@ -1,17 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUserFromRequest } from "../../../utils/auth";
+import { buildPublicProfilesByUserId } from "../../../utils/profiles";
 
 export const runtime = "nodejs";
-
-function getEmailPrefix(email?: string | null) {
-  if (!email) {
-    return "Bowler";
-  }
-  const [prefix] = email.split("@");
-  const trimmed = prefix?.trim();
-  return trimmed || "Bowler";
-}
 
 export async function GET(
   request: Request,
@@ -60,10 +52,20 @@ export async function GET(
   }
 
   const inviterUserId = link.inviter_user_id as string;
-  const { data: inviterUserData } = await supabase.auth.admin.getUserById(
-    inviterUserId
-  );
-  const inviterDisplayName = getEmailPrefix(inviterUserData.user?.email);
+  let inviter = null;
+  try {
+    const publicProfiles = await buildPublicProfilesByUserId(supabase, [inviterUserId]);
+    inviter = publicProfiles.get(inviterUserId) || null;
+  } catch (error) {
+    return NextResponse.json(
+      {
+        valid: false,
+        error:
+          error instanceof Error ? error.message : "Failed to load inviter profile."
+      },
+      { status: 500 }
+    );
+  }
 
   const viewer = await getUserFromRequest(request);
   const authRequired = !viewer.userId || viewer.isGuest;
@@ -92,7 +94,11 @@ export async function GET(
     valid: true,
     inviter: {
       userId: inviterUserId,
-      displayName: inviterDisplayName
+      username: inviter?.username || "bowler",
+      avatarKind: inviter?.avatarKind || "initials",
+      avatarPresetId: inviter?.avatarPresetId || null,
+      avatarUrl: inviter?.avatarUrl || null,
+      initials: inviter?.initials || "P"
     },
     authRequired,
     selfInvite,

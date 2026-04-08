@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUserFromRequest } from "../../utils/auth";
+import { buildPublicProfilesByUserId } from "../../utils/profiles";
 
 export const runtime = "nodejs";
 
@@ -56,18 +57,6 @@ type GameRow = {
 
 function roundToTenths(value: number) {
   return Math.round(value * 10) / 10;
-}
-
-function getEmailPrefix(email?: string | null, fallbackUserId?: string) {
-  if (!email) {
-    return fallbackUserId ? `bowler-${fallbackUserId.slice(0, 8)}` : "Bowler";
-  }
-  const [prefix] = email.split("@");
-  const trimmed = prefix?.trim();
-  if (trimmed) {
-    return trimmed;
-  }
-  return fallbackUserId ? `bowler-${fallbackUserId.slice(0, 8)}` : "Bowler";
 }
 
 function createBlankMetrics(): MutableMetrics {
@@ -278,17 +267,24 @@ export async function GET(request: Request) {
         : 0;
   });
 
-  const participants = await Promise.all(
-    participantIds.map(async (participantId) => {
-      const metrics = metricsByUser.get(participantId) ?? createBlankMetrics();
-      const { data: authUserData } = await supabase.auth.admin.getUserById(
-        participantId
-      );
-      const displayName = getEmailPrefix(
-        authUserData.user?.email ?? null,
-        participantId
-      );
+  let publicProfiles;
+  try {
+    publicProfiles = await buildPublicProfilesByUserId(supabase, participantIds);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load participant profiles."
+      },
+      { status: 500 }
+    );
+  }
 
+  const participants = participantIds.map((participantId) => {
+      const metrics = metricsByUser.get(participantId) ?? createBlankMetrics();
+      const publicProfile = publicProfiles.get(participantId);
       const normalizedMetrics: LeaderboardMetrics = {
         bestGame: metrics.bestGame,
         bestAverage: roundToTenths(metrics.bestAverage),
@@ -308,11 +304,14 @@ export async function GET(request: Request) {
 
       return {
         userId: participantId,
-        displayName,
+        username: publicProfile?.username || "bowler",
+        avatarKind: publicProfile?.avatarKind || "initials",
+        avatarPresetId: publicProfile?.avatarPresetId || null,
+        avatarUrl: publicProfile?.avatarUrl || null,
+        initials: publicProfile?.initials || "P",
         metrics: normalizedMetrics
       };
-    })
-  );
+    });
 
   return NextResponse.json({
     selfUserId: user.userId,

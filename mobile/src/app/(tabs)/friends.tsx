@@ -19,12 +19,14 @@ import ActionButton from '@/components/action-button';
 import CenteredState from '@/components/centered-state';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
+import ProfileAvatar from '@/components/profile-avatar';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
 import { createInvite, fetchLeaderboard, queryKeys } from '@/lib/backend';
 import { formatTenths } from '@/lib/number-format';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { formatHandle } from '@/lib/profile';
 import type { InviteLinkResponse, LeaderboardMetric, LeaderboardRow } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -90,6 +92,7 @@ export default function FriendsScreen() {
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [inviteStatus, setInviteStatus] = useState('');
   const [invitePayload, setInvitePayload] = useState<InviteLinkResponse | null>(null);
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
   const [tabLabelWidths, setTabLabelWidths] = useState<MetricTabWidths>({});
   const [pagerWidth, setPagerWidth] = useState(0);
   const tabScrollRef = useRef<ScrollView | null>(null);
@@ -108,6 +111,7 @@ export default function FriendsScreen() {
     onSuccess: (payload) => {
       setInvitePayload(payload);
       setInvitePanelOpen(true);
+      setInviteLinkCopied(false);
       setInviteStatus('');
     },
     onError: (error) => {
@@ -121,6 +125,7 @@ export default function FriendsScreen() {
     }
     setInvitePanelOpen(false);
     setInvitePayload(null);
+    setInviteLinkCopied(false);
     setInviteStatus('');
   }, [isGuest]);
 
@@ -134,7 +139,7 @@ export default function FriendsScreen() {
         if (delta !== 0) {
           return delta;
         }
-        const nameDelta = left.displayName.localeCompare(right.displayName, undefined, {
+        const nameDelta = left.username.localeCompare(right.username, undefined, {
           sensitivity: 'base',
         });
         if (nameDelta !== 0) {
@@ -252,7 +257,8 @@ export default function FriendsScreen() {
       return;
     }
     await Clipboard.setStringAsync(invitePayload.inviteUrl);
-    setInviteStatus('Invite link copied.');
+    setInviteLinkCopied(true);
+    setInviteStatus('');
   };
 
   const handleShareInvite = async () => {
@@ -447,10 +453,18 @@ export default function FriendsScreen() {
                   page.rankedRows.map((row) => (
                     <View key={row.userId} style={styles.leaderboardRow}>
                       <Text style={styles.rankText}>{row.rank}</Text>
+                      <ProfileAvatar
+                        size={42}
+                        avatarKind={row.avatarKind}
+                        avatarPresetId={row.avatarPresetId}
+                        avatarUrl={row.avatarUrl}
+                        initials={row.initials}
+                        username={row.username}
+                      />
                       <Text
                         style={[styles.rowName, row.userId === selfUserId && styles.rowNameSelf]}
                         numberOfLines={1}>
-                        {row.displayName}
+                        {formatHandle(row.username)}
                       </Text>
                       <Text style={styles.rowValue}>
                         {formatMetricValue(page.metric, row.metricValue)}
@@ -471,7 +485,10 @@ export default function FriendsScreen() {
               <View />
               <IconAction
                 accessibilityLabel="Close invite panel"
-                onPress={() => setInvitePanelOpen(false)}
+                onPress={() => {
+                  setInvitePanelOpen(false);
+                  setInviteLinkCopied(false);
+                }}
                 icon={<Ionicons name="close" size={20} color={palette.muted} />}
               />
             </View>
@@ -481,9 +498,25 @@ export default function FriendsScreen() {
               join your leaderboard.
             </Text>
 
-            <ActionButton label="Copy link" onPress={handleCopyInvite} />
+            <ActionButton
+              label={inviteLinkCopied ? 'Copied' : 'Copy link'}
+              onPress={handleCopyInvite}
+              style={inviteLinkCopied ? styles.copiedButton : undefined}
+              leftIcon={
+                inviteLinkCopied ? (
+                  <Ionicons name="checkmark" size={18} color={palette.text} />
+                ) : undefined
+              }
+            />
             <ActionButton label="Share link" onPress={handleShareInvite} />
-            <ActionButton label="Close" onPress={() => setInvitePanelOpen(false)} variant="secondary" />
+            <ActionButton
+              label="Close"
+              onPress={() => {
+                setInvitePanelOpen(false);
+                setInviteLinkCopied(false);
+              }}
+              variant="secondary"
+            />
           </SurfaceCard>
         </View>
       </Modal>
@@ -701,6 +734,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
     fontFamily: fontFamilySans,
+  },
+  copiedButton: {
+    backgroundColor: palette.accentSoft,
   },
   pressed: {
     opacity: 0.9,

@@ -8,18 +8,25 @@ import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
 
-export default function UploadsProcessingBanner() {
+type UploadsProcessingBannerProps = {
+  showPending?: boolean;
+};
+
+export default function UploadsProcessingBanner({
+  showPending = true,
+}: UploadsProcessingBannerProps) {
   const router = useRouter();
   const { summary } = useUploadsProcessing();
+  const visiblePendingCount = showPending ? summary.pendingCount : 0;
 
-  if (summary.pendingCount === 0 && summary.failedCount === 0) {
+  if (visiblePendingCount === 0 && summary.failedCount === 0) {
     return null;
   }
 
   const detailText =
     summary.failedCount > 0
       ? `${summary.failedCount} item${summary.failedCount === 1 ? '' : 's'} need attention.`
-      : `${summary.pendingCount} item${summary.pendingCount === 1 ? '' : 's'} still syncing in the background.`;
+      : `${visiblePendingCount} item${visiblePendingCount === 1 ? '' : 's'} still syncing in the background.`;
   const helperText =
     summary.failedCount > 0
       ? 'Open Uploads & Processing to retry or delete failed scoreboards.'

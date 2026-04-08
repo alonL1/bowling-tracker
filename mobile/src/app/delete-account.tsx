@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
 import InfoBanner from '@/components/info-banner';
+import PageBackButton from '@/components/page-back-button';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { deleteOwnAccount } from '@/lib/backend';
@@ -82,6 +83,7 @@ export default function DeleteAccountScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
+          <PageBackButton fallbackHref="/(tabs)/account" />
           <Text style={styles.title}>Delete Account</Text>
           <Text style={styles.subtitle}>PinPoint</Text>
           <Text style={styles.meta}>Last updated: March 24, 2026</Text>

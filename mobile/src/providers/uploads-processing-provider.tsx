@@ -108,8 +108,8 @@ type UploadsProcessingContextValue = {
   store: UploadsProcessingStore;
   summary: ReturnType<typeof getUploadsProcessingSummary>;
   ready: boolean;
-  enqueueLiveCapture: (payload: {
-    asset: ImagePicker.ImagePickerAsset;
+  enqueueLiveCaptures: (payload: {
+    assets: ImagePicker.ImagePickerAsset[];
     liveSession: LiveSession | null;
     nextSessionNumber?: number | null;
     name?: string;
@@ -1059,20 +1059,25 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
     };
   }, [ready, runSyncPass, scheduleSyncNow, user?.id]);
 
-  const enqueueLiveCapture = useCallback(
+  const enqueueLiveCaptures = useCallback(
     async (payload: {
-      asset: ImagePicker.ImagePickerAsset;
+      assets: ImagePicker.ImagePickerAsset[];
       liveSession: LiveSession | null;
       nextSessionNumber?: number | null;
       name?: string;
       description?: string;
     }) => {
       const currentTime = nowIso();
-      const localFilePrefix = createLocalId('capture');
-      const persistedFile = await persistImageAssetLocally(payload.asset, {
-        fileNamePrefix: localFilePrefix,
-        fallbackIndex: 0,
-      });
+      const persistedAssets = await Promise.all(
+        payload.assets.map(async (asset, index) => ({
+          asset,
+          index,
+          persistedFile: await persistImageAssetLocally(asset, {
+            fileNamePrefix: createLocalId('capture'),
+            fallbackIndex: index,
+          }),
+        })),
+      );
 
       updateStore((current) => {
         const existingLiveSession = current.liveSessions.find(
@@ -1087,33 +1092,34 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
           description: payload.description,
         });
 
-        const captureOrder =
-          current.captureItems
-            .filter((entry) => entry.liveSessionId === liveSessionEntry.id)
-            .reduce((max, entry) => Math.max(max, entry.captureOrder), 0) + 1;
-
-        const captureItem: UploadsProcessingCaptureItem = {
-          id: createLocalId('live-capture'),
-          sourceFlow: 'live_session',
-          createdAt: currentTime,
-          updatedAt: currentTime,
-          localFileUri: persistedFile.localFileUri,
-          localFileName: persistedFile.localFileName,
-          mimeType: payload.asset.mimeType ?? 'image/jpeg',
-          fileSizeBytes: payload.asset.fileSize ?? null,
-          capturedAtHint: deriveCapturedAtHint(payload.asset),
-          status: 'captured_local',
-          retryCount: 0,
-          lastError: null,
-          liveSessionId: liveSessionEntry.id,
-          liveGameId: createLocalId('live-game'),
-          serverSessionId: liveSessionEntry.serverSessionId ?? null,
-          serverLiveSessionId: liveSessionEntry.serverLiveSessionId ?? null,
-          captureOrder,
-        };
-
         current.liveSessions = replaceStoreEntity(current.liveSessions, liveSessionEntry);
-        current.captureItems = replaceStoreEntity(current.captureItems, captureItem);
+        const existingCaptureOrder = current.captureItems
+          .filter((entry) => entry.liveSessionId === liveSessionEntry.id)
+          .reduce((max, entry) => Math.max(max, entry.captureOrder), 0);
+
+        persistedAssets.forEach((entry, index) => {
+          const captureItem: UploadsProcessingCaptureItem = {
+            id: createLocalId('live-capture'),
+            sourceFlow: 'live_session',
+            createdAt: currentTime,
+            updatedAt: currentTime,
+            localFileUri: entry.persistedFile.localFileUri,
+            localFileName: entry.persistedFile.localFileName,
+            mimeType: entry.asset.mimeType ?? 'image/jpeg',
+            fileSizeBytes: entry.asset.fileSize ?? null,
+            capturedAtHint: deriveCapturedAtHint(entry.asset),
+            status: 'captured_local',
+            retryCount: 0,
+            lastError: null,
+            liveSessionId: liveSessionEntry.id,
+            liveGameId: createLocalId('live-game'),
+            serverSessionId: liveSessionEntry.serverSessionId ?? null,
+            serverLiveSessionId: liveSessionEntry.serverLiveSessionId ?? null,
+            captureOrder: existingCaptureOrder + index + 1,
+          };
+
+          current.captureItems = replaceStoreEntity(current.captureItems, captureItem);
+        });
         return current;
       });
 
@@ -1191,21 +1197,34 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         return false;
       }
 
-      if (targetSession.serverLiveSessionId) {
-        return false;
-      }
-
       updateStore((current) => {
         const captureItems = current.captureItems.filter(
           (entry) => entry.liveSessionId === targetSession.id,
         );
+        const captureItemIds = new Set(captureItems.map((entry) => entry.id));
         captureItems.forEach((item) => deleteLocalUploadsProcessingFile(item.localFileUri));
         current.captureItems = current.captureItems.filter(
           (entry) => entry.liveSessionId !== targetSession.id,
         );
-        current.liveSessions = current.liveSessions.filter(
-          (entry) => entry.id !== targetSession.id,
+        current.finalizeOperations = current.finalizeOperations.filter(
+          (entry) =>
+            entry.liveSessionId !== targetSession.id &&
+            !entry.linkedCaptureItemIds.some((captureId) => captureItemIds.has(captureId)),
         );
+
+        const storedSession = current.liveSessions.find((entry) => entry.id === targetSession.id);
+        if (
+          storedSession &&
+          (storedSession.serverLiveSessionId || storedSession.serverSessionId)
+        ) {
+          storedSession.state = 'discarded';
+          storedSession.lastError = null;
+          storedSession.updatedAt = nowIso();
+        } else {
+          current.liveSessions = current.liveSessions.filter(
+            (entry) => entry.id !== targetSession.id,
+          );
+        }
         return current;
       });
 
@@ -1793,7 +1812,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
       store,
       summary: getUploadsProcessingSummary(store),
       ready,
-      enqueueLiveCapture,
+      enqueueLiveCaptures,
       updateLiveSessionLocal,
       deleteLiveCapture,
       discardLiveSessionLocal,
@@ -1815,7 +1834,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
       discardDraftLocal,
       discardLiveSessionLocal,
       enqueueDraftCaptures,
-      enqueueLiveCapture,
+      enqueueLiveCaptures,
       finalizeDraftLocal,
       finalizeLiveSessionLocal,
       ready,

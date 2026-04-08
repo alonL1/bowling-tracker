@@ -1,11 +1,13 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -18,9 +20,11 @@ import CenteredState from '@/components/centered-state';
 import InfoBanner from '@/components/info-banner';
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import SurfaceCard from '@/components/surface-card';
+import { checkUsernameAvailability } from '@/lib/backend';
 import { claimGuest } from '@/lib/backend';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { formatHandle, normalizeUsernameInput } from '@/lib/profile';
 import { getSessionSnapshot, isGuestUser } from '@/lib/supabase';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -59,6 +63,9 @@ export default function LoginScreen() {
     continueAsGuest,
   } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signIn');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -69,8 +76,36 @@ export default function LoginScreen() {
   const [transferPrompt, setTransferPrompt] = useState<TransferPrompt | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferError, setTransferError] = useState('');
+  const pagerRef = useRef<ScrollView | null>(null);
+  const [pagerWidth, setPagerWidth] = useState(0);
 
   const nextPath = useMemo(() => getSafeNextPath(params.next) as Href, [params.next]);
+  const currentSubtitle =
+    mode === 'signIn'
+      ? 'Sign in to access your sessions, uploads, chat, and friends.'
+      : 'Create an account to save your logs and access them on every device.';
+
+  const scrollToMode = (nextMode: AuthMode, animated: boolean) => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    pagerRef.current?.scrollTo({
+      x: nextMode === 'signUp' ? pagerWidth : 0,
+      y: 0,
+      animated,
+    });
+  };
+
+  const handleModePress = (nextMode: AuthMode) => {
+    if (nextMode === mode) {
+      return;
+    }
+
+    setMode(nextMode);
+    scrollToMode(nextMode, true);
+  };
+
   useEffect(() => {
     let active = true;
 
@@ -104,6 +139,20 @@ export default function LoginScreen() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      scrollToMode(mode, false);
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [mode, pagerWidth]);
 
   if (loading) {
     return <CenteredState title="Loading account..." loading />;
@@ -144,7 +193,7 @@ export default function LoginScreen() {
     return false;
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (targetMode: AuthMode) => {
     if (busy || transferBusy) {
       return;
     }
@@ -165,10 +214,22 @@ export default function LoginScreen() {
             }
           : null;
 
-      if (mode === 'signIn') {
+      if (targetMode === 'signIn') {
         await signInWithPassword(email.trim(), password);
       } else {
-        await signUpWithPassword(email.trim(), password);
+        const normalizedUsername = normalizeUsernameInput(username);
+        const usernameCheck = await checkUsernameAvailability(normalizedUsername);
+        if (!usernameCheck.available) {
+          throw new Error('That username is already taken.');
+        }
+
+        await signUpWithPassword({
+          firstName,
+          lastName,
+          username: normalizedUsername,
+          email: email.trim(),
+          password,
+        });
       }
 
       if (
@@ -185,7 +246,7 @@ export default function LoginScreen() {
         return;
       }
 
-      if (mode === 'signUp') {
+      if (targetMode === 'signUp') {
         setInfo('Account created. If email confirmation is enabled, check your inbox.');
       } else {
         setInfo('Sign in did not finish yet. If confirmation is required, complete it first.');
@@ -345,6 +406,150 @@ export default function LoginScreen() {
     }
   };
 
+  const renderAuthPage = (pageMode: AuthMode) => (
+    <View style={styles.pageContentInner}>
+      {pageMode === 'signUp' ? (
+        <>
+          <View style={styles.nameRow}>
+            <View style={[styles.formGroup, styles.nameField]}>
+              <Text style={styles.label}>First Name</Text>
+              <TextInput
+                placeholder="First name"
+                placeholderTextColor={palette.muted}
+                style={styles.input}
+                value={firstName}
+                onChangeText={setFirstName}
+              />
+            </View>
+
+            <View style={[styles.formGroup, styles.nameField]}>
+              <Text style={styles.label}>Last Name</Text>
+              <TextInput
+                placeholder="Optional"
+                placeholderTextColor={palette.muted}
+                style={styles.input}
+                value={lastName}
+                onChangeText={setLastName}
+              />
+            </View>
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Username</Text>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="username"
+              placeholderTextColor={palette.muted}
+              style={styles.input}
+              value={username}
+              onChangeText={setUsername}
+            />
+            <Text style={styles.helperText}>
+              Publicly shown as {formatHandle(normalizeUsernameInput(username) || 'username')}
+            </Text>
+          </View>
+        </>
+      ) : null}
+
+      <View style={styles.formGroup}>
+        <Text style={styles.label}>Email</Text>
+        <TextInput
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          placeholder="name@example.com"
+          placeholderTextColor={palette.muted}
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+        />
+      </View>
+
+      <View style={styles.formGroup}>
+        <Text style={styles.label}>Password</Text>
+        <TextInput
+          secureTextEntry
+          placeholder="Password"
+          placeholderTextColor={palette.muted}
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+        />
+      </View>
+
+      {error ? <InfoBanner text={error} tone="error" /> : null}
+      {info ? <InfoBanner text={info} /> : null}
+      {isGuest ? <InfoBanner text="You are currently using a guest session." /> : null}
+
+      <ActionButton
+        label={pageMode === 'signIn' ? 'Sign In' : 'Create Account'}
+        onPress={() => handleSubmit(pageMode)}
+        disabled={
+          busy ||
+          transferBusy ||
+          !email.trim() ||
+          !password ||
+          (pageMode === 'signUp' && (!firstName.trim() || !normalizeUsernameInput(username)))
+        }
+        loading={activeAction === 'password'}
+      />
+
+      {Platform.OS === 'ios' && appleSignInAvailable ? (
+        activeAction === 'apple' ? (
+          <ActionButton
+            label="Continue with Apple"
+            onPress={handleApple}
+            disabled={busy || transferBusy}
+            loading
+            variant="secondary"
+            leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
+          />
+        ) : (
+          <View
+            pointerEvents={busy || transferBusy ? 'none' : 'auto'}
+            style={busy || transferBusy ? styles.oauthButtonDisabled : undefined}>
+            <AppleAuthentication.AppleAuthenticationButton
+              buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+              cornerRadius={14}
+              onPress={handleApple}
+              style={styles.appleButton}
+            />
+          </View>
+        )
+      ) : null}
+
+      {Platform.OS === 'web' && appleSignInAvailable ? (
+        <ActionButton
+          label="Continue with Apple"
+          onPress={handleApple}
+          disabled={busy || transferBusy}
+          loading={activeAction === 'apple'}
+          variant="secondary"
+          leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
+        />
+      ) : null}
+
+      <ActionButton
+        label="Continue with Google"
+        onPress={handleGoogle}
+        disabled={busy || transferBusy}
+        loading={activeAction === 'google'}
+        variant="secondary"
+        leftIcon={<Ionicons name="logo-google" size={18} color={palette.text} />}
+      />
+
+      <ActionButton
+        label="Continue as Guest"
+        onPress={handleGuest}
+        disabled={busy || transferBusy}
+        loading={activeAction === 'guest'}
+        variant="secondary"
+      />
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
       <KeyboardAvoidingView
@@ -358,122 +563,77 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
             <Text style={styles.headerTitle}>PinPoint</Text>
-            <Text style={styles.headerSubtitle}>
-              {mode === 'signIn'
-                ? 'Sign in to access your sessions, uploads, chat, and friends.'
-                : 'Create an account to save your sessions, uploads, chat, and friends, and access them on every device.'}
-            </Text>
+            <Text style={styles.headerSubtitle}>{currentSubtitle}</Text>
           </View>
 
-          <View style={styles.formSection}>
+          <View style={styles.modeRowWrap}>
             <View style={styles.modeRow}>
               <View style={styles.modeGroup}>
-                <Text
-                  onPress={() => setMode('signIn')}
-                  style={[styles.modeButtonText, mode === 'signIn' && styles.modeButtonTextActive]}>
-                  Sign In
-                </Text>
+                <Pressable
+                  onPress={() => handleModePress('signIn')}
+                  style={({ pressed }) => [styles.modePressable, pressed && styles.pressed]}>
+                  <Text
+                    style={[
+                      styles.modeButtonText,
+                      mode === 'signIn' && styles.modeButtonTextActive,
+                    ]}>
+                    Sign In
+                  </Text>
+                </Pressable>
                 {mode === 'signIn' ? <View style={styles.modeIndicator} /> : <View style={styles.modeSpacer} />}
               </View>
               <View style={styles.modeGroup}>
-                <Text
-                  onPress={() => setMode('signUp')}
-                  style={[styles.modeButtonText, mode === 'signUp' && styles.modeButtonTextActive]}>
-                  Create Account
-                </Text>
+                <Pressable
+                  onPress={() => handleModePress('signUp')}
+                  style={({ pressed }) => [styles.modePressable, pressed && styles.pressed]}>
+                  <Text
+                    style={[
+                      styles.modeButtonText,
+                      mode === 'signUp' && styles.modeButtonTextActive,
+                    ]}>
+                    Create Account
+                  </Text>
+                </Pressable>
                 {mode === 'signUp' ? <View style={styles.modeIndicator} /> : <View style={styles.modeSpacer} />}
               </View>
             </View>
+          </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Email</Text>
-              <TextInput
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="email-address"
-                placeholder="name@example.com"
-                placeholderTextColor={palette.muted}
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-              />
-            </View>
+          <View
+            style={styles.pagerViewport}
+            onLayout={(event) => {
+              const nextWidth = Math.round(event.nativeEvent.layout.width);
+              if (!nextWidth || nextWidth === pagerWidth) {
+                return;
+              }
+              setPagerWidth(nextWidth);
+            }}>
+            <ScrollView
+              ref={pagerRef}
+              horizontal
+              pagingEnabled
+              nestedScrollEnabled
+              directionalLockEnabled
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              onMomentumScrollEnd={(event) => {
+                if (!pagerWidth) {
+                  return;
+                }
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Password</Text>
-              <TextInput
-                secureTextEntry
-                placeholder="Password"
-                placeholderTextColor={palette.muted}
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-              />
-            </View>
-
-            {error ? <InfoBanner text={error} tone="error" /> : null}
-            {info ? <InfoBanner text={info} /> : null}
-            {isGuest ? <InfoBanner text="You are currently using a guest session." /> : null}
-
-            <ActionButton
-              label={mode === 'signIn' ? 'Sign In' : 'Create Account'}
-              onPress={handleSubmit}
-              disabled={busy || transferBusy || !email.trim() || !password}
-              loading={activeAction === 'password'}
-            />
-
-            {Platform.OS === 'ios' && appleSignInAvailable ? (
-              activeAction === 'apple' ? (
-                <ActionButton
-                  label="Continue with Apple"
-                  onPress={handleApple}
-                  disabled={busy || transferBusy}
-                  loading
-                  variant="secondary"
-                  leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
-                />
-              ) : (
-                <View
-                  pointerEvents={busy || transferBusy ? 'none' : 'auto'}
-                  style={busy || transferBusy ? styles.oauthButtonDisabled : undefined}>
-                  <AppleAuthentication.AppleAuthenticationButton
-                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                    cornerRadius={14}
-                    onPress={handleApple}
-                    style={styles.appleButton}
-                  />
-                </View>
-              )
-            ) : null}
-
-            {Platform.OS === 'web' && appleSignInAvailable ? (
-              <ActionButton
-                label="Continue with Apple"
-                onPress={handleApple}
-                disabled={busy || transferBusy}
-                loading={activeAction === 'apple'}
-                variant="secondary"
-                leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
-              />
-            ) : null}
-
-            <ActionButton
-              label="Continue with Google"
-              onPress={handleGoogle}
-              disabled={busy || transferBusy}
-              loading={activeAction === 'google'}
-              variant="secondary"
-              leftIcon={<Ionicons name="logo-google" size={18} color={palette.text} />}
-            />
-
-            <ActionButton
-              label="Continue as Guest"
-              onPress={handleGuest}
-              disabled={busy || transferBusy}
-              loading={activeAction === 'guest'}
-              variant="secondary"
-            />
+                const nextMode =
+                  Math.round(event.nativeEvent.contentOffset.x / pagerWidth) === 1
+                    ? 'signUp'
+                    : 'signIn';
+                setMode(nextMode);
+              }}>
+              <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
+                {renderAuthPage('signIn')}
+              </View>
+              <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
+                {renderAuthPage('signUp')}
+              </View>
+            </ScrollView>
           </View>
         </KeyboardAwareScrollView>
       </KeyboardAvoidingView>
@@ -525,6 +685,7 @@ const styles = StyleSheet.create({
     paddingTop: 28,
     paddingBottom: 60,
     gap: spacing.xl,
+    flexGrow: 1,
   },
   header: {
     gap: spacing.md,
@@ -543,8 +704,11 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilySans,
     maxWidth: 480,
   },
-  formSection: {
-    gap: spacing.lg,
+  modeRowWrap: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xs,
   },
   modeRow: {
     flexDirection: 'row',
@@ -553,6 +717,9 @@ const styles = StyleSheet.create({
   },
   modeGroup: {
     gap: spacing.xs,
+  },
+  modePressable: {
+    alignSelf: 'flex-start',
   },
   modeSpacer: {
     height: 3,
@@ -574,8 +741,26 @@ const styles = StyleSheet.create({
     color: palette.text,
     fontWeight: '700',
   },
+  pagerViewport: {
+    overflow: 'hidden',
+  },
+  pagerPage: {},
+  pageContentInner: {
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
+    gap: spacing.lg,
+    paddingTop: spacing.sm,
+  },
   formGroup: {
     gap: spacing.sm,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  nameField: {
+    flex: 1,
   },
   label: {
     color: palette.text,
@@ -592,6 +777,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     lineHeight: 22,
+    fontFamily: fontFamilySans,
+  },
+  helperText: {
+    color: palette.muted,
+    fontSize: 13,
+    lineHeight: 18,
     fontFamily: fontFamilySans,
   },
   appleButton: {
@@ -617,6 +808,9 @@ const styles = StyleSheet.create({
     lineHeight: 30,
     fontWeight: '700',
     fontFamily: fontFamilySans,
+  },
+  pressed: {
+    opacity: 0.85,
   },
   modalText: {
     color: palette.muted,

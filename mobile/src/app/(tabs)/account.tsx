@@ -5,19 +5,25 @@ import { Ionicons } from '@expo/vector-icons';
 
 import ActionButton from '@/components/action-button';
 import InfoBanner from '@/components/info-banner';
+import ProfileAvatar from '@/components/profile-avatar';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { formatHandle } from '@/lib/profile';
 import { useAuth } from '@/providers/auth-provider';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
 
 export default function AccountScreen() {
   const router = useRouter();
-  const { user, isGuest, signOutToGuestSession } = useAuth();
+  const { user, isGuest, profile, signOutToGuestSession } = useAuth();
   const { summary } = useUploadsProcessing();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const profileName =
+    [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim() ||
+    profile?.firstName ||
+    'PinPoint Account';
 
   const handleSignOut = async () => {
     if (busy) {
@@ -42,11 +48,27 @@ export default function AccountScreen() {
       {!isGuest ? (
         <SurfaceCard style={styles.summaryCard}>
           <Text style={styles.summaryEyebrow}>Signed In</Text>
-          <Text style={[styles.summaryTitle, styles.summaryEmail]}>
-            {user?.email || 'Account'}
-          </Text>
+          <View style={styles.profileSummaryRow}>
+            <ProfileAvatar
+              size={72}
+              avatarKind={profile?.avatarKind}
+              avatarPresetId={profile?.avatarPresetId}
+              avatarUrl={profile?.avatarUrl}
+              initials={profile?.initials}
+              firstName={profile?.firstName}
+              lastName={profile?.lastName}
+              username={profile?.username}
+            />
+            <View style={styles.profileSummaryText}>
+              <Text style={styles.summaryTitle}>{profileName}</Text>
+              <Text style={styles.summaryHandle}>{formatHandle(profile?.username)}</Text>
+              <Text style={[styles.summaryDescription, styles.summaryEmail]}>
+                {user?.email || 'Account'}
+              </Text>
+            </View>
+          </View>
           <Text style={styles.summaryDescription}>
-            Your sessions, uploads, chat history, and friends all stay tied to this account.
+            Your sessions, uploads, chat, and friends all stay tied to this account profile.
           </Text>
         </SurfaceCard>
       ) : null}
@@ -65,6 +87,11 @@ export default function AccountScreen() {
         </SurfaceCard>
       ) : (
         <View style={styles.actions}>
+          <ActionButton
+            label="Edit Profile"
+            onPress={() => router.push('/edit-profile')}
+            variant="secondary"
+          />
           <ActionButton
             label="Sign out"
             onPress={handleSignOut}
@@ -162,9 +189,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: fontFamilySans,
   },
+  profileSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  profileSummaryText: {
+    flex: 1,
+    gap: 2,
+  },
+  summaryHandle: {
+    color: palette.muted,
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
   summaryEmail: {
-    fontSize: 22,
-    lineHeight: 28,
+    fontSize: 14,
+    lineHeight: 20,
   },
   summaryDescription: {
     color: palette.muted,

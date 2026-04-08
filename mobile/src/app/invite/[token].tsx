@@ -6,8 +6,10 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import CenteredState from '@/components/centered-state';
 import DetailShell from '@/components/detail-shell';
+import ProfileAvatar from '@/components/profile-avatar';
 import { acceptInvite, lookupInvite, queryKeys } from '@/lib/backend';
 import { palette, spacing } from '@/constants/palette';
+import { formatHandle } from '@/lib/profile';
 import { useAuth } from '@/providers/auth-provider';
 
 function getAppInviteUrl(token: string) {
@@ -148,10 +150,20 @@ export default function InviteScreen() {
         ) : null}
 
         {inviteQuery.data?.inviter ? (
-          <Text style={styles.bodyText}>
-            <Text style={styles.emphasis}>{inviteQuery.data.inviter.displayName}</Text> invited you
-            to connect.
-          </Text>
+          <View style={styles.inviterRow}>
+            <ProfileAvatar
+              size={54}
+              avatarKind={inviteQuery.data.inviter.avatarKind}
+              avatarPresetId={inviteQuery.data.inviter.avatarPresetId}
+              avatarUrl={inviteQuery.data.inviter.avatarUrl}
+              initials={inviteQuery.data.inviter.initials}
+              username={inviteQuery.data.inviter.username}
+            />
+            <Text style={styles.bodyText}>
+              <Text style={styles.emphasis}>{formatHandle(inviteQuery.data.inviter.username)}</Text>{' '}
+              invited you to connect.
+            </Text>
+          </View>
         ) : null}
 
         {inviteQuery.data?.selfInvite ? (
@@ -205,6 +217,11 @@ const styles = StyleSheet.create({
   },
   browserAuthPanel: {
     gap: spacing.sm,
+  },
+  inviterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
   bodyText: {
     color: palette.muted,

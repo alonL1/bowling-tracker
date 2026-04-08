@@ -1,4 +1,6 @@
-import { apiJson } from '@/lib/api';
+import { Platform } from 'react-native';
+
+import { apiFetch, apiJson, parseJsonResponse } from '@/lib/api';
 import { cacheOfflineChatGames } from '@/lib/offline-chat';
 import {
   loadUploadsProcessingStore,
@@ -9,6 +11,7 @@ import {
   mergeSessionsWithUploadsProcessing,
 } from '@/lib/uploads-processing-store';
 import type {
+  AvatarPresetId,
   GameDetail,
   GameListItem,
   InviteLinkResponse,
@@ -24,6 +27,7 @@ import type {
   SessionItem,
   SessionMode,
   StatusResponse,
+  UserProfile,
 } from '@/lib/types';
 
 export const queryKeys = {
@@ -35,6 +39,7 @@ export const queryKeys = {
   recordingDraft: (mode: RecordingDraftMode) => ['recording-draft', mode] as const,
   leaderboard: ['leaderboard'] as const,
   inviteLookup: (token: string) => ['invite-lookup', token] as const,
+  profile: ['profile'] as const,
 };
 
 export async function fetchGames() {
@@ -156,6 +161,78 @@ export async function sendChat(question: string, gameId?: string | null) {
 
 export async function fetchLeaderboard() {
   return apiJson<{ selfUserId: string; participants: LeaderboardRow[] }>('/api/friends/leaderboard');
+}
+
+export async function fetchOwnProfile() {
+  return apiJson<{ profile: UserProfile }>('/api/account/profile');
+}
+
+export async function checkUsernameAvailability(username: string) {
+  return apiJson<{ available: boolean; username: string }>(
+    `/api/account/profile/username?username=${encodeURIComponent(username)}`,
+  );
+}
+
+export async function updateOwnProfile(payload: {
+  username: string;
+  firstName: string;
+  lastName?: string | null;
+  completeAvatarOnboarding?: boolean;
+}) {
+  return apiJson<{ profile: UserProfile }>('/api/account/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function setOwnProfileAvatarPreset(presetId: AvatarPresetId) {
+  return apiJson<{ profile: UserProfile }>('/api/account/profile/avatar/preset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ presetId }),
+  });
+}
+
+export async function removeOwnProfileAvatar() {
+  return apiJson<{ profile: UserProfile }>('/api/account/profile/avatar', {
+    method: 'DELETE',
+  });
+}
+
+export async function uploadOwnProfileAvatar(payload: {
+  uri: string;
+  mimeType?: string | null;
+  fileName?: string | null;
+  webFile?: File | null;
+}) {
+  const formData = new FormData();
+
+  if (Platform.OS === 'web') {
+    if (payload.webFile) {
+      formData.append('avatar', payload.webFile);
+    } else {
+      const response = await fetch(payload.uri);
+      const blob = await response.blob();
+      formData.append('avatar', blob, payload.fileName ?? 'avatar.jpg');
+    }
+  } else {
+    formData.append('avatar', {
+      uri: payload.uri,
+      name: payload.fileName ?? 'avatar.jpg',
+      type: payload.mimeType ?? 'image/jpeg',
+    } as unknown as Blob);
+  }
+
+  const response = await apiFetch('/api/account/profile/avatar/upload', {
+    method: 'POST',
+    body: formData,
+  });
+  const result = await parseJsonResponse<{ profile: UserProfile; error?: string }>(response);
+  if (!response.ok) {
+    throw new Error(result.error || `Request failed (${response.status}).`);
+  }
+  return result;
 }
 
 export async function deleteOwnAccount() {

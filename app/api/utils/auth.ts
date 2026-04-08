@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { User } from "@supabase/supabase-js";
 
 type AuthUserLike = {
   is_anonymous?: boolean;
@@ -54,11 +55,11 @@ export async function getUserFromRequest(request: Request) {
     "";
 
   if (!authHeader.toLowerCase().startsWith("bearer ")) {
-    return { userId: null, accessToken: null, isGuest: false, email: null };
+    return { userId: null, accessToken: null, isGuest: false, email: null, authUser: null };
   }
   const token = authHeader.slice(7).trim();
   if (!token || !supabaseUrl || !supabaseServiceKey) {
-    return { userId: null, accessToken: null, isGuest: false, email: null };
+    return { userId: null, accessToken: null, isGuest: false, email: null, authUser: null };
   }
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey, {
@@ -66,12 +67,18 @@ export async function getUserFromRequest(request: Request) {
   });
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data?.user) {
-    return { userId: null, accessToken: null, isGuest: false, email: null };
+    return { userId: null, accessToken: null, isGuest: false, email: null, authUser: null };
   }
   return {
     userId: data.user.id,
     accessToken: token,
     isGuest: isAnonymousUser(data.user),
-    email: data.user.email ?? null
+    email: data.user.email ?? null,
+    authUser: data.user
   };
+}
+
+export async function getAuthUserFromRequest(request: Request): Promise<User | null> {
+  const user = await getUserFromRequest(request);
+  return user.authUser ?? null;
 }

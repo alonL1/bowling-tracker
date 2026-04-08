@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import PageBackButton from '@/components/page-back-button';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 
@@ -39,6 +40,7 @@ export default function PrivacyScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
+          <PageBackButton fallbackHref="/(tabs)/account" />
           <Text style={styles.title}>Privacy Policy</Text>
           <Text style={styles.subtitle}>PinPoint</Text>
           <Text style={styles.meta}>Effective date: March 17, 2026</Text>

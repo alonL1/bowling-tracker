@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 export type DeletionCounts = {
+  profiles: number;
   analysisJobs: number;
   inviteLinks: number;
   friendships: number;
@@ -27,6 +28,23 @@ export function getAccountSupabase() {
 
 async function collectStorageKeys(supabase: SupabaseClient, userId: string) {
   const keys = new Set<string>();
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("avatar_storage_key")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (profileError) {
+    throw new Error(profileError.message || "Failed to load account profile.");
+  }
+
+  if (
+    typeof profile?.avatar_storage_key === "string" &&
+    profile.avatar_storage_key.length > 0
+  ) {
+    keys.add(profile.avatar_storage_key);
+  }
 
   const { data: analysisJobs, error: analysisJobsError } = await supabase
     .from("analysis_jobs")
@@ -109,8 +127,16 @@ async function collectStorageKeys(supabase: SupabaseClient, userId: string) {
 export async function purgeUserData(supabase: SupabaseClient, userId: string) {
   const storageKeys = await collectStorageKeys(supabase, userId);
 
-  const [{ count: analysisJobs, error: analysisJobsError }, { count: inviteLinks, error: inviteLinksError }] =
+  const [
+    { count: profiles, error: profilesError },
+    { count: analysisJobs, error: analysisJobsError },
+    { count: inviteLinks, error: inviteLinksError }
+  ] =
     await Promise.all([
+      supabase
+        .from("profiles")
+        .delete({ count: "exact" })
+        .eq("user_id", userId),
       supabase
         .from("analysis_jobs")
         .delete({ count: "exact" })
@@ -121,6 +147,9 @@ export async function purgeUserData(supabase: SupabaseClient, userId: string) {
         .eq("inviter_user_id", userId),
     ]);
 
+  if (profilesError) {
+    throw new Error(profilesError.message || "Failed to delete profile.");
+  }
   if (analysisJobsError) {
     throw new Error(analysisJobsError.message || "Failed to delete analysis jobs.");
   }
@@ -201,6 +230,7 @@ export async function purgeUserData(supabase: SupabaseClient, userId: string) {
   }
 
   return {
+    profiles: profiles ?? 0,
     analysisJobs: analysisJobs ?? 0,
     inviteLinks: inviteLinks ?? 0,
     friendships: (ownFriendships ?? 0) + (friendSideFriendships ?? 0),

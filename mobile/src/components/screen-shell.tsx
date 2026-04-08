@@ -1,5 +1,6 @@
 import React, { type ReactNode, type ReactElement } from 'react';
 import {
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -7,6 +8,8 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter, type Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
@@ -19,6 +22,8 @@ type ScreenShellProps = {
   children?: ReactNode;
   refreshControl?: ReactElement<RefreshControlProps>;
   headerRight?: ReactNode;
+  showBackButton?: boolean;
+  backHref?: Href;
   bodyStyle?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
   overlay?: ReactNode;
@@ -30,10 +35,14 @@ export default function ScreenShell({
   children,
   refreshControl,
   headerRight,
+  showBackButton = false,
+  backHref = '/(tabs)/sessions',
   bodyStyle,
   contentStyle,
   overlay,
 }: ScreenShellProps) {
+  const router = useRouter();
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <KeyboardAwareScrollView
@@ -42,6 +51,20 @@ export default function ScreenShell({
         showsVerticalScrollIndicator={false}
         refreshControl={refreshControl}>
         <View style={styles.header}>
+          {showBackButton ? (
+            <Pressable
+              onPress={() => {
+                try {
+                  router.back();
+                } catch {
+                  router.replace(backHref);
+                }
+              }}
+              style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+              <Ionicons name="chevron-back" size={16} color={palette.muted} />
+              <Text style={styles.backText}>Back</Text>
+            </Pressable>
+          ) : null}
           <View style={styles.headerTop}>
             <View style={styles.headerText}>
               <Text style={styles.title}>{title}</Text>
@@ -79,6 +102,20 @@ const styles = StyleSheet.create({
   header: {
     gap: spacing.md,
   },
+  backButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: spacing.xs,
+  },
+  backText: {
+    color: palette.muted,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '500',
+    fontFamily: fontFamilySans,
+  },
   headerTop: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -112,5 +149,8 @@ const styles = StyleSheet.create({
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
+  },
+  pressed: {
+    opacity: 0.85,
   },
 });

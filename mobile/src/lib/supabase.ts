@@ -2,6 +2,7 @@ import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type Session, type User } from '@supabase/supabase-js';
+import * as Linking from 'expo-linking';
 import { AppState, Platform } from 'react-native';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -67,12 +68,11 @@ type AppleFullName = {
 } | null;
 
 async function getOAuthRedirectUri() {
-  const { makeRedirectUri } = await import('expo-auth-session');
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    return `${window.location.origin}/login`;
+  }
 
-  return makeRedirectUri({
-    path: 'login',
-    preferLocalhost: true,
-  });
+  return Linking.createURL('login');
 }
 
 async function signInWithBrowserOAuth(provider: 'apple' | 'google') {
@@ -105,16 +105,23 @@ async function signInWithBrowserOAuth(provider: 'apple' | 'google') {
 }
 
 export async function createSessionFromUrl(url: string) {
-  const QueryParams = await import('expo-auth-session/build/QueryParams');
-  const { params, errorCode } = QueryParams.getQueryParams(url);
+  const parsedUrl = new URL(url);
+  const queryParams = parsedUrl.searchParams;
+  const hashParams = new URLSearchParams(
+    parsedUrl.hash.startsWith('#') ? parsedUrl.hash.slice(1) : parsedUrl.hash,
+  );
+  const getParam = (key: string) => queryParams.get(key) ?? hashParams.get(key);
+
+  const errorCode = getParam('error_code') ?? getParam('error');
+  const errorDescription = getParam('error_description');
 
   if (errorCode) {
-    throw new Error(errorCode);
+    throw new Error(errorDescription || errorCode);
   }
 
-  const accessToken = typeof params.access_token === 'string' ? params.access_token : null;
-  const refreshToken = typeof params.refresh_token === 'string' ? params.refresh_token : null;
-  const code = typeof params.code === 'string' ? params.code : null;
+  const accessToken = getParam('access_token');
+  const refreshToken = getParam('refresh_token');
+  const code = getParam('code');
 
   if (accessToken && refreshToken) {
     const { data, error } = await supabase.auth.setSession({

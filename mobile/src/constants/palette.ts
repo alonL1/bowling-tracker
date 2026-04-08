@@ -10,6 +10,7 @@ export const palette = {
   navIcon: '#C3C6CF',
   field: '#424853',
   userChat: '#91B2E0',
+  accentSoft: '#4F76A6',
   spinner: '#22C55E',
   border: 'rgba(188, 199, 219, 0.18)',
   overlay: 'rgba(3, 10, 18, 0.82)',

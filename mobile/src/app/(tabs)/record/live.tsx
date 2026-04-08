@@ -205,7 +205,7 @@ export default function LiveSessionScreen() {
   const {
     deleteLiveCapture,
     discardLiveSessionLocal,
-    enqueueLiveCapture,
+    enqueueLiveCaptures,
     finalizeLiveSessionLocal,
     updateLiveSessionLocal,
   } = useUploadsProcessing();
@@ -422,7 +422,8 @@ export default function LiveSessionScreen() {
             })
           : await ImagePicker.launchImageLibraryAsync({
               mediaTypes: 'images',
-              allowsMultipleSelection: false,
+              allowsMultipleSelection: true,
+              selectionLimit: 100,
               exif: true,
               quality: 1,
             });
@@ -430,21 +431,19 @@ export default function LiveSessionScreen() {
       if (result.canceled || result.assets.length === 0) {
         return null;
       }
-
-      const asset = result.assets[0];
       setSourceOpen(false);
       setActiveTab('games');
       scrollToTab('games', true);
-      await enqueueLiveCapture({
-        asset,
+      await enqueueLiveCaptures({
+        assets: result.assets,
         liveSession,
         name: draftName,
         description: draftDescription,
       });
-      return true;
+      return result.assets.length;
     },
-    onSuccess: async (didQueue) => {
-      if (!didQueue) {
+    onSuccess: async (queuedCount) => {
+      if (!queuedCount) {
         return;
       }
 
@@ -511,11 +510,18 @@ export default function LiveSessionScreen() {
   const discardLiveSessionMutation = useMutation({
     mutationFn: async () => {
       const discardedLocally = await discardLiveSessionLocal({ liveSession });
-      if (discardedLocally) {
-        return { ok: true, discarded: true, discardedLocally: true };
+      if (!discardedLocally) {
+        const response = await discardLiveSession();
+        return { ...response, discardedLocally: false };
       }
-      const response = await discardLiveSession();
-      return { ...response, discardedLocally: false };
+
+      if (liveSession?.id && !liveSession.id.startsWith('live-session-')) {
+        discardLiveSession().catch((nextError) => {
+          console.warn('Failed to discard live session remotely after local discard.', nextError);
+        });
+      }
+
+      return { ok: true, discarded: true, discardedLocally: true };
     },
     onSuccess: async () => {
       setError('');
@@ -752,7 +758,7 @@ export default function LiveSessionScreen() {
               }
             />
           ) : null}
-          <UploadsProcessingBanner />
+          <UploadsProcessingBanner showPending={false} />
 
           <SurfaceCard style={styles.sectionCard}>
             <Text style={styles.sectionBody}>

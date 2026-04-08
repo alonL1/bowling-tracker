@@ -1,6 +1,15 @@
 export type JobStatus = 'queued' | 'processing' | 'logged' | 'error';
 
 export type SessionMode = 'auto' | 'new' | 'existing';
+export type AvatarKind = 'initials' | 'preset' | 'uploaded';
+export type AvatarPresetId =
+  | 'happy_pin'
+  | 'thinking_pin'
+  | 'idea_pin'
+  | 'ball_blue'
+  | 'ball_red'
+  | 'ball_orange'
+  | 'ball_purple';
 export type LocalSyncSourceFlow =
   | 'live_session'
   | 'upload_session'
@@ -105,8 +114,35 @@ export type LeaderboardMetric =
 
 export type LeaderboardRow = {
   userId: string;
-  displayName: string;
+  username: string;
+  avatarKind: AvatarKind;
+  avatarPresetId?: AvatarPresetId | null;
+  avatarUrl?: string | null;
+  initials: string;
   metrics: Record<LeaderboardMetric, number>;
+};
+
+export type PublicProfile = {
+  userId: string;
+  username: string;
+  avatarKind: AvatarKind;
+  avatarPresetId: AvatarPresetId | null;
+  avatarUrl: string | null;
+  initials: string;
+};
+
+export type UserProfile = {
+  userId: string;
+  username: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  avatarKind: AvatarKind;
+  avatarPresetId: AvatarPresetId | null;
+  avatarUrl: string | null;
+  initials: string;
+  profileComplete: boolean;
+  avatarStepNeeded: boolean;
+  usernameSuggestion: string | null;
 };
 
 export type InviteLinkResponse = {
@@ -117,10 +153,7 @@ export type InviteLinkResponse = {
 export type InviteLookupResponse = {
   valid: boolean;
   error?: string;
-  inviter?: {
-    userId: string;
-    displayName: string;
-  };
+  inviter?: PublicProfile;
   authRequired?: boolean;
   selfInvite?: boolean;
   alreadyFriends?: boolean;

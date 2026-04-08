@@ -7,6 +7,7 @@ import InfoBanner from '@/components/info-banner';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
 import { confirmAction } from '@/lib/confirm';
+import { shouldDisplayCaptureItemInUploadsProcessing } from '@/lib/uploads-processing-store';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
@@ -71,7 +72,7 @@ export default function UploadsProcessingScreen() {
 
   const entries = useMemo(() => {
     const captureEntries = store.captureItems
-      .filter((item) => item.status !== 'synced' && item.status !== 'discarded')
+      .filter((item) => shouldDisplayCaptureItemInUploadsProcessing(item))
       .map((item) => ({
         id: item.id,
         kind: 'capture' as const,
@@ -107,6 +108,7 @@ export default function UploadsProcessingScreen() {
   return (
     <ScreenShell
       title="Uploads & Processing"
+      showBackButton
       subtitle="Pending scoreboard uploads, retries, and local-first session finalization live here.">
       {!ready ? (
         <SurfaceCard style={styles.loadingCard}>

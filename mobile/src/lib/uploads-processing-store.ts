@@ -29,6 +29,8 @@ const UPLOADS_PROCESSING_DIRECTORY_NAME = 'uploads-processing';
 const STORE_VERSION = 1;
 const BASE_RETRY_DELAY_MS = 4_000;
 const MAX_RETRY_DELAY_MS = 5 * 60_000;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type UploadsProcessingCaptureState =
   | 'captured_local'
@@ -335,11 +337,8 @@ export async function persistImageAssetLocally(
 export function getUploadsProcessingSummary(
   store: UploadsProcessingStore,
 ): UploadsProcessingSummary {
-  const pendingCaptures = store.captureItems.filter(
-    (item) =>
-      item.status !== 'synced' &&
-      item.status !== 'discarded' &&
-      item.status !== 'failed',
+  const pendingCaptures = store.captureItems.filter((item) =>
+    shouldCountCaptureItemAsPending(item),
   ).length;
   const failedCaptures = store.captureItems.filter((item) => item.status === 'failed').length;
   const pendingFinalizations = store.finalizeOperations.filter(
@@ -355,9 +354,43 @@ export function getUploadsProcessingSummary(
   return {
     pendingCount: pendingCaptures + pendingFinalizations,
     failedCount: failedCaptures + failedFinalizations,
-    captureCount: store.captureItems.filter((item) => item.status !== 'discarded').length,
+    captureCount: store.captureItems.filter((item) =>
+      shouldDisplayCaptureItemInUploadsProcessing(item),
+    ).length,
     finalizeCount: store.finalizeOperations.filter((item) => item.status !== 'discarded').length,
   };
+}
+
+export function shouldDisplayCaptureItemInUploadsProcessing(
+  item: UploadsProcessingCaptureItem,
+) {
+  if (item.status === 'synced' || item.status === 'discarded') {
+    return false;
+  }
+
+  if (item.sourceFlow === 'live_session' && item.status === 'ready_pending_finalize') {
+    return false;
+  }
+
+  return true;
+}
+
+export function shouldCountCaptureItemAsPending(
+  item: UploadsProcessingCaptureItem,
+) {
+  if (
+    item.status === 'synced' ||
+    item.status === 'discarded' ||
+    item.status === 'failed'
+  ) {
+    return false;
+  }
+
+  if (item.sourceFlow === 'live_session' && item.status === 'ready_pending_finalize') {
+    return false;
+  }
+
+  return true;
 }
 
 export function buildUploadsProcessingLocalSync(
@@ -375,6 +408,25 @@ export function buildUploadsProcessingLocalSync(
     isReadOnlyUntilSynced: true,
     lastSyncError: lastSyncError ?? null,
   };
+}
+
+function isUuidLike(value?: string | null) {
+  return typeof value === 'string' && UUID_PATTERN.test(value);
+}
+
+function isLocalOnlyMergedEntity(
+  id: string,
+  localSync?: LocalSyncMetadata | null,
+) {
+  return Boolean(localSync?.localId) && !isUuidLike(id);
+}
+
+function dedupeById<T extends { id: string }>(items: T[]) {
+  const byId = new Map<string, T>();
+  items.forEach((item) => {
+    byId.set(item.id, item);
+  });
+  return [...byId.values()];
 }
 
 function getOptimisticSessionError(
@@ -517,7 +569,7 @@ function buildLocalOnlyLiveGame(item: UploadsProcessingCaptureItem): LiveSession
   const syncState = item.status === 'failed' ? 'failed' : 'syncing';
 
   return {
-    id: item.liveGameId || `local-live-game-${item.id}`,
+    id: item.serverLiveGameId || item.liveGameId || `local-live-game-${item.id}`,
     capture_order: item.captureOrder,
     status,
     captured_at_hint: item.capturedAtHint ?? null,
@@ -548,7 +600,7 @@ function buildLocalOnlyDraftGame(item: UploadsProcessingCaptureItem): RecordingD
   const syncState = item.status === 'failed' ? 'failed' : 'syncing';
 
   return {
-    id: item.recordingDraftGameId || `local-draft-game-${item.id}`,
+    id: item.serverDraftGameId || item.recordingDraftGameId || `local-draft-game-${item.id}`,
     draft_id: item.recordingDraftId || 'local-draft',
     group_id: item.localDraftGroupId ?? null,
     capture_order: item.captureOrder,
@@ -576,7 +628,8 @@ export function mergeGamesWithUploadsProcessing(
   store: UploadsProcessingStore,
 ) {
   const optimisticGames = buildOptimisticGames(store);
-  return [...games, ...optimisticGames].sort((left, right) => {
+  const baseGames = games.filter((game) => !isLocalOnlyMergedEntity(game.id, game.local_sync));
+  return dedupeById([...baseGames, ...optimisticGames]).sort((left, right) => {
     const leftTime = Date.parse(left.played_at || left.created_at || '');
     const rightTime = Date.parse(right.played_at || right.created_at || '');
     if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && rightTime !== leftTime) {
@@ -591,7 +644,10 @@ export function mergeSessionsWithUploadsProcessing(
   store: UploadsProcessingStore,
 ) {
   const optimisticSessions = buildOptimisticSessionItems(store);
-  const mergedSessions = sessions.map((session) => {
+  const baseSessions = sessions.filter(
+    (session) => !isLocalOnlyMergedEntity(session.id, session.local_sync),
+  );
+  const mergedSessions = baseSessions.map((session) => {
     const optimisticSession = optimisticSessions.get(session.id);
     if (!optimisticSession) {
       return session;
@@ -652,8 +708,11 @@ export function mergeLiveSessionWithUploadsProcessing(
     return payload;
   }
 
+  const baseGames = (baseLiveSession?.games ?? []).filter(
+    (game) => !isLocalOnlyMergedEntity(game.id, game.local_sync),
+  );
   const serverGameIdSet = new Set(
-    (baseLiveSession?.games ?? []).map((game) => game.id),
+    baseGames.map((game) => game.id),
   );
   const localOnlyGames = relevantCaptureItems
     .filter((item) => !item.serverLiveGameId || !serverGameIdSet.has(item.serverLiveGameId))
@@ -675,7 +734,7 @@ export function mergeLiveSessionWithUploadsProcessing(
         ? localLiveSession.selectedPlayerKeys
         : (baseLiveSession?.selectedPlayerKeys ?? []),
     playerOptions: baseLiveSession?.playerOptions ?? [],
-    games: [...(baseLiveSession?.games ?? []), ...localOnlyGames].sort(
+    games: dedupeById([...baseGames, ...localOnlyGames]).sort(
       (left, right) => left.capture_order - right.capture_order,
     ),
     local_sync: buildUploadsProcessingLocalSync(
@@ -737,7 +796,9 @@ export function mergeRecordingDraftWithUploadsProcessing(
   sortDraftGroups(baseDraft?.groups ?? []).forEach((group) => {
     groupsById.set(group.id, {
       ...group,
-      games: [...group.games],
+      games: group.games.filter(
+        (game) => !isLocalOnlyMergedEntity(game.id, game.local_sync),
+      ),
     });
   });
 
@@ -792,7 +853,9 @@ export function mergeRecordingDraftWithUploadsProcessing(
     .sort((left, right) => left.display_order - right.display_order)
     .map((group) => ({
       ...group,
-      games: [...group.games].sort((left, right) => left.capture_order - right.capture_order),
+      games: dedupeById(group.games).sort(
+        (left, right) => left.capture_order - right.capture_order,
+      ),
     }));
 
   const allGames = mergedGroups.flatMap((group) => group.games);
@@ -838,21 +901,29 @@ export function mergeRecordEntryStatusWithUploadsProcessing(
   status: RecordEntryStatus,
   store: UploadsProcessingStore,
 ): RecordEntryStatus {
-  const activeLiveSession = store.liveSessions.some((entry) => entry.state === 'active');
-  const activeUploadDraft = store.drafts.some(
-    (entry) => entry.mode === 'upload_session' && entry.state === 'active',
-  );
-  const activeMultipleDraft = store.drafts.some(
-    (entry) => entry.mode === 'add_multiple_sessions' && entry.state === 'active',
-  );
-  const activeExistingDraft = store.drafts.some(
-    (entry) => entry.mode === 'add_existing_session' && entry.state === 'active',
-  );
+  const latestLiveSession = [...store.liveSessions].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  )[0];
+  const latestUploadDraft = [...store.drafts]
+    .filter((entry) => entry.mode === 'upload_session')
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  const latestMultipleDraft = [...store.drafts]
+    .filter((entry) => entry.mode === 'add_multiple_sessions')
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  const latestExistingDraft = [...store.drafts]
+    .filter((entry) => entry.mode === 'add_existing_session')
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
 
   return {
-    liveSession: status.liveSession || activeLiveSession,
-    uploadSessionDraft: status.uploadSessionDraft || activeUploadDraft,
-    addMultipleSessionsDraft: status.addMultipleSessionsDraft || activeMultipleDraft,
-    addExistingSessionDraft: status.addExistingSessionDraft || activeExistingDraft,
+    liveSession: latestLiveSession ? latestLiveSession.state === 'active' : status.liveSession,
+    uploadSessionDraft: latestUploadDraft
+      ? latestUploadDraft.state === 'active'
+      : status.uploadSessionDraft,
+    addMultipleSessionsDraft: latestMultipleDraft
+      ? latestMultipleDraft.state === 'active'
+      : status.addMultipleSessionsDraft,
+    addExistingSessionDraft: latestExistingDraft
+      ? latestExistingDraft.state === 'active'
+      : status.addExistingSessionDraft,
   };
 }
