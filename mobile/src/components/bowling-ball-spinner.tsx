@@ -4,11 +4,10 @@ import {
   Easing,
   Platform,
   StyleProp,
-  StyleSheet,
-  View,
   ViewStyle,
 } from 'react-native';
 
+import BowlingBallGlyph from '@/components/bowling-ball-glyph';
 import { palette } from '@/constants/palette';
 
 type BowlingBallSpinnerProps = {
@@ -54,69 +53,19 @@ export default function BowlingBallSpinner({
     [spinValue],
   );
 
-  const holeSize = Math.max(3, Math.round(size * 0.14));
-
   return (
     <Animated.View
       style={[
-        styles.ball,
         {
           width: size,
           height: size,
-          borderRadius: size / 2,
-          backgroundColor: color,
+          alignItems: 'center',
+          justifyContent: 'center',
           transform: [{ rotate }],
         },
         style,
       ]}>
-      <View
-        style={[
-          styles.hole,
-          {
-            width: holeSize,
-            height: holeSize,
-            borderRadius: holeSize / 2,
-            backgroundColor: holeColor,
-            left: '35%',
-            top: '22%',
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.hole,
-          {
-            width: holeSize,
-            height: holeSize,
-            borderRadius: holeSize / 2,
-            backgroundColor: holeColor,
-            left: '54%',
-            top: '18%',
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.hole,
-          {
-            width: holeSize,
-            height: holeSize,
-            borderRadius: holeSize / 2,
-            backgroundColor: holeColor,
-            left: '45%',
-            top: '38%',
-          },
-        ]}
-      />
+      <BowlingBallGlyph size={size} color={color} holeColor={holeColor} />
     </Animated.View>
   );
 }
-
-const styles = StyleSheet.create({
-  ball: {
-    position: 'relative',
-  },
-  hole: {
-    position: 'absolute',
-  },
-});

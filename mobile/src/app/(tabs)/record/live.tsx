@@ -44,6 +44,7 @@ import {
   canonicalizePlayerLabel,
   getFirstSelectionValidationError,
 } from '@/lib/live-session';
+import { navigateBackOrFallback } from '@/lib/navigation';
 import { formatTenths } from '@/lib/number-format';
 import { confirmAction } from '@/lib/confirm';
 import type { LiveSessionGame, LiveSessionResponse, LiveSessionStats } from '@/lib/types';
@@ -718,7 +719,7 @@ export default function LiveSessionScreen() {
           showsVerticalScrollIndicator={false}>
           <View style={styles.topBar}>
             <Pressable
-              onPress={() => router.back()}
+              onPress={() => navigateBackOrFallback(router, '/(tabs)/record')}
               style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
               <Ionicons name="chevron-back" size={16} color={palette.muted} />
               <Text style={styles.backText}>Back</Text>

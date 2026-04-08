@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import { palette, spacing } from '@/constants/palette';
+import { navigateBackOrFallback } from '@/lib/navigation';
 import { fontFamilySans } from '@/constants/typography';
 
 type ScreenShellProps = {
@@ -53,13 +54,7 @@ export default function ScreenShell({
         <View style={styles.header}>
           {showBackButton ? (
             <Pressable
-              onPress={() => {
-                try {
-                  router.back();
-                } catch {
-                  router.replace(backHref);
-                }
-              }}
+              onPress={() => navigateBackOrFallback(router, backHref)}
               style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
               <Ionicons name="chevron-back" size={16} color={palette.muted} />
               <Text style={styles.backText}>Back</Text>

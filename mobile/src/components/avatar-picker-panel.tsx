@@ -77,21 +77,26 @@ export default function AvatarPickerPanel({
           label="Take Photo"
           onPress={onTakePhoto}
           disabled={busy}
-          variant="secondary"
+          variant="primary"
+          style={styles.photoButtonPrimary}
         />
         <ActionButton
           label="Choose Photo"
           onPress={onChoosePhoto}
           disabled={busy}
-          variant="secondary"
+          variant="primary"
+          style={styles.photoButtonSecondary}
         />
         <ActionButton
           label="Use Initials"
           onPress={onUseInitials}
           disabled={busy}
-          variant={selectedMode === 'initials' ? 'primary' : 'secondary'}
+          variant="primary"
+          style={selectedMode === 'initials' ? styles.initialsButtonActive : styles.initialsButton}
         />
       </View>
+
+      <Text style={styles.sectionSubtitle}>or choose an icon</Text>
 
       <View style={styles.grid}>
         {AVATAR_PRESET_OPTIONS.map((option) => {
@@ -99,6 +104,9 @@ export default function AvatarPickerPanel({
           return (
             <Pressable
               key={option.id}
+              accessibilityRole="button"
+              accessibilityLabel={option.label}
+              accessibilityState={selected ? { selected: true } : {}}
               onPress={() => onSelectPreset(option.id)}
               style={({ pressed }) => [
                 styles.presetCard,
@@ -113,7 +121,6 @@ export default function AvatarPickerPanel({
                 lastName={lastName}
                 username={username}
               />
-              <Text style={styles.presetLabel}>{option.label}</Text>
             </Pressable>
           );
         })}
@@ -169,35 +176,44 @@ const styles = StyleSheet.create({
   actionGroup: {
     gap: spacing.sm,
   },
+  sectionSubtitle: {
+    color: palette.muted,
+    fontSize: 14,
+    lineHeight: 19,
+    fontFamily: fontFamilySans,
+  },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
+  photoButtonPrimary: {
+    backgroundColor: palette.accent,
+  },
+  photoButtonSecondary: {
+    backgroundColor: palette.accentSoft,
+  },
+  initialsButton: {
+    backgroundColor: palette.field,
+  },
+  initialsButtonActive: {
+    backgroundColor: palette.accent,
+  },
   presetCard: {
     width: '48%',
-    minHeight: 108,
+    minHeight: 78,
     borderRadius: radii.md,
     backgroundColor: palette.surface,
     borderWidth: 1,
     borderColor: palette.border,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.sm,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.md,
   },
   presetCardSelected: {
     borderColor: palette.userChat,
     backgroundColor: palette.surfaceRaised,
-  },
-  presetLabel: {
-    color: palette.text,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-    fontFamily: fontFamilySans,
   },
   pressed: {
     opacity: 0.92,

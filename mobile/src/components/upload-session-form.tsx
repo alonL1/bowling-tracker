@@ -45,6 +45,7 @@ import {
   canonicalizePlayerLabel,
   getFirstSelectionValidationError,
 } from '@/lib/live-session';
+import { navigateBackOrFallback } from '@/lib/navigation';
 import { supabase } from '@/lib/supabase';
 import type {
   RecordingDraftGame,
@@ -758,7 +759,7 @@ export default function UploadSessionForm({
         return;
       }
 
-      router.back();
+      navigateBackOrFallback(router, '/(tabs)/record');
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to add draft to log.');
@@ -862,7 +863,9 @@ export default function UploadSessionForm({
   const topContent = (
     <View style={styles.topContent}>
       <View style={styles.topBar}>
-        <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+        <Pressable
+          onPress={() => navigateBackOrFallback(router, '/(tabs)/record')}
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
           <Ionicons name="chevron-back" size={16} color={palette.muted} />
           <Text style={styles.backText}>Back</Text>
         </Pressable>

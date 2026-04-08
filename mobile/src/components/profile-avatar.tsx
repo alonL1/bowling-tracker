@@ -9,6 +9,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import BowlingBallGlyph from '@/components/bowling-ball-glyph';
 import { palette } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { AVATAR_PRESET_MAP, getProfileInitials } from '@/lib/profile';
@@ -27,6 +28,7 @@ type ProfileAvatarProps = {
 };
 
 const INITIALS_BACKGROUNDS = ['#33506D', '#415E82', '#4C668D', '#2A4259'] as const;
+const COCONUT_HOLE_COLOR = '#3A2416';
 
 function getInitialsBackground(seed: string) {
   const source = seed || 'P';
@@ -37,56 +39,267 @@ function getInitialsBackground(seed: string) {
   return INITIALS_BACKGROUNDS[sum % INITIALS_BACKGROUNDS.length];
 }
 
-function BowlingBallAvatar({ size, color }: { size: number; color: string }) {
-  const holeSize = Math.max(5, Math.round(size * 0.16));
-  const holeOffset = Math.round(size * 0.22);
-  const holeTop = Math.round(size * 0.26);
-  const lowerHoleTop = Math.round(size * 0.48);
+function CoconutBowlingBallAvatar({ size, color }: { size: number; color: string }) {
+  return (
+    <View style={styles.coconutWrap}>
+      <BowlingBallGlyph size={size} color={color} holeColor={COCONUT_HOLE_COLOR} />
+      <View
+        pointerEvents="none"
+        style={[
+          styles.coconutTextureMark,
+          {
+            width: size * 0.16,
+            height: size * 0.05,
+            borderRadius: size * 0.03,
+            top: size * 0.18,
+            left: size * 0.2,
+            transform: [{ rotate: '-18deg' }],
+          },
+        ]}
+      />
+      <View
+        pointerEvents="none"
+        style={[
+          styles.coconutTextureMark,
+          {
+            width: size * 0.12,
+            height: size * 0.045,
+            borderRadius: size * 0.03,
+            top: size * 0.58,
+            left: size * 0.16,
+            transform: [{ rotate: '10deg' }],
+          },
+        ]}
+      />
+      <View
+        pointerEvents="none"
+        style={[
+          styles.coconutTextureMark,
+          {
+            width: size * 0.15,
+            height: size * 0.05,
+            borderRadius: size * 0.03,
+            top: size * 0.64,
+            right: size * 0.18,
+            transform: [{ rotate: '-14deg' }],
+          },
+        ]}
+      />
+    </View>
+  );
+}
 
+function SinkAvatar({ size }: { size: number }) {
   return (
     <View
       style={[
-        styles.ball,
+        styles.iconAvatarWrap,
         {
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: color,
+          backgroundColor: '#465261',
         },
       ]}>
       <View
         style={[
-          styles.ballHole,
+          styles.sinkFaucetStem,
           {
-            width: holeSize,
-            height: holeSize,
-            borderRadius: holeSize / 2,
-            top: holeTop,
-            left: holeOffset,
+            width: size * 0.08,
+            height: size * 0.18,
+            top: size * 0.18,
+            left: size * 0.46,
+            borderRadius: size * 0.04,
           },
         ]}
       />
       <View
         style={[
-          styles.ballHole,
+          styles.sinkFaucetTop,
           {
-            width: holeSize,
-            height: holeSize,
-            borderRadius: holeSize / 2,
-            top: holeTop - Math.round(size * 0.04),
-            right: holeOffset,
+            width: size * 0.22,
+            height: size * 0.07,
+            top: size * 0.16,
+            left: size * 0.34,
+            borderRadius: size * 0.03,
           },
         ]}
       />
       <View
         style={[
-          styles.ballHole,
+          styles.sinkBasin,
           {
-            width: holeSize,
-            height: holeSize,
-            borderRadius: holeSize / 2,
-            top: lowerHoleTop,
-            left: Math.round(size * 0.45),
+            width: size * 0.56,
+            height: size * 0.3,
+            top: size * 0.44,
+            left: size * 0.22,
+            borderRadius: size * 0.12,
+          },
+        ]}>
+        <View
+          style={[
+            styles.sinkDrain,
+            {
+              width: size * 0.08,
+              height: size * 0.08,
+              borderRadius: size * 0.04,
+              top: size * 0.1,
+              left: size * 0.24,
+            },
+          ]}
+        />
+      </View>
+    </View>
+  );
+}
+
+function LeafAvatar({ size }: { size: number }) {
+  return (
+    <View
+      style={[
+        styles.iconAvatarWrap,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: '#274A36',
+        },
+      ]}>
+      <View
+        style={[
+          styles.leafBody,
+          {
+            width: size * 0.38,
+            height: size * 0.56,
+            left: size * 0.31,
+            top: size * 0.18,
+            borderTopLeftRadius: size * 0.24,
+            borderTopRightRadius: size * 0.04,
+            borderBottomLeftRadius: size * 0.04,
+            borderBottomRightRadius: size * 0.24,
+            transform: [{ rotate: '-32deg' }],
+          },
+        ]}
+      />
+      <View
+        style={[
+          styles.leafVein,
+          {
+            width: size * 0.04,
+            height: size * 0.42,
+            left: size * 0.47,
+            top: size * 0.28,
+            borderRadius: size * 0.02,
+            transform: [{ rotate: '-32deg' }],
+          },
+        ]}
+      />
+    </View>
+  );
+}
+
+function PeanutButterJarAvatar({ size }: { size: number }) {
+  return (
+    <View
+      style={[
+        styles.iconAvatarWrap,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: '#49372C',
+        },
+      ]}>
+      <View
+        style={[
+          styles.jarLid,
+          {
+            width: size * 0.34,
+            height: size * 0.11,
+            left: size * 0.33,
+            top: size * 0.18,
+            borderTopLeftRadius: size * 0.05,
+            borderTopRightRadius: size * 0.05,
+          },
+        ]}
+      />
+      <View
+        style={[
+          styles.jarBody,
+          {
+            width: size * 0.42,
+            height: size * 0.42,
+            left: size * 0.29,
+            top: size * 0.28,
+            borderRadius: size * 0.1,
+          },
+        ]}>
+        <View
+          style={[
+            styles.jarLabel,
+            {
+              width: size * 0.24,
+              height: size * 0.13,
+              left: size * 0.09,
+              top: size * 0.14,
+              borderRadius: size * 0.04,
+            },
+          ]}
+        />
+      </View>
+    </View>
+  );
+}
+
+function BeachChairAvatar({ size }: { size: number }) {
+  return (
+    <View
+      style={[
+        styles.iconAvatarWrap,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: '#1D3446',
+        },
+      ]}>
+      <View
+        style={[
+          styles.chairSeat,
+          {
+            width: size * 0.3,
+            height: size * 0.34,
+            left: size * 0.38,
+            top: size * 0.24,
+            borderRadius: size * 0.04,
+            transform: [{ rotate: '-22deg' }],
+          },
+        ]}>
+        <View style={[styles.chairStripe, { left: '18%' }]} />
+        <View style={[styles.chairStripe, { left: '44%' }]} />
+        <View style={[styles.chairStripe, { left: '70%' }]} />
+      </View>
+      <View
+        style={[
+          styles.chairLeg,
+          {
+            width: size * 0.045,
+            height: size * 0.34,
+            left: size * 0.34,
+            top: size * 0.38,
+            transform: [{ rotate: '20deg' }],
+          },
+        ]}
+      />
+      <View
+        style={[
+          styles.chairLeg,
+          {
+            width: size * 0.045,
+            height: size * 0.34,
+            left: size * 0.6,
+            top: size * 0.34,
+            transform: [{ rotate: '-14deg' }],
           },
         ]}
       />
@@ -148,7 +361,51 @@ export default function ProfileAvatar({
     if (preset?.kind === 'ball' && preset.color) {
       return (
         <View style={style}>
-          <BowlingBallAvatar size={size} color={preset.color} />
+          <BowlingBallGlyph
+            size={size}
+            color={preset.color}
+            holeColor={palette.background}
+          />
+        </View>
+      );
+    }
+
+    if (preset?.kind === 'coconut' && preset.color) {
+      return (
+        <View style={style}>
+          <CoconutBowlingBallAvatar size={size} color={preset.color} />
+        </View>
+      );
+    }
+
+    if (preset?.kind === 'sink') {
+      return (
+        <View style={style}>
+          <SinkAvatar size={size} />
+        </View>
+      );
+    }
+
+    if (preset?.kind === 'leaf') {
+      return (
+        <View style={style}>
+          <LeafAvatar size={size} />
+        </View>
+      );
+    }
+
+    if (preset?.kind === 'jar') {
+      return (
+        <View style={style}>
+          <PeanutButterJarAvatar size={size} />
+        </View>
+      );
+    }
+
+    if (preset?.kind === 'chair') {
+      return (
+        <View style={style}>
+          <BeachChairAvatar size={size} />
         </View>
       );
     }
@@ -193,14 +450,71 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilySans,
     letterSpacing: 0.4,
   },
-  ball: {
+  coconutWrap: {
+    position: 'relative',
+  },
+  iconAvatarWrap: {
     position: 'relative',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  ballHole: {
+  coconutTextureMark: {
     position: 'absolute',
-    backgroundColor: '#111827',
+    backgroundColor: 'rgba(165, 118, 84, 0.5)',
+  },
+  sinkFaucetStem: {
+    position: 'absolute',
+    backgroundColor: '#C8D1DB',
+  },
+  sinkFaucetTop: {
+    position: 'absolute',
+    backgroundColor: '#D8E0E8',
+  },
+  sinkBasin: {
+    position: 'absolute',
+    backgroundColor: '#E6EEF5',
+    overflow: 'hidden',
+  },
+  sinkDrain: {
+    position: 'absolute',
+    backgroundColor: '#95A3B2',
+  },
+  leafBody: {
+    position: 'absolute',
+    backgroundColor: '#8FD07A',
+  },
+  leafVein: {
+    position: 'absolute',
+    backgroundColor: '#5A924B',
+  },
+  jarLid: {
+    position: 'absolute',
+    backgroundColor: '#D14836',
+  },
+  jarBody: {
+    position: 'absolute',
+    backgroundColor: '#C98843',
+  },
+  jarLabel: {
+    position: 'absolute',
+    backgroundColor: '#F2D79B',
+  },
+  chairSeat: {
+    position: 'absolute',
+    backgroundColor: '#4BA9C7',
+    overflow: 'hidden',
+  },
+  chairStripe: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: '14%',
+    backgroundColor: '#F4E3AF',
+  },
+  chairLeg: {
+    position: 'absolute',
+    backgroundColor: '#D4DCE6',
+    borderRadius: 999,
   },
 });

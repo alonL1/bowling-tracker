@@ -45,6 +45,7 @@ import {
   updateSession,
 } from '@/lib/backend';
 import { buildSessionGroups } from '@/lib/bowling';
+import { navigateBackOrFallback } from '@/lib/navigation';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 
@@ -273,7 +274,7 @@ export default function SessionDetailScreen() {
       router.replace('/sessions' as never);
       return;
     }
-    router.back();
+    navigateBackOrFallback(router, '/(tabs)/sessions');
   };
 
   const updateMutation = useMutation({

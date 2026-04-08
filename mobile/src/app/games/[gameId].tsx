@@ -26,6 +26,7 @@ import {
   toLocalDateInputValue,
   toLocalTimeInputValue,
 } from '@/lib/date-time';
+import { navigateBackOrFallback } from '@/lib/navigation';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import type { FrameDetail, GameDetail } from '@/lib/types';
@@ -205,7 +206,7 @@ export default function GameDetailScreen() {
         try {
           await deleteGame(game.id);
           await queryClient.invalidateQueries({ queryKey: queryKeys.games });
-          router.back();
+          navigateBackOrFallback(router, '/(tabs)/sessions');
         } catch (nextError) {
           setError(nextError instanceof Error ? nextError.message : 'Failed to delete game.');
         }

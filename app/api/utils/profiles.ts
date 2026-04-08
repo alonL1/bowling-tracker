@@ -10,7 +10,12 @@ export const AVATAR_PRESET_IDS = [
   "ball_blue",
   "ball_red",
   "ball_orange",
-  "ball_purple"
+  "ball_purple",
+  "ball_coconut",
+  "sink",
+  "leaf",
+  "peanut_butter_jar",
+  "beach_chair"
 ] as const;
 
 export type AvatarPresetId = (typeof AVATAR_PRESET_IDS)[number];

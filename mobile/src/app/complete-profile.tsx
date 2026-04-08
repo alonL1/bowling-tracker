@@ -138,7 +138,7 @@ export default function CompleteProfileScreen() {
           <Text style={styles.helper}>Shown publicly as {formatHandle(username || 'username')}</Text>
         </View>
 
-        <InfoBanner text="Last name stays private to your account in v1." />
+        <InfoBanner text="Last name stays private to your account." />
         {error ? <InfoBanner text={error} tone="error" /> : null}
 
         <ActionButton

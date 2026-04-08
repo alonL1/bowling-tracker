@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 import { apiFetch, apiJson, parseJsonResponse } from '@/lib/api';
 import { cacheOfflineChatGames } from '@/lib/offline-chat';
+import { buildLegacyUsernameFallback, getProfileInitials } from '@/lib/profile';
 import {
   loadUploadsProcessingStore,
   mergeGamesWithUploadsProcessing,
@@ -29,6 +30,66 @@ import type {
   StatusResponse,
   UserProfile,
 } from '@/lib/types';
+
+function normalizeLeaderboardParticipant(
+  row: Partial<LeaderboardRow> & {
+    userId: string;
+    displayName?: string;
+    metrics: LeaderboardRow['metrics'];
+  },
+): LeaderboardRow {
+  const username = buildLegacyUsernameFallback({
+    username: row.username,
+    displayName: row.displayName,
+    userId: row.userId,
+  });
+
+  return {
+    userId: row.userId,
+    username,
+    displayName: row.displayName || username,
+    avatarKind: row.avatarKind || 'initials',
+    avatarPresetId: row.avatarPresetId ?? null,
+    avatarUrl: row.avatarUrl ?? null,
+    initials:
+      row.initials ||
+      getProfileInitials({
+        username,
+        initials: row.displayName || null,
+      }),
+    metrics: row.metrics,
+  };
+}
+
+function normalizeInviteLookupPayload(payload: InviteLookupResponse): InviteLookupResponse {
+  if (!payload.inviter) {
+    return payload;
+  }
+
+  const username = buildLegacyUsernameFallback({
+    username: payload.inviter.username,
+    displayName: payload.inviter.displayName,
+    userId: payload.inviter.userId,
+  });
+
+  return {
+    ...payload,
+    inviter: {
+      ...payload.inviter,
+      username,
+      displayName: payload.inviter.displayName || username,
+      avatarKind: payload.inviter.avatarKind || 'initials',
+      avatarPresetId: payload.inviter.avatarPresetId ?? null,
+      avatarUrl: payload.inviter.avatarUrl ?? null,
+      initials:
+        payload.inviter.initials ||
+        getProfileInitials({
+          username,
+          initials: payload.inviter.displayName || null,
+        }),
+    },
+  };
+}
 
 export const queryKeys = {
   games: ['games'] as const,
@@ -160,7 +221,21 @@ export async function sendChat(question: string, gameId?: string | null) {
 }
 
 export async function fetchLeaderboard() {
-  return apiJson<{ selfUserId: string; participants: LeaderboardRow[] }>('/api/friends/leaderboard');
+  const payload = await apiJson<{
+    selfUserId: string;
+    participants: Array<
+      Partial<LeaderboardRow> & {
+        userId: string;
+        displayName?: string;
+        metrics: LeaderboardRow['metrics'];
+      }
+    >;
+  }>('/api/friends/leaderboard');
+
+  return {
+    ...payload,
+    participants: (payload.participants || []).map(normalizeLeaderboardParticipant),
+  };
 }
 
 export async function fetchOwnProfile() {
@@ -262,7 +337,10 @@ export async function createInvite() {
 }
 
 export async function lookupInvite(token: string) {
-  return apiJson<InviteLookupResponse>(`/api/friends/invite/${encodeURIComponent(token)}`);
+  const payload = await apiJson<InviteLookupResponse>(
+    `/api/friends/invite/${encodeURIComponent(token)}`,
+  );
+  return normalizeInviteLookupPayload(payload);
 }
 
 export async function acceptInvite(token: string) {

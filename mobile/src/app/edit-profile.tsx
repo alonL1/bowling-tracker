@@ -17,6 +17,7 @@ import {
   updateOwnProfile,
   uploadOwnProfileAvatar,
 } from '@/lib/backend';
+import { navigateBackOrFallback } from '@/lib/navigation';
 import { normalizeUsernameInput } from '@/lib/profile';
 import type { AvatarKind, AvatarPresetId } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
@@ -167,7 +168,7 @@ export default function EditProfileScreen() {
       await refreshProfile();
       await queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard });
       setInfo('Profile updated.');
-      router.back();
+      navigateBackOrFallback(router, '/(tabs)/account');
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update profile.');
     } finally {

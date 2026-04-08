@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useRouter, type Href } from 'expo-router';
 import React, { type ReactNode } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import { palette, spacing } from '@/constants/palette';
+import { navigateBackOrFallback } from '@/lib/navigation';
 import { fontFamilySans } from '@/constants/typography';
 
 type DetailShellProps = {
@@ -22,6 +23,7 @@ type DetailShellProps = {
   trailing?: ReactNode;
   scroll?: boolean;
   bodyStyle?: StyleProp<ViewStyle>;
+  backHref?: Href;
 };
 
 export default function DetailShell({
@@ -31,13 +33,16 @@ export default function DetailShell({
   trailing,
   scroll = true,
   bodyStyle,
+  backHref = '/(tabs)/sessions',
 }: DetailShellProps) {
   const router = useRouter();
   const content = (
     <View style={styles.content}>
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Pressable onPress={() => router.back()} style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+          <Pressable
+            onPress={() => navigateBackOrFallback(router, backHref)}
+            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
             <Ionicons name="chevron-back" size={16} color={palette.muted} />
             <Text style={styles.backText}>Back</Text>
           </Pressable>

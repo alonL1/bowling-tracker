@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchOwnProfile } from '@/lib/backend';
+import { buildLegacyProfileFallback } from '@/lib/profile';
 import { queryClient, QUERY_CACHE_OWNER_STORAGE_KEY } from '@/lib/query-client';
 import {
   ensureMobileSession,
@@ -40,6 +41,13 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function isMissingProfileRouteError(error: unknown) {
+  return (
+    error instanceof Error &&
+    error.message.includes('non-JSON response (404)')
+  );
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -102,6 +110,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         return payload.profile;
       } catch (error) {
+        if (isMissingProfileRouteError(error)) {
+          const fallbackProfile = buildLegacyProfileFallback(nextUser);
+          console.warn(
+            'Account profile route is unavailable on the current backend. Using legacy fallback profile until the backend is updated.',
+          );
+          if (mountedRef.current && profileRequestIdRef.current === requestId) {
+            setProfile(fallbackProfile);
+          }
+          return fallbackProfile;
+        }
+
         console.error('Failed to load account profile.', error);
         if (mountedRef.current && profileRequestIdRef.current === requestId) {
           setProfile(null);
@@ -181,6 +200,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(payload.profile);
           return payload.profile;
         } catch (error) {
+          if (isMissingProfileRouteError(error) && nextUser) {
+            const fallbackProfile = buildLegacyProfileFallback(nextUser);
+            console.warn(
+              'Account profile route is unavailable on the current backend. Using legacy fallback profile until the backend is updated.',
+            );
+            setProfile(fallbackProfile);
+            return fallbackProfile;
+          }
+
           console.error('Failed to refresh account profile.', error);
           setProfile(null);
           return null;

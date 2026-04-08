@@ -208,7 +208,7 @@ export default function ChooseAvatarScreen() {
       <View style={styles.body}>
         <AvatarPickerPanel
           title="Your public avatar"
-          subtitle="Shown next to your @username on account, friends, and invite surfaces."
+          subtitle="Shown next to your username on account, friends, and invite surfaces."
           firstName={profile.firstName}
           lastName={profile.lastName}
           username={profile.username ?? profile.usernameSuggestion}

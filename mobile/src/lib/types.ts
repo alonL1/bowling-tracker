@@ -9,7 +9,12 @@ export type AvatarPresetId =
   | 'ball_blue'
   | 'ball_red'
   | 'ball_orange'
-  | 'ball_purple';
+  | 'ball_purple'
+  | 'ball_coconut'
+  | 'sink'
+  | 'leaf'
+  | 'peanut_butter_jar'
+  | 'beach_chair';
 export type LocalSyncSourceFlow =
   | 'live_session'
   | 'upload_session'
@@ -115,6 +120,7 @@ export type LeaderboardMetric =
 export type LeaderboardRow = {
   userId: string;
   username: string;
+  displayName?: string;
   avatarKind: AvatarKind;
   avatarPresetId?: AvatarPresetId | null;
   avatarUrl?: string | null;
@@ -125,6 +131,7 @@ export type LeaderboardRow = {
 export type PublicProfile = {
   userId: string;
   username: string;
+  displayName?: string;
   avatarKind: AvatarKind;
   avatarPresetId: AvatarPresetId | null;
   avatarUrl: string | null;

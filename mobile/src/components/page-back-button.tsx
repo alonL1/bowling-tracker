@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { palette, spacing } from '@/constants/palette';
+import { navigateBackOrFallback } from '@/lib/navigation';
 import { fontFamilySans } from '@/constants/typography';
 
 type PageBackButtonProps = {
@@ -18,11 +19,7 @@ export default function PageBackButton({
   const router = useRouter();
 
   const handlePress = () => {
-    try {
-      router.back();
-    } catch {
-      router.replace(fallbackHref);
-    }
+    navigateBackOrFallback(router, fallbackHref);
   };
 
   return (
