@@ -65,8 +65,10 @@ export default function SessionGameCard({
   const scoreLabel = typeof game.total_score === 'number' ? String(game.total_score) : '—';
   const badgeLines = useMemo(() => getCollapsedBadgeLines(title), [title]);
   const isReadOnlyUntilSynced = Boolean(game.local_sync?.isReadOnlyUntilSynced);
+  const isFailedLocalSync = game.local_sync?.syncState === 'failed';
+  const canEditGame = !isReadOnlyUntilSynced || isFailedLocalSync;
   const syncBadgeLabel = game.local_sync
-    ? game.local_sync.syncState === 'failed'
+    ? isFailedLocalSync
       ? 'Needs attention'
       : 'Syncing'
     : null;
@@ -117,13 +119,17 @@ export default function SessionGameCard({
           </Pressable>
 
           <View style={styles.actions}>
-            {!isReadOnlyUntilSynced ? (
+            {canEditGame ? (
               <>
                 <IconAction
-                  accessibilityLabel="Edit game"
+                  accessibilityLabel={isFailedLocalSync ? 'Fix game' : 'Edit game'}
                   onPress={() => setEditOpen(true)}
                   icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
                 />
+              </>
+            ) : null}
+            {!isReadOnlyUntilSynced ? (
+              <>
                 <IconAction
                   accessibilityLabel="Delete game"
                   onPress={deleteMutation.isPending ? undefined : handleDelete}
@@ -155,9 +161,15 @@ export default function SessionGameCard({
           <View style={styles.expandedBody}>
             <Text style={styles.metaLine}>{meta}</Text>
             {isReadOnlyUntilSynced ? (
-              <Text style={styles.readOnlyHint}>
-                This game is read-only until background sync finishes.
-              </Text>
+              isFailedLocalSync ? (
+                <Text style={styles.readOnlyHint}>
+                  This game needs attention. Edit the scoreboard to fix names or marks, then sync will retry automatically.
+                </Text>
+              ) : (
+                <Text style={styles.readOnlyHint}>
+                  This game is read-only until background sync finishes.
+                </Text>
+              )
             ) : null}
             {game.scoreboard_extraction ? (
               <MultiPlayerFrameGrid

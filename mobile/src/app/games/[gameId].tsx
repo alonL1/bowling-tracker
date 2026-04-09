@@ -1,3 +1,4 @@
+import { useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -111,6 +112,7 @@ function formatGameMeta(game: GameDetail) {
 
 export default function GameDetailScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { gameId } = useLocalSearchParams<{ gameId: string }>();
   const queryClient = useQueryClient();
   const [frames, setFrames] = useState<EditableFrame[]>([]);
@@ -206,7 +208,7 @@ export default function GameDetailScreen() {
         try {
           await deleteGame(game.id);
           await queryClient.invalidateQueries({ queryKey: queryKeys.games });
-          navigateBackOrFallback(router, '/(tabs)/sessions');
+          navigateBackOrFallback(router, '/(tabs)/sessions', navigation);
         } catch (nextError) {
           setError(nextError instanceof Error ? nextError.message : 'Failed to delete game.');
         }

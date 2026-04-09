@@ -1,6 +1,7 @@
 import { useRouter, type Href } from 'expo-router';
 import React, { type ReactNode } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import {
   Pressable,
   StyleSheet,
@@ -36,12 +37,13 @@ export default function DetailShell({
   backHref = '/(tabs)/sessions',
 }: DetailShellProps) {
   const router = useRouter();
+  const navigation = useNavigation();
   const content = (
     <View style={styles.content}>
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Pressable
-            onPress={() => navigateBackOrFallback(router, backHref)}
+            onPress={() => navigateBackOrFallback(router, backHref, navigation)}
             style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
             <Ionicons name="chevron-back" size={16} color={palette.muted} />
             <Text style={styles.backText}>Back</Text>

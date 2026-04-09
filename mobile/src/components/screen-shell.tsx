@@ -9,6 +9,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useRouter, type Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -43,6 +44,7 @@ export default function ScreenShell({
   overlay,
 }: ScreenShellProps) {
   const router = useRouter();
+  const navigation = useNavigation();
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -54,7 +56,7 @@ export default function ScreenShell({
         <View style={styles.header}>
           {showBackButton ? (
             <Pressable
-              onPress={() => navigateBackOrFallback(router, backHref)}
+              onPress={() => navigateBackOrFallback(router, backHref, navigation)}
               style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
               <Ionicons name="chevron-back" size={16} color={palette.muted} />
               <Text style={styles.backText}>Back</Text>

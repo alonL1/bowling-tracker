@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { StackActions, useNavigation } from '@react-navigation/native';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -201,6 +202,7 @@ function StatsTile({ label, value, onPress }: StatsTileProps) {
 
 export default function LiveSessionScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const { user, loading: authLoading } = useAuth();
   const {
@@ -370,11 +372,39 @@ export default function LiveSessionScreen() {
   );
 
   const hasSelectedPlayers = selectedPlayerKeys.length > 0;
-  const hasUnfinishedGames = nonReadyGames.some(
+  const unfinishedGameCount = nonReadyGames.filter(
     (game) => game.status === 'queued' || game.status === 'processing',
-  );
-  const hasFailedGames = nonReadyGames.some((game) => game.status === 'error');
+  ).length;
+  const failedGameCount = nonReadyGames.filter((game) => game.status === 'error').length;
+  const hasUnfinishedGames = unfinishedGameCount > 0;
+  const hasFailedGames = failedGameCount > 0;
   const hasAnyVisibleGames = (liveSession?.games?.length ?? 0) > 0;
+  const canEndSession =
+    Boolean(liveSession) &&
+    hasAnyVisibleGames &&
+    hasSelectedPlayers &&
+    !hasUnfinishedGames &&
+    !hasFailedGames &&
+    !selectionError;
+  const endSessionBlockers = [
+    ...(!hasAnyVisibleGames ? ['Add at least one scoreboard before ending the session.'] : []),
+    ...(unfinishedGameCount > 0
+      ? [
+          `${unfinishedGameCount} scoreboard${
+            unfinishedGameCount === 1 ? '' : 's'
+          } still processing.`,
+        ]
+      : []),
+    ...(failedGameCount > 0
+      ? [
+          `${failedGameCount} scoreboard${
+            failedGameCount === 1 ? '' : 's'
+          } ${failedGameCount === 1 ? 'needs' : 'need'} attention.`,
+        ]
+      : []),
+    ...(!hasSelectedPlayers ? ['Choose at least one player before ending the session.'] : []),
+    ...(selectionError ? [selectionError] : []),
+  ];
 
   const selectionMutation = useMutation({
     mutationFn: async ({
@@ -384,7 +414,10 @@ export default function LiveSessionScreen() {
       revision: number;
     }) =>
       updateLiveSession({ selectedPlayerKeys: nextSelectedPlayerKeys }),
-    onError: (nextError) => {
+    onError: (nextError, variables) => {
+      if (variables.revision !== selectionRevisionRef.current) {
+        return;
+      }
       setError(nextError instanceof Error ? nextError.message : 'Failed to update selected players.');
       void queryClient.invalidateQueries({ queryKey: queryKeys.liveSession });
     },
@@ -392,7 +425,13 @@ export default function LiveSessionScreen() {
       if (variables.revision !== selectionRevisionRef.current) {
         return;
       }
-      queryClient.setQueryData(queryKeys.liveSession, data);
+      queryClient.setQueryData<LiveSessionResponse | undefined>(queryKeys.liveSession, (current) =>
+        updateLiveSessionCache(data, (session) => ({
+          ...session,
+          selectedPlayerKeys: variables.nextSelectedPlayerKeys,
+          playerOptions: current?.liveSession?.playerOptions ?? session.playerOptions,
+        })),
+      );
     },
   });
 
@@ -553,13 +592,13 @@ export default function LiveSessionScreen() {
     },
     onSuccess: async (payload) => {
       setError('');
-      setEndSessionOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
       ]);
-      router.replace(`/sessions/${payload.routeSessionId}` as never);
+      navigation.dispatch(StackActions.popToTop());
+      router.replace('/(tabs)/sessions' as never);
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to end live session.');
@@ -594,7 +633,7 @@ export default function LiveSessionScreen() {
   };
 
   const handleEndSession = () => {
-    if (!liveSession) {
+    if (!canEndSession) {
       return;
     }
     setEndSessionOpen(true);
@@ -719,7 +758,7 @@ export default function LiveSessionScreen() {
           showsVerticalScrollIndicator={false}>
           <View style={styles.topBar}>
             <Pressable
-              onPress={() => navigateBackOrFallback(router, '/(tabs)/record')}
+              onPress={() => navigateBackOrFallback(router, '/(tabs)/record', navigation)}
               style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
               <Ionicons name="chevron-back" size={16} color={palette.muted} />
               <Text style={styles.backText}>Back</Text>
@@ -1058,26 +1097,23 @@ export default function LiveSessionScreen() {
           }}>
           {!hasSelectedPlayers ? (
             <Text style={styles.dockNote}>Choose at least one player before ending the session.</Text>
-          ) : selectionError ? (
-            <Text style={styles.dockNote}>{selectionError}</Text>
-          ) : hasUnfinishedGames ? (
-            <Text style={styles.dockNote}>You can end now. Remaining scoreboards will keep syncing in the background.</Text>
-          ) : hasFailedGames ? (
-            <Text style={styles.dockNote}>You can end now. Failed scoreboards will stay in Uploads & Processing until you retry or delete them.</Text>
           ) : projectedLoggedGameCount > 0 ? (
             <Text style={styles.dockNote}>
               Ending this session will log {projectedLoggedGameCount} games from {readyGames.length} scoreboards.
             </Text>
           ) : null}
+          {endSessionBlockers
+            .filter((message) => message !== 'Choose at least one player before ending the session.')
+            .map((message) => (
+              <Text key={message} style={styles.dockNote}>
+                {message}
+              </Text>
+            ))}
           <ActionButton
             label={endSessionMutation.isPending ? 'Ending session...' : 'End Session'}
             onPress={handleEndSession}
             disabled={
-              endSessionMutation.isPending ||
-              !liveSession ||
-              !hasSelectedPlayers ||
-              Boolean(selectionError) ||
-              !hasAnyVisibleGames
+              endSessionMutation.isPending || !canEndSession
             }
           />
         </View>
@@ -1117,7 +1153,7 @@ export default function LiveSessionScreen() {
           <SurfaceCard style={styles.modalCard} tone="raised">
             <Text style={styles.modalTitle}>End Session</Text>
             <Text style={styles.modalBody}>
-              The session will appear in your log immediately. Any remaining uploads or processing will continue in the background.
+              This session will appear in your Sessions list immediately and finish syncing in the background.
             </Text>
             <View style={styles.summaryList}>
               <Text style={styles.summaryLine}>
@@ -1149,7 +1185,8 @@ export default function LiveSessionScreen() {
             <ActionButton
               label={endSessionMutation.isPending ? 'Ending session...' : 'End Session'}
               onPress={() => endSessionMutation.mutate()}
-              disabled={endSessionMutation.isPending}
+              loading={endSessionMutation.isPending}
+              disabled={endSessionMutation.isPending || !canEndSession}
             />
             <ActionButton label="Cancel" onPress={() => setEndSessionOpen(false)} variant="secondary" />
           </SurfaceCard>

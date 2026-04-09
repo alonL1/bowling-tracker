@@ -285,7 +285,12 @@ create table if not exists profiles (
         'ball_blue',
         'ball_red',
         'ball_orange',
-        'ball_purple'
+        'ball_purple',
+        'ball_coconut',
+        'sink',
+        'leaf',
+        'peanut_butter_jar',
+        'beach_chair'
       )
     )
 );

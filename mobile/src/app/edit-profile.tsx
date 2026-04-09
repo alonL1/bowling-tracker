@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
+import { useNavigation } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
@@ -32,6 +33,7 @@ type UploadSelection = {
 
 export default function EditProfileScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const { user, loading, isGuest, profile, refreshProfile } = useAuth();
   const [firstName, setFirstName] = useState('');
@@ -169,7 +171,7 @@ export default function EditProfileScreen() {
       await refreshProfile();
       await queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard });
       setInfo('Profile updated.');
-      navigateBackOrFallback(router, '/(tabs)/account');
+      navigateBackOrFallback(router, '/(tabs)/account', navigation);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update profile.');
     } finally {

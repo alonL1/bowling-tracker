@@ -555,11 +555,12 @@ export async function updateLiveSession(payload: {
   selectedPlayerKeys?: string[];
   name?: string;
   description?: string;
-}) {
+}, options?: { signal?: AbortSignal }) {
   return apiJson<LiveSessionResponse>('/api/live-session', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    signal: options?.signal,
   });
 }
 
@@ -598,10 +599,14 @@ export async function deleteLiveSessionGame(liveGameId: string) {
   });
 }
 
-export async function endLiveSession(clientOperationId?: string) {
+export async function endLiveSession(
+  clientOperationId?: string,
+  options?: { signal?: AbortSignal },
+) {
   return apiJson<LiveSessionEndResponse>('/api/live-session/end', {
     method: 'POST',
     headers: clientOperationId ? { 'Content-Type': 'application/json' } : undefined,
     body: clientOperationId ? JSON.stringify({ clientOperationId }) : undefined,
+    signal: options?.signal,
   });
 }

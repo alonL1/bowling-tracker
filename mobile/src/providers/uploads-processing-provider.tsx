@@ -22,8 +22,10 @@ import {
   queryKeys,
   queueLiveSessionCapture,
   updateLiveSession,
+  updateLiveSessionGame,
   updateRecordingDraft,
   updateRecordingDraftGroup,
+  updateRecordingDraftGame,
   uploadToRecordingDraft,
 } from '@/lib/backend';
 import { apiJson } from '@/lib/api';
@@ -56,6 +58,7 @@ import {
   type UploadsProcessingLiveSessionEntry,
   type UploadsProcessingOptimisticGame,
   type UploadsProcessingOptimisticSession,
+  type UploadsProcessingSessionRouteAlias,
   type UploadsProcessingStore,
 } from '@/lib/uploads-processing-store';
 import {
@@ -66,6 +69,7 @@ import {
 import type {
   GameListItem,
   LiveSession,
+  LivePlayer,
   LiveSessionResponse,
   RecordingDraft,
   RecordingDraftMode,
@@ -77,6 +81,7 @@ import { useAuth } from '@/providers/auth-provider';
 
 const DEFAULT_BUCKET = 'scoreboards-temp';
 const SYNC_INTERVAL_MS = 15_000;
+const NEW_SESSION_TARGET = '__new-session__';
 
 type UpdateDraftInput = {
   mode: RecordingDraftMode;
@@ -144,9 +149,17 @@ type UploadsProcessingContextValue = {
     mode: RecordingDraftMode;
     draft: RecordingDraft | null;
   }) => Promise<boolean>;
+  clearDraftLocalState: (payload: {
+    mode: RecordingDraftMode;
+    draft: RecordingDraft | null;
+  }) => Promise<void>;
   finalizeDraftLocal: (payload: FinalizeDraftInput) => Promise<{ routeSessionId: string | null }>;
   retryEntry: (entryId: string) => Promise<void>;
   deleteEntry: (entryId: string) => Promise<void>;
+  repairFailedLoggedGame: (payload: {
+    game: GameListItem;
+    players: LivePlayer[];
+  }) => Promise<void>;
   requestSyncNow: () => void;
 };
 
@@ -175,12 +188,27 @@ function cloneStore(store: UploadsProcessingStore): UploadsProcessingStore {
       })),
       optimisticGames: entry.optimisticGames.map((game) => ({ ...game })),
     })),
+    sessionRouteAliases: store.sessionRouteAliases.map((entry) => ({ ...entry })),
   };
 }
 
 function replaceStoreEntity<T extends { id: string }>(items: T[], nextItem: T) {
   const nextItems = [...items];
   const targetIndex = nextItems.findIndex((entry) => entry.id === nextItem.id);
+  if (targetIndex >= 0) {
+    nextItems[targetIndex] = nextItem;
+    return nextItems;
+  }
+  nextItems.push(nextItem);
+  return nextItems;
+}
+
+function replaceSessionRouteAlias(
+  items: UploadsProcessingSessionRouteAlias[],
+  nextItem: UploadsProcessingSessionRouteAlias,
+) {
+  const nextItems = [...items];
+  const targetIndex = nextItems.findIndex((entry) => entry.tempSessionId === nextItem.tempSessionId);
   if (targetIndex >= 0) {
     nextItems[targetIndex] = nextItem;
     return nextItems;
@@ -290,6 +318,66 @@ function buildOptimisticGameSelection(
       : null,
   };
 }
+
+function buildLocalExtraction(players: LivePlayer[]): NonNullable<UploadsProcessingCaptureItem['extraction']> {
+  return {
+    players,
+  };
+}
+
+function buildResolvedSessionRouteAliases(
+  operation: UploadsProcessingFinalizeOperation,
+  payload: {
+    primarySessionId?: string | null;
+    createdSessionIds?: string[] | null;
+    liveSessionId?: string | null;
+  },
+): UploadsProcessingSessionRouteAlias[] {
+  const createdSessionIds = payload.createdSessionIds ?? [];
+
+  if (operation.sourceFlow === 'live_session') {
+    const tempSessionId = operation.optimisticSessions[0]?.sessionId;
+    if (!tempSessionId || !payload.liveSessionId || tempSessionId === payload.liveSessionId) {
+      return [];
+    }
+
+    return [
+      {
+        tempSessionId,
+        resolvedSessionId: payload.liveSessionId,
+        sourceFlow: operation.sourceFlow,
+        finalizeOperationId: operation.id,
+        createdAt: nowIso(),
+      },
+    ];
+  }
+
+  if (operation.sourceFlow === 'add_existing_session' && operation.targetSessionId) {
+    if (operation.targetSessionId !== NEW_SESSION_TARGET) {
+      return [];
+    }
+  }
+
+  return operation.optimisticSessions.flatMap((session, index) => {
+    const tempSessionId = session.sessionId;
+    const resolvedSessionId =
+      createdSessionIds[index] ??
+      (operation.optimisticSessions.length === 1 ? payload.primarySessionId ?? null : null);
+
+    if (!tempSessionId || !resolvedSessionId || tempSessionId === resolvedSessionId) {
+      return [];
+    }
+
+    return {
+      tempSessionId,
+      resolvedSessionId,
+      sourceFlow: operation.sourceFlow,
+      finalizeOperationId: operation.id,
+      createdAt: nowIso(),
+    };
+  });
+}
+
 
 export function UploadsProcessingProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
@@ -799,7 +887,10 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
   );
 
   const finalizeOperationSucceeded = useCallback(
-    (operationId: string) => {
+    (
+      operationId: string,
+      resolvedSessionRouteAliases: UploadsProcessingSessionRouteAlias[] = [],
+    ) => {
       updateStore((current) => {
         const operation = current.finalizeOperations.find((entry) => entry.id === operationId);
         if (!operation) {
@@ -829,6 +920,12 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         current.finalizeOperations = current.finalizeOperations.filter(
           (entry) => entry.id !== operationId,
         );
+        resolvedSessionRouteAliases.forEach((entry) => {
+          current.sessionRouteAliases = replaceSessionRouteAlias(
+            current.sessionRouteAliases,
+            entry,
+          );
+        });
 
         return current;
       });
@@ -915,8 +1012,13 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
             name: liveSession.name ?? undefined,
             description: liveSession.description ?? undefined,
           });
-          await endLiveSession(operation.id);
-          finalizeOperationSucceeded(operation.id);
+          const response = await endLiveSession(operation.id);
+          finalizeOperationSucceeded(
+            operation.id,
+            buildResolvedSessionRouteAliases(operation, {
+              liveSessionId: response.sessionId,
+            }),
+          );
           return;
         }
 
@@ -945,14 +1047,20 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
             ),
           );
 
-          await finalizeRecordingDraft({
+          const response = await finalizeRecordingDraft({
             mode: draft.mode,
             targetSessionId: draft.targetSessionId ?? null,
             name: draft.name ?? null,
             description: draft.description ?? null,
             clientOperationId: operation.id,
           });
-          finalizeOperationSucceeded(operation.id);
+          finalizeOperationSucceeded(
+            operation.id,
+            buildResolvedSessionRouteAliases(operation, {
+              primarySessionId: response.primarySessionId,
+              createdSessionIds: response.createdSessionIds,
+            }),
+          );
         }
       } catch (error) {
         updateStore((current) => {
@@ -1250,6 +1358,9 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 
       const currentTime = nowIso();
       const routeSessionId = createLocalId('session');
+      const nextName = payload.name?.trim() || payload.liveSession.name || null;
+      const nextDescription =
+        payload.description?.trim() || payload.liveSession.description || null;
       const captureItems = storeRef.current.captureItems
         .filter((entry) => entry.liveSessionId === localSessionId && entry.status !== 'discarded')
         .sort((left, right) => left.captureOrder - right.captureOrder);
@@ -1302,9 +1413,8 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
           payload.liveSession.sessionId === localSessionId ? null : payload.liveSession.sessionId,
         serverLiveSessionId:
           payload.liveSession.id === localSessionId ? null : payload.liveSession.id,
-        draftName: payload.name?.trim() || payload.liveSession.name || null,
-        draftDescription:
-          payload.description?.trim() || payload.liveSession.description || null,
+        draftName: nextName,
+        draftDescription: nextDescription,
       };
 
       updateStore((current) => {
@@ -1322,9 +1432,8 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         const targetLiveSession = current.liveSessions.find((entry) => entry.id === localSessionId);
         if (targetLiveSession) {
           targetLiveSession.state = 'finalize_pending';
-          targetLiveSession.name = payload.name?.trim() || targetLiveSession.name || null;
-          targetLiveSession.description =
-            payload.description?.trim() || targetLiveSession.description || null;
+          targetLiveSession.name = nextName ?? targetLiveSession.name ?? null;
+          targetLiveSession.description = nextDescription ?? targetLiveSession.description ?? null;
           targetLiveSession.selectedPlayerKeys = [...payload.liveSession.selectedPlayerKeys];
           targetLiveSession.lastError = null;
           targetLiveSession.updatedAt = currentTime;
@@ -1552,11 +1661,56 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         const captureItems = current.captureItems.filter((entry) => entry.recordingDraftId === draft.id);
         captureItems.forEach((item) => deleteLocalUploadsProcessingFile(item.localFileUri));
         current.captureItems = current.captureItems.filter((entry) => entry.recordingDraftId !== draft.id);
+        current.finalizeOperations = current.finalizeOperations.filter(
+          (entry) => entry.recordingDraftId !== draft.id,
+        );
         current.drafts = current.drafts.filter((entry) => entry.id !== draft.id);
         return current;
       });
 
       return true;
+    },
+    [updateStore],
+  );
+
+  const clearDraftLocalState = useCallback(
+    async (payload: { mode: RecordingDraftMode; draft: RecordingDraft | null }) => {
+      const localDraftId =
+        payload.draft?.local_sync?.localId ||
+        storeRef.current.drafts.find(
+          (entry) =>
+            (payload.draft?.id && entry.serverDraftId === payload.draft.id) ||
+            entry.mode === payload.mode,
+        )?.id;
+
+      if (!localDraftId) {
+        return;
+      }
+
+      updateStore((current) => {
+        const targetDraft = current.drafts.find((entry) => entry.id === localDraftId);
+        if (!targetDraft) {
+          return current;
+        }
+
+        const linkedCaptureItems = current.captureItems.filter(
+          (entry) => entry.recordingDraftId === targetDraft.id,
+        );
+        const linkedCaptureIds = new Set(linkedCaptureItems.map((entry) => entry.id));
+
+        linkedCaptureItems.forEach((item) => deleteLocalUploadsProcessingFile(item.localFileUri));
+
+        current.captureItems = current.captureItems.filter(
+          (entry) => entry.recordingDraftId !== targetDraft.id,
+        );
+        current.finalizeOperations = current.finalizeOperations.filter(
+          (entry) =>
+            entry.recordingDraftId !== targetDraft.id &&
+            !entry.linkedCaptureItemIds.some((captureId) => linkedCaptureIds.has(captureId)),
+        );
+        current.drafts = current.drafts.filter((entry) => entry.id !== targetDraft.id);
+        return current;
+      });
     },
     [updateStore],
   );
@@ -1723,6 +1877,157 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
     [scheduleSyncNow, updateStore],
   );
 
+  const repairFailedLoggedGame = useCallback(
+    async (payload: { game: GameListItem; players: LivePlayer[] }) => {
+      const linkedCaptureItemId = payload.game.local_sync?.linkedQueueItemIds?.[0] ?? null;
+      if (!linkedCaptureItemId) {
+        throw new Error('This game is no longer linked to a background upload.');
+      }
+
+      const captureItem = storeRef.current.captureItems.find((entry) => entry.id === linkedCaptureItemId);
+      if (!captureItem) {
+        throw new Error('This game is no longer linked to a background upload.');
+      }
+
+      if (payload.game.local_sync?.syncState !== 'failed') {
+        throw new Error('Only failed background-sync games can be repaired here.');
+      }
+
+      const currentTime = nowIso();
+      const nextExtraction = buildLocalExtraction(payload.players);
+
+      if (captureItem.sourceFlow === 'live_session') {
+        if (!captureItem.serverLiveGameId) {
+          throw new Error('This live session game is not ready to be repaired yet.');
+        }
+
+        await updateLiveSessionGame({
+          liveGameId: captureItem.serverLiveGameId,
+          players: payload.players,
+        });
+
+        updateStore((current) => {
+          const currentItem = current.captureItems.find((entry) => entry.id === linkedCaptureItemId);
+          if (!currentItem) {
+            return current;
+          }
+
+          currentItem.extraction = nextExtraction;
+          currentItem.status = 'ready_pending_finalize';
+          currentItem.lastError = null;
+          currentItem.nextRetryAt = null;
+          currentItem.updatedAt = currentTime;
+
+          const targetLiveSession = current.liveSessions.find(
+            (entry) => entry.id === currentItem.liveSessionId,
+          );
+          if (targetLiveSession) {
+            targetLiveSession.lastError = null;
+            targetLiveSession.state = 'finalize_pending';
+            targetLiveSession.updatedAt = currentTime;
+          }
+
+          const targetOperation = current.finalizeOperations.find(
+            (entry) => entry.id === currentItem.finalizeOperationId,
+          );
+          if (targetOperation) {
+            targetOperation.status = 'pending';
+            targetOperation.lastError = null;
+            targetOperation.nextRetryAt = null;
+            targetOperation.updatedAt = currentTime;
+
+            const selectedPlayer = buildOptimisticGameSelection(
+              currentItem.extraction,
+              targetLiveSession?.selectedPlayerKeys ?? [],
+            );
+            targetOperation.optimisticGames = targetOperation.optimisticGames.map((game) =>
+              game.linkedCaptureItemId === currentItem.id
+                ? {
+                    ...game,
+                    selectedPlayerKey: selectedPlayer.selectedPlayerKey,
+                    selectedPlayerName: selectedPlayer.selectedPlayerName,
+                  }
+                : game,
+            );
+          }
+
+          return current;
+        });
+
+        scheduleSyncNow();
+        return;
+      }
+
+      if (!captureItem.serverDraftGameId) {
+        throw new Error('This game is not ready to be repaired yet.');
+      }
+
+      const response = await updateRecordingDraftGame({
+        mode: captureItem.sourceFlow as RecordingDraftMode,
+        draftGameId: captureItem.serverDraftGameId,
+        players: payload.players,
+      });
+      const responseDraft = response.draft;
+      const responseGame = responseDraft?.groups
+        .flatMap((group) => group.games)
+        .find((entry) => entry.id === captureItem.serverDraftGameId);
+
+      updateStore((current) => {
+        const currentItem = current.captureItems.find((entry) => entry.id === linkedCaptureItemId);
+        if (!currentItem) {
+          return current;
+        }
+
+        currentItem.extraction = responseGame?.extraction ?? nextExtraction;
+        currentItem.status = 'ready_pending_finalize';
+        currentItem.lastError = null;
+        currentItem.nextRetryAt = null;
+        currentItem.updatedAt = currentTime;
+
+        const targetDraft = current.drafts.find(
+          (entry) => entry.id === currentItem.recordingDraftId,
+        );
+        if (targetDraft) {
+          targetDraft.serverDraftId = responseDraft?.id ?? targetDraft.serverDraftId ?? null;
+          targetDraft.selectedPlayerKeys =
+            responseDraft?.selectedPlayerKeys ?? targetDraft.selectedPlayerKeys;
+          targetDraft.lastError = null;
+          targetDraft.state = 'finalize_pending';
+          targetDraft.updatedAt = currentTime;
+        }
+
+        const targetOperation = current.finalizeOperations.find(
+          (entry) => entry.id === currentItem.finalizeOperationId,
+        );
+        if (targetOperation) {
+          targetOperation.status = 'pending';
+          targetOperation.lastError = null;
+          targetOperation.nextRetryAt = null;
+          targetOperation.updatedAt = currentTime;
+
+          const selectedPlayer = buildOptimisticGameSelection(
+            currentItem.extraction,
+            responseDraft?.selectedPlayerKeys ?? targetDraft?.selectedPlayerKeys ?? [],
+          );
+          targetOperation.optimisticGames = targetOperation.optimisticGames.map((game) =>
+            game.linkedCaptureItemId === currentItem.id
+              ? {
+                  ...game,
+                  selectedPlayerKey: selectedPlayer.selectedPlayerKey,
+                  selectedPlayerName: selectedPlayer.selectedPlayerName,
+                }
+              : game,
+          );
+        }
+
+        return current;
+      });
+
+      scheduleSyncNow();
+    },
+    [scheduleSyncNow, updateStore],
+  );
+
   const retryEntry = useCallback(
     async (entryId: string) => {
       updateStore((current) => {
@@ -1822,15 +2127,18 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
       updateDraftGroupLocal,
       deleteDraftCapture,
       discardDraftLocal,
+      clearDraftLocalState,
       finalizeDraftLocal,
       retryEntry,
       deleteEntry,
+      repairFailedLoggedGame,
       requestSyncNow: scheduleSyncNow,
     }),
     [
       deleteDraftCapture,
       deleteEntry,
       deleteLiveCapture,
+      clearDraftLocalState,
       discardDraftLocal,
       discardLiveSessionLocal,
       enqueueDraftCaptures,
@@ -1838,6 +2146,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
       finalizeDraftLocal,
       finalizeLiveSessionLocal,
       ready,
+      repairFailedLoggedGame,
       retryEntry,
       scheduleSyncNow,
       store,

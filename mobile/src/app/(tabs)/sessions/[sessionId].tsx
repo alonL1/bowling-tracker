@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -46,8 +47,10 @@ import {
 } from '@/lib/backend';
 import { buildSessionGroups } from '@/lib/bowling';
 import { navigateBackOrFallback } from '@/lib/navigation';
+import { getResolvedSessionRouteId } from '@/lib/uploads-processing-store';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
 
 const NEW_SESSION_TARGET = '__new-session__';
 const comparisonCategories: Array<{ key: LivePlayerComparisonMetric; label: string }> = [
@@ -212,8 +215,10 @@ function StatsTile({
 
 export default function SessionDetailScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const queryClient = useQueryClient();
+  const { store } = useUploadsProcessing();
 
   const gamesQuery = useQuery({
     queryKey: queryKeys.games,
@@ -224,7 +229,16 @@ export default function SessionDetailScreen() {
     () => buildSessionGroups(gamesQuery.data?.games ?? []),
     [gamesQuery.data?.games],
   );
-  const group = grouping.groups.find((entry) => entry.key === sessionId);
+  const pendingOptimisticGroup = grouping.groups.find((entry) => entry.key === sessionId);
+  const resolvedSessionId = getResolvedSessionRouteId(store, sessionId);
+  const group =
+    pendingOptimisticGroup ??
+    (resolvedSessionId
+      ? grouping.groups.find((entry) => entry.key === resolvedSessionId)
+      : undefined);
+  const pendingOptimisticRoute = store.finalizeOperations.some((operation) =>
+    operation.optimisticSessions.some((entry) => entry.sessionId === sessionId),
+  );
 
   const [editing, setEditing] = useState(false);
   const [deleteOptionsOpen, setDeleteOptionsOpen] = useState(false);
@@ -269,12 +283,35 @@ export default function SessionDetailScreen() {
     );
   }, [group]);
 
+  useEffect(() => {
+    if (!resolvedSessionId || !group?.sessionId || group.sessionId !== resolvedSessionId) {
+      return;
+    }
+
+    if (sessionId === resolvedSessionId) {
+      return;
+    }
+
+    router.replace(`/sessions/${resolvedSessionId}` as never);
+  }, [group?.sessionId, resolvedSessionId, router, sessionId]);
+
+  useEffect(() => {
+    if (!resolvedSessionId || group) {
+      return;
+    }
+
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+    ]);
+  }, [group, queryClient, resolvedSessionId]);
+
   const leaveSessionDetail = () => {
     if (Platform.OS === 'web') {
       router.replace('/sessions' as never);
       return;
     }
-    navigateBackOrFallback(router, '/(tabs)/sessions');
+    navigateBackOrFallback(router, '/(tabs)/sessions', navigation);
   };
 
   const updateMutation = useMutation({
@@ -376,6 +413,10 @@ export default function SessionDetailScreen() {
     return <CenteredState title="Loading session..." loading />;
   }
 
+  if (!group && (resolvedSessionId || pendingOptimisticRoute || gamesQuery.isFetching)) {
+    return <CenteredState title="Finishing session..." loading />;
+  }
+
   if (!group) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -429,6 +470,19 @@ export default function SessionDetailScreen() {
     group.session?.local_sync?.isReadOnlyUntilSynced ||
       group.games.some((game) => game.local_sync?.isReadOnlyUntilSynced),
   );
+  const hasFailedLocalSync = Boolean(
+    group.session?.local_sync?.syncState === 'failed' ||
+      group.games.some((game) => game.local_sync?.syncState === 'failed'),
+  );
+  const hasPendingLocalSync = Boolean(
+    group.session?.local_sync?.syncState === 'syncing' ||
+      group.games.some((game) => game.local_sync?.syncState === 'syncing'),
+  );
+  const sessionActionsLocked = readOnlyUntilSynced;
+  const firstLocalSyncError =
+    group.session?.local_sync?.lastSyncError ||
+    group.games.find((game) => game.local_sync?.syncState === 'failed')?.local_sync?.lastSyncError ||
+    '';
 
   const handleDeleteSession = () => {
     if (!group.sessionId || group.isSessionless) {
@@ -500,7 +554,7 @@ export default function SessionDetailScreen() {
             <Text style={styles.backText}>Back</Text>
           </Pressable>
 
-          {!group.isSessionless && !readOnlyUntilSynced ? (
+          {!group.isSessionless && !sessionActionsLocked ? (
             <View style={styles.topBarActions}>
               <IconAction
                 accessibilityLabel="Edit session"
@@ -533,8 +587,17 @@ export default function SessionDetailScreen() {
         </View>
 
         {error ? <InfoBanner tone="error" text={error} /> : null}
-        {readOnlyUntilSynced ? (
-          <InfoBanner text="This session is still syncing in the background. Editing and deletion are disabled until it finishes." />
+        {hasFailedLocalSync ? (
+          <InfoBanner
+            tone="error"
+            text={
+              firstLocalSyncError
+                ? `${firstLocalSyncError} Open the affected game to fix its scoreboard, then sync will retry automatically.`
+                : 'One or more games in this session need attention. Open the affected game to fix its scoreboard, then sync will retry automatically.'
+            }
+          />
+        ) : hasPendingLocalSync ? (
+          <InfoBanner text="This session is still syncing in the background. Session-level editing and deletion are disabled until it finishes." />
         ) : null}
         <UploadsProcessingBanner />
 
@@ -603,8 +666,10 @@ export default function SessionDetailScreen() {
             }}>
             <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
               <Text style={styles.guidance}>
-                {readOnlyUntilSynced
-                  ? 'This session is read-only while Uploads & Processing finishes syncing it.'
+                {hasFailedLocalSync
+                  ? 'One or more games need attention. Open the affected game to fix names or marks, then the session will retry syncing automatically.'
+                  : hasPendingLocalSync
+                    ? 'This session is read-only while Uploads & Processing finishes syncing it.'
                   : 'Tap on a game to see more info. Hold down on a game to move it into a different session.'}
               </Text>
 

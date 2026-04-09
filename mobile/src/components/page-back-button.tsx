@@ -1,6 +1,7 @@
 import { useRouter, type Href } from 'expo-router';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { palette, spacing } from '@/constants/palette';
@@ -17,9 +18,10 @@ export default function PageBackButton({
   label = 'Back',
 }: PageBackButtonProps) {
   const router = useRouter();
+  const navigation = useNavigation();
 
   const handlePress = () => {
-    navigateBackOrFallback(router, fallbackHref);
+    navigateBackOrFallback(router, fallbackHref, navigation);
   };
 
   return (

@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { StackActions, useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   KeyboardAvoidingView,
@@ -97,13 +98,17 @@ function getDraftMode(sessionMode: SessionMode): RecordingDraftMode {
 
 function getPrimaryButtonLabel(mode: RecordingDraftMode, hasTargetSession: boolean) {
   if (mode === 'add_existing_session') {
-    return hasTargetSession ? 'Add to Session' : 'Choose Existing Session';
+    return hasTargetSession ? 'Add to Session' : 'Add to Session';
   }
   return 'Add to Log';
 }
 
 function getFinalizeButtonLabel(mode: RecordingDraftMode) {
   return mode === 'add_existing_session' ? 'Add to Session' : 'Add to Log';
+}
+
+function getTargetSessionButtonLabel(targetSessionId: string | null) {
+  return targetSessionId ? 'Change Existing Session' : 'Choose Existing Session';
 }
 
 function buildDraftFlatRows(groups: RecordingDraftGroup[]) {
@@ -334,9 +339,11 @@ export default function UploadSessionForm({
   addToLogHelperText,
 }: UploadSessionFormProps) {
   const router = useRouter();
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const {
+    clearDraftLocalState,
     deleteDraftCapture,
     discardDraftLocal,
     enqueueDraftCaptures,
@@ -365,6 +372,7 @@ export default function UploadSessionForm({
   const pendingScrollGameIdRef = useRef<string | null>(null);
   const gameLayoutYRef = useRef<Record<string, number>>({});
   const gameListYRef = useRef(0);
+  const selectionRevisionRef = useRef(0);
 
   const draftQuery = useQuery({
     queryKey: queryKeys.recordingDraft(mode),
@@ -395,12 +403,39 @@ export default function UploadSessionForm({
     () => getFirstSelectionValidationError(readyGames, selectedPlayerKeys),
     [readyGames, selectedPlayerKeys],
   );
-  const hasProcessing = allGames.some(
+  const processingGameCount = allGames.filter(
     (game) => game.status === 'queued' || game.status === 'processing',
-  );
-  const hasFailedGames = allGames.some((game) => game.status === 'error');
+  ).length;
+  const failedGameCount = allGames.filter((game) => game.status === 'error').length;
+  const hasProcessing = processingGameCount > 0;
+  const hasFailedGames = failedGameCount > 0;
+  const hasVisibleGames = allGames.length > 0;
+  const finalizeBlockers = [
+    ...(!hasVisibleGames ? ['Add at least one scoreboard before continuing.'] : []),
+    ...(processingGameCount > 0
+      ? [
+          `${processingGameCount} scoreboard${
+            processingGameCount === 1 ? '' : 's'
+          } still processing.`,
+        ]
+      : []),
+    ...(failedGameCount > 0
+      ? [
+          `${failedGameCount} scoreboard${
+            failedGameCount === 1 ? '' : 's'
+          } ${failedGameCount === 1 ? 'needs' : 'need'} attention.`,
+        ]
+      : []),
+    ...(selectionError ? [selectionError] : []),
+    ...(mode === 'add_existing_session' && !targetSessionId
+      ? ['Choose an existing session before continuing.']
+      : []),
+  ];
   const canFinalize =
-    readyGames.length > 0 &&
+    hasVisibleGames &&
+    readyGames.length === allGames.length &&
+    !hasProcessing &&
+    !hasFailedGames &&
     !selectionError &&
     (mode !== 'add_existing_session' || Boolean(targetSessionId));
 
@@ -557,16 +592,36 @@ export default function UploadSessionForm({
   });
 
   const selectionMutation = useMutation({
-    mutationFn: async (nextSelectedPlayerKeys: string[]) =>
+    mutationFn: async ({
+      nextSelectedPlayerKeys,
+    }: {
+      nextSelectedPlayerKeys: string[];
+      revision: number;
+    }) =>
       updateRecordingDraft({
         mode,
         selectedPlayerKeys: nextSelectedPlayerKeys,
       }),
-    onSuccess: (response) => {
+    onSuccess: (response, variables) => {
+      if (variables.revision !== selectionRevisionRef.current) {
+        return;
+      }
       setError('');
-      setDraftCache(response as { draft: typeof draft });
+      const responsePayload = response as { draft: typeof draft };
+      setDraftCache({
+        ...responsePayload,
+        draft: responsePayload.draft
+          ? {
+              ...responsePayload.draft,
+              selectedPlayerKeys: variables.nextSelectedPlayerKeys,
+            }
+          : responsePayload.draft,
+      });
     },
-    onError: (nextError) => {
+    onError: (nextError, variables) => {
+      if (variables.revision !== selectionRevisionRef.current) {
+        return;
+      }
       setError(nextError instanceof Error ? nextError.message : 'Failed to update selected players.');
       void queryClient.invalidateQueries({ queryKey: queryKeys.recordingDraft(mode) });
     },
@@ -627,11 +682,15 @@ export default function UploadSessionForm({
       const response = await discardRecordingDraft(mode);
       return { ...response, discardedLocally: false };
     },
-    onSuccess: async () => {
+    onSuccess: async (response) => {
+      if (!response.discardedLocally) {
+        await clearDraftLocalState({ mode, draft });
+      }
       setError('');
       setFinalizeOpen(false);
       setEditingGame(null);
       setEditingGroup(null);
+      setDraftCache({ draft: null });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.recordingDraft(mode) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
@@ -725,7 +784,6 @@ export default function UploadSessionForm({
       );
       setDraftCache(response as { draft: typeof draft });
       setSessionPickerOpen(false);
-      setFinalizeOpen(true);
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to choose session.');
@@ -745,21 +803,15 @@ export default function UploadSessionForm({
         name: mode === 'upload_session' ? finalizeName : undefined,
         description: mode === 'upload_session' ? finalizeDescription : undefined,
       }),
-    onSuccess: async (response) => {
+    onSuccess: async () => {
       setError('');
-      setFinalizeOpen(false);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
       ]);
-
-      if (response.routeSessionId) {
-        router.replace(`/sessions/${response.routeSessionId}` as never);
-        return;
-      }
-
-      navigateBackOrFallback(router, '/(tabs)/record');
+      navigation.dispatch(StackActions.popToTop());
+      router.replace('/(tabs)/sessions' as never);
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to add draft to log.');
@@ -804,16 +856,23 @@ export default function UploadSessionForm({
       selectedPlayerKeys: nextSelectedPlayerKeys,
     });
 
-    selectionMutation.mutate(nextSelectedPlayerKeys);
+    selectionRevisionRef.current += 1;
+    selectionMutation.mutate({
+      nextSelectedPlayerKeys,
+      revision: selectionRevisionRef.current,
+    });
   };
 
   const handleOpenPrimaryAction = () => {
-    if (mode === 'add_existing_session' && !targetSessionId) {
-      setSessionPickerOpen(true);
+    if (!canFinalize) {
       return;
     }
 
     setFinalizeOpen(true);
+  };
+
+  const handleChooseTargetSession = () => {
+    setSessionPickerOpen(true);
   };
 
   const handleDiscardDraft = () => {
@@ -864,7 +923,7 @@ export default function UploadSessionForm({
     <View style={styles.topContent}>
       <View style={styles.topBar}>
         <Pressable
-          onPress={() => navigateBackOrFallback(router, '/(tabs)/record')}
+          onPress={() => navigateBackOrFallback(router, '/(tabs)/record', navigation)}
           style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
           <Ionicons name="chevron-back" size={16} color={palette.muted} />
           <Text style={styles.backText}>Back</Text>
@@ -1133,29 +1192,30 @@ export default function UploadSessionForm({
               These grouped scoreboards will each become a session when you add them to your log.
             </Text>
           ) : !targetSessionId ? (
-            <Text style={styles.dockNote}>Choose an existing session before continuing.</Text>
+            <Text style={styles.dockNote}>Pick which existing session these scoreboards should go into.</Text>
           ) : (
             <Text style={styles.dockNote}>
               Adding to: {formatTargetSessionLabel(targetSessionId, sessions)}
             </Text>
           )}
 
-          {selectionError ? <Text style={styles.dockNote}>{selectionError}</Text> : null}
-          {!selectionError && hasProcessing ? (
-            <Text style={styles.dockNote}>You can continue now. Remaining scoreboards will keep syncing in the background.</Text>
-          ) : null}
-          {!selectionError && !hasProcessing && hasFailedGames ? (
-            <Text style={styles.dockNote}>You can continue now. Failed scoreboards will stay in Uploads & Processing until you retry or delete them.</Text>
-          ) : null}
+          {finalizeBlockers.map((message) => (
+            <Text key={message} style={styles.dockNote}>
+              {message}
+            </Text>
+          ))}
           {addToLogHelperText ? <Text style={styles.dockSubnote}>{addToLogHelperText}</Text> : null}
+          {mode === 'add_existing_session' ? (
+            <ActionButton
+              label={getTargetSessionButtonLabel(targetSessionId)}
+              onPress={handleChooseTargetSession}
+              variant="secondary"
+            />
+          ) : null}
           <ActionButton
             label={getPrimaryButtonLabel(mode, Boolean(targetSessionId))}
             onPress={handleOpenPrimaryAction}
-            disabled={
-              mode === 'add_existing_session'
-                ? false
-                : !canFinalize
-            }
+            disabled={!canFinalize}
           />
         </View>
       ) : null}
@@ -1226,8 +1286,8 @@ export default function UploadSessionForm({
             <Text style={styles.modalTitle}>{getFinalizeButtonLabel(mode)}</Text>
             <Text style={styles.modalBody}>
               {mode === 'add_existing_session'
-                ? `Add these scoreboards to ${formatTargetSessionLabel(targetSessionId, sessions)}. Any remaining uploads or processing will continue in the background.`
-                : 'The session will appear in your log immediately. Any remaining uploads or processing will continue in the background.'}
+                ? `These scoreboards will appear in your Sessions list immediately under ${formatTargetSessionLabel(targetSessionId, sessions)}. Finalizing them on the server will continue in the background.`
+                : 'This will appear in your Sessions list immediately. Finalizing it on the server will continue in the background.'}
             </Text>
             <View style={styles.summaryList}>
               <Text style={styles.summaryLine}>Ready scoreboards: {readyGames.length}</Text>
@@ -1274,6 +1334,7 @@ export default function UploadSessionForm({
             <ActionButton
               label={finalizeMutation.isPending ? getFinalizeButtonLabel(mode) : getFinalizeButtonLabel(mode)}
               onPress={() => finalizeMutation.mutate()}
+              loading={finalizeMutation.isPending}
               disabled={finalizeMutation.isPending || !canFinalize}
             />
             <ActionButton
