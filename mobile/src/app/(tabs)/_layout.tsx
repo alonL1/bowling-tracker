@@ -1,11 +1,12 @@
 import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 import { Asset } from 'expo-asset';
-import { Redirect, Tabs } from 'expo-router';
+import { Tabs } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
 import CenteredState from '@/components/centered-state';
 import MobileTabBar from '@/components/mobile-tab-bar';
+import SafeRedirect from '@/components/safe-redirect';
 import { palette } from '@/constants/palette';
 import { fetchGames, fetchLeaderboard, fetchRecordEntryStatus, queryKeys } from '@/lib/backend';
 import { useAuth } from '@/providers/auth-provider';
@@ -57,7 +58,7 @@ export default function TabsLayout() {
   }
 
   if (!user) {
-    return <Redirect href="/login" />;
+    return <SafeRedirect href="/login" />;
   }
 
   return (

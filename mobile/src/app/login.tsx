@@ -1,5 +1,5 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
-import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -19,6 +19,7 @@ import ActionButton from '@/components/action-button';
 import CenteredState from '@/components/centered-state';
 import InfoBanner from '@/components/info-banner';
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
+import SafeRedirect from '@/components/safe-redirect';
 import SurfaceCard from '@/components/surface-card';
 import { checkUsernameAvailability } from '@/lib/backend';
 import { claimGuest } from '@/lib/backend';
@@ -159,7 +160,7 @@ export default function LoginScreen() {
   }
 
   if (user && !isGuest && !transferPrompt && !busy && !transferBusy) {
-    return <Redirect href={nextPath} />;
+    return <SafeRedirect href={nextPath} />;
   }
 
   const finishAuthentication = async (guestAccessToken: string, guestUserId: string) => {

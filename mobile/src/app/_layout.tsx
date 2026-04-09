@@ -1,4 +1,4 @@
-import { Redirect, Stack, usePathname } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { View } from 'react-native';
@@ -8,6 +8,7 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 
 import CenteredState from '@/components/centered-state';
 import GlobalAppNav from '@/components/global-app-nav';
+import SafeRedirect from '@/components/safe-redirect';
 import { palette } from '@/constants/palette';
 import { queryClient, queryPersistOptions } from '@/lib/query-client';
 import { AuthProvider } from '@/providers/auth-provider';
@@ -37,15 +38,15 @@ function RootNavigator() {
 
   if (user && !isGuest) {
     if (!profileComplete && !isProfileGuardExemptPath(nextPath)) {
-      return <Redirect href={`/complete-profile?next=${encodeURIComponent(nextPath)}`} />;
+      return <SafeRedirect href={`/complete-profile?next=${encodeURIComponent(nextPath)}`} />;
     }
 
     if (profileComplete && avatarStepNeeded && !isProfileGuardExemptPath(nextPath)) {
-      return <Redirect href={`/choose-avatar?next=${encodeURIComponent(nextPath)}`} />;
+      return <SafeRedirect href={`/choose-avatar?next=${encodeURIComponent(nextPath)}`} />;
     }
 
     if (!profileComplete && nextPath === '/choose-avatar') {
-      return <Redirect href={`/complete-profile?next=${encodeURIComponent('/(tabs)/sessions')}`} />;
+      return <SafeRedirect href={`/complete-profile?next=${encodeURIComponent('/(tabs)/sessions')}`} />;
     }
   }
 

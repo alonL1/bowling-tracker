@@ -1,5 +1,5 @@
-import { Redirect } from 'expo-router';
+import SafeRedirect from '@/components/safe-redirect';
 
 export default function IndexScreen() {
-  return <Redirect href="/(tabs)/sessions" />;
+  return <SafeRedirect href="/(tabs)/sessions" />;
 }

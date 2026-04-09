@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import ActionButton from '@/components/action-button';
 import AvatarPickerPanel from '@/components/avatar-picker-panel';
 import InfoBanner from '@/components/info-banner';
+import SafeRedirect from '@/components/safe-redirect';
 import ScreenShell from '@/components/screen-shell';
 import { spacing } from '@/constants/palette';
 import {
@@ -69,15 +70,15 @@ export default function ChooseAvatarScreen() {
   }
 
   if (!user || isGuest) {
-    return <Redirect href="/login" />;
+    return <SafeRedirect href="/login" />;
   }
 
   if (!profile?.profileComplete) {
-    return <Redirect href={`/complete-profile?next=${encodeURIComponent(nextPath)}`} />;
+    return <SafeRedirect href={`/complete-profile?next=${encodeURIComponent(nextPath)}`} />;
   }
 
   if (!profile.avatarStepNeeded) {
-    return <Redirect href={nextPath as Href} />;
+    return <SafeRedirect href={nextPath as Href} />;
   }
 
   const previewAvatarKind =

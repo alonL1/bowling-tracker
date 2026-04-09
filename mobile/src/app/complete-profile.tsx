@@ -1,10 +1,11 @@
-import { Redirect, useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import ActionButton from '@/components/action-button';
 import InfoBanner from '@/components/info-banner';
+import SafeRedirect from '@/components/safe-redirect';
 import ScreenShell from '@/components/screen-shell';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
@@ -56,14 +57,14 @@ export default function CompleteProfileScreen() {
   }
 
   if (!user || isGuest) {
-    return <Redirect href="/login" />;
+    return <SafeRedirect href="/login" />;
   }
 
   if (profile?.profileComplete) {
     if (profile.avatarStepNeeded) {
-        return <Redirect href={`/choose-avatar?next=${encodeURIComponent(nextPath)}`} />;
-      }
-    return <Redirect href={nextPath as Href} />;
+      return <SafeRedirect href={`/choose-avatar?next=${encodeURIComponent(nextPath)}`} />;
+    }
+    return <SafeRedirect href={nextPath as Href} />;
   }
 
   const handleSave = async () => {
