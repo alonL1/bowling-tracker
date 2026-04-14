@@ -77,7 +77,7 @@ function isAuthEntryPath(pathname: string) {
 
 function RootNavigator() {
   const pathname = usePathname();
-  const params = useGlobalSearchParams<{ next?: string; replay?: string }>();
+  const params = useGlobalSearchParams<{ next?: string; replay?: string; preview?: string }>();
   const { user, loading, isGuest, profileComplete, avatarStepNeeded, tutorialSeen } = useAuth();
   const currentPath = pathname || DEFAULT_POST_AUTH_PATH;
   const nextPath = getSafePostAuthPath(
@@ -85,12 +85,13 @@ function RootNavigator() {
     usesDefaultPostAuthFallback(currentPath) ? DEFAULT_POST_AUTH_PATH : currentPath,
   );
   const replayTutorial = params.replay === '1';
+  const tutorialPreview = currentPath === '/getting-started' && params.preview === '1';
 
   if (loading) {
     return <CenteredState title="Loading account..." loading />;
   }
 
-  if (!user && !isSignedOutPublicPath(currentPath)) {
+  if (!user && !tutorialPreview && !isSignedOutPublicPath(currentPath)) {
     return <SafeRedirect href={`/welcome?next=${encodeURIComponent(nextPath)}`} />;
   }
 

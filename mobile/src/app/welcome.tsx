@@ -1,52 +1,102 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import {
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
 import CenteredState from '@/components/centered-state';
-import SurfaceCard from '@/components/surface-card';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { DEFAULT_POST_AUTH_PATH, getSafePostAuthPath } from '@/lib/onboarding';
 import { useAuth } from '@/providers/auth-provider';
 
-const BENEFITS = [
+const HIGHLIGHTS = [
   {
-    key: 'log-fast',
-    title: 'Log bowling faster',
-    body: 'Use Live Session, upload later, or sort a big batch of scoreboards at once.',
-    icon: <Ionicons name="flash" size={18} color={palette.text} />,
+    key: 'capture',
+    renderIcon: (size: number) => <Ionicons name="camera" size={size} color={palette.text} />,
+    text: 'Capture scoreboards, review results, and get data automatically recorded.',
   },
   {
-    key: 'track-history',
-    title: 'Keep every session organized',
-    body: 'PinPoint turns scoreboard photos into sessions, games, and stats you can revisit.',
-    icon: <MaterialCommunityIcons name="book-open-page-variant" size={18} color={palette.text} />,
+    key: 'sessions',
+    renderIcon: (size: number) => (
+      <MaterialCommunityIcons name="book-open-page-variant" size={size + 2} color={palette.text} />
+    ),
+    text: 'Keep sessions, games, stats, and trends in one clean log.',
   },
   {
-    key: 'learn-more',
-    title: 'Ask questions about your data',
-    body: 'Compare with friends and use chat to learn from your own bowling history.',
-    icon: <Ionicons name="chatbubble-ellipses" size={18} color={palette.text} />,
+    key: 'chat',
+    renderIcon: (size: number) => (
+      <Ionicons name="chatbubble-ellipses" size={size} color={palette.text} />
+    ),
+    text: 'Ask our AI chat anything about your bowling data anytime.',
+  },
+  {
+    key: 'friends',
+    renderIcon: (size: number) => <Ionicons name="people" size={size} color={palette.text} />,
+    text: 'Compare stats with friends and see how your bowling stacks up.',
   },
 ] as const;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function roundToTenth(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+function buildWelcomeMetrics(width: number, height: number) {
+  const widthScale = clamp(width / 390, 0.86, 1.04);
+  const rawHeightScale = height / 900;
+  const heightScale = clamp(Math.pow(rawHeightScale, 1.06), 0.62, 1.02);
+  const scale = Math.min(widthScale, heightScale);
+
+  return {
+    pageHorizontal: Math.round(clamp(20 * widthScale, 14, 20)),
+    pageTop: Math.round(clamp(20 * heightScale, 10, 20)),
+    pageBottom: Math.round(clamp(24 * heightScale, 12, 24)),
+    topGap: Math.round(clamp(24 * scale, 12, 24)),
+    bottomGap: Math.round(clamp(16 * scale, 10, 16)),
+    headerGap: Math.round(clamp(16 * scale, 8, 16)),
+    brandSize: roundToTenth(clamp(42 * scale, 28, 42)),
+    brandLine: roundToTenth(clamp(46 * scale, 32, 46)),
+    pinSize: Math.round(clamp(132 * scale, 88, 132)),
+    pinRightMargin: Math.round(clamp(8 * widthScale, 4, 8)),
+    titleSize: roundToTenth(clamp(40 * scale, 26, 40)),
+    titleLine: roundToTenth(clamp(44 * scale, 30, 44)),
+    highlightListGap: Math.round(clamp(16 * scale, 8, 16)),
+    highlightRowGap: Math.round(clamp(16 * scale, 8, 16)),
+    highlightIconSize: Math.round(clamp(44 * scale, 30, 44)),
+    highlightIconGlyph: roundToTenth(clamp(16 * scale, 12, 16)),
+    highlightTextSize: roundToTenth(clamp(17 * scale, 13, 17)),
+    highlightTextLine: roundToTenth(clamp(24 * scale, 17, 24)),
+    actionsGap: Math.round(clamp(8 * scale, 6, 8)),
+    secondaryRowGap: Math.round(clamp(8 * scale, 6, 8)),
+    buttonMinHeight: Math.round(clamp(52 * scale, 44, 52)),
+    buttonTextSize: roundToTenth(clamp(16 * scale, 14, 16)),
+    footerSize: roundToTenth(clamp(14 * scale, 12, 14)),
+    footerLine: roundToTenth(clamp(19 * scale, 16, 19)),
+    glowTopSize: Math.round(clamp(260 * scale, 180, 260)),
+    glowBottomSize: Math.round(clamp(240 * scale, 160, 240)),
+  };
+}
 
 export default function WelcomeScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ next?: string }>();
-  const { user, loading, continueAsGuest } = useAuth();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const { loading, continueAsGuest } = useAuth();
   const [guestBusy, setGuestBusy] = useState(false);
   const [error, setError] = useState('');
   const nextPath = useMemo(() => getSafePostAuthPath(params.next), [params.next]);
+  const safeWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
+  const safeHeight = Math.max(0, Math.round(windowHeight - insets.top - insets.bottom));
+  const metrics = useMemo(
+    () => buildWelcomeMetrics(safeWidth || windowWidth, safeHeight || windowHeight),
+    [safeHeight, safeWidth, windowHeight, windowWidth],
+  );
 
   if (loading) {
     return <CenteredState title="Loading account..." loading />;
@@ -71,101 +121,211 @@ export default function WelcomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}>
-        <SurfaceCard style={styles.heroCard} tone="raised">
-          <View style={styles.heroGlowLarge} />
-          <View style={styles.heroGlowSmall} />
-          <View style={styles.heroTopRow}>
-            <View style={styles.eyebrowPill}>
-              <Text style={styles.eyebrow}>WELCOME TO PINPOINT</Text>
+      <View
+        style={[
+          styles.page,
+          {
+            paddingHorizontal: metrics.pageHorizontal,
+            paddingTop: metrics.pageTop,
+            paddingBottom: metrics.pageBottom,
+          },
+        ]}>
+        <View
+          style={[
+            styles.glowTop,
+            {
+              width: metrics.glowTopSize,
+              height: metrics.glowTopSize,
+              top: -Math.round(metrics.glowTopSize * 0.27),
+              right: -Math.round(metrics.glowTopSize * 0.15),
+            },
+          ]}
+        />
+        <View
+          style={[
+            styles.glowBottom,
+            {
+              width: metrics.glowBottomSize,
+              height: metrics.glowBottomSize,
+              bottom: -Math.round(metrics.glowBottomSize * 0.38),
+              left: -Math.round(metrics.glowBottomSize * 0.3),
+            },
+          ]}
+        />
+
+        <View style={[styles.topContent, { gap: metrics.topGap }]}>
+          <View style={styles.heroHeader}>
+            <Text
+              style={[
+                styles.brandTitle,
+                {
+                  fontSize: metrics.brandSize,
+                  lineHeight: metrics.brandLine,
+                },
+              ]}>
+              PinPoint
+            </Text>
+            <Image
+              source={require('../../assets/pins/happy_pin.png')}
+              alt=""
+              style={[
+                styles.heroPin,
+                {
+                  width: metrics.pinSize,
+                  height: metrics.pinSize,
+                  marginRight: metrics.pinRightMargin,
+                },
+              ]}
+              resizeMode="contain"
+            />
+          </View>
+
+          <View style={[styles.hero, { gap: metrics.headerGap }]}>
+            <View style={styles.heroText}>
+              <Text
+                style={[
+                  styles.heroTitle,
+                  {
+                    fontSize: metrics.titleSize,
+                    lineHeight: metrics.titleLine,
+                  },
+                ]}>
+                Bowling logs that start with a photo.
+              </Text>
             </View>
-            <View style={styles.heroPinWrap}>
-              <Image
-                source={require('../../assets/pins/happy_pin.png')}
-                style={styles.heroPin}
-                resizeMode="contain"
+          </View>
+
+          <View style={[styles.highlightList, { gap: metrics.highlightListGap }]}>
+            {HIGHLIGHTS.map((item) => (
+              <View
+                key={item.key}
+                style={[styles.highlightRow, { gap: metrics.highlightRowGap }]}>
+                <View
+                  style={[
+                    styles.highlightIcon,
+                    {
+                      width: metrics.highlightIconSize,
+                      height: metrics.highlightIconSize,
+                      borderRadius: metrics.highlightIconSize / 2,
+                    },
+                  ]}>
+                  {item.renderIcon(metrics.highlightIconGlyph)}
+                </View>
+                <Text
+                  style={[
+                    styles.highlightText,
+                    {
+                      fontSize: metrics.highlightTextSize,
+                      lineHeight: metrics.highlightTextLine,
+                    },
+                  ]}>
+                  {item.text}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={[styles.bottomContent, { gap: metrics.bottomGap }]}>
+          {error ? (
+            <Text
+              style={[
+                styles.errorText,
+                {
+                  fontSize: metrics.footerSize,
+                  lineHeight: metrics.footerLine,
+                },
+              ]}>
+              {error}
+            </Text>
+          ) : null}
+
+          <View style={[styles.actions, { gap: metrics.actionsGap }]}>
+            <ActionButton
+              label="Get Started"
+              onPress={() =>
+                router.push(
+                  `/login?mode=signUp&next=${encodeURIComponent(nextPath || DEFAULT_POST_AUTH_PATH)}` as never,
+                )
+              }
+              style={{ minHeight: metrics.buttonMinHeight }}
+              textStyle={{ fontSize: metrics.buttonTextSize }}
+            />
+
+            <ActionButton
+              label="Sign In"
+              onPress={() =>
+                router.push(
+                  `/login?mode=signIn&next=${encodeURIComponent(nextPath || DEFAULT_POST_AUTH_PATH)}` as never,
+                )
+              }
+              variant="secondary"
+              style={{ minHeight: metrics.buttonMinHeight }}
+              textStyle={{ fontSize: metrics.buttonTextSize }}
+            />
+
+            <View style={[styles.secondaryActionRow, { gap: metrics.secondaryRowGap }]}>
+              <ActionButton
+                label="Learn More"
+                onPress={() => router.push('/getting-started?preview=1' as never)}
+                variant="secondary"
+                style={[styles.secondaryAction, { minHeight: metrics.buttonMinHeight }]}
+                textStyle={{ fontSize: metrics.buttonTextSize }}
+              />
+              <ActionButton
+                label="Continue as Guest"
+                onPress={handleGuest}
+                loading={guestBusy}
+                disabled={guestBusy}
+                variant="secondary"
+                style={[styles.secondaryAction, { minHeight: metrics.buttonMinHeight }]}
+                textStyle={{ fontSize: metrics.buttonTextSize }}
               />
             </View>
           </View>
 
-          <View style={styles.heroTextBlock}>
-            <Text style={styles.heroTitle}>Track every bowling session without typing it all in.</Text>
-            <Text style={styles.heroBody}>
-              PinPoint pulls names and scores from scoreboard photos, helps you review everything,
-              and keeps your bowling history easy to explore.
+          <View style={[styles.footer, { gap: metrics.secondaryRowGap }]}>
+            <Pressable
+              onPress={() => router.push('/privacy')}
+              style={({ pressed }) => pressed && styles.pressed}>
+              <Text
+                style={[
+                  styles.footerLink,
+                  {
+                    fontSize: metrics.footerSize,
+                    lineHeight: metrics.footerLine,
+                  },
+                ]}>
+                Privacy
+              </Text>
+            </Pressable>
+            <Text
+              style={[
+                styles.footerDot,
+                {
+                  fontSize: metrics.footerSize,
+                  lineHeight: metrics.footerLine,
+                },
+              ]}>
+              •
             </Text>
+            <Pressable
+              onPress={() => router.push('/terms')}
+              style={({ pressed }) => pressed && styles.pressed}>
+              <Text
+                style={[
+                  styles.footerLink,
+                  {
+                    fontSize: metrics.footerSize,
+                    lineHeight: metrics.footerLine,
+                  },
+                ]}>
+                Terms
+              </Text>
+            </Pressable>
           </View>
-
-          <View style={styles.heroBadgeRow}>
-            <View style={styles.heroBadge}>
-              <Ionicons name="camera" size={14} color={palette.text} />
-              <Text style={styles.heroBadgeText}>Photo-first logging</Text>
-            </View>
-            <View style={styles.heroBadge}>
-              <Ionicons name="stats-chart" size={14} color={palette.text} />
-              <Text style={styles.heroBadgeText}>Sessions, stats, chat</Text>
-            </View>
-          </View>
-        </SurfaceCard>
-
-        <View style={styles.benefitList}>
-          {BENEFITS.map((benefit) => (
-            <SurfaceCard key={benefit.key} style={styles.benefitCard}>
-              <View style={styles.benefitIcon}>{benefit.icon}</View>
-              <View style={styles.benefitText}>
-                <Text style={styles.benefitTitle}>{benefit.title}</Text>
-                <Text style={styles.benefitBody}>{benefit.body}</Text>
-              </View>
-            </SurfaceCard>
-          ))}
         </View>
-
-        {error ? (
-          <SurfaceCard style={styles.errorCard}>
-            <Text style={styles.errorText}>{error}</Text>
-          </SurfaceCard>
-        ) : null}
-
-        <View style={styles.actions}>
-          <ActionButton
-            label="Create Account"
-            onPress={() =>
-              router.push(
-                `/login?mode=signUp&next=${encodeURIComponent(nextPath || DEFAULT_POST_AUTH_PATH)}` as never,
-              )
-            }
-          />
-          <ActionButton
-            label="Sign In"
-            onPress={() =>
-              router.push(
-                `/login?mode=signIn&next=${encodeURIComponent(nextPath || DEFAULT_POST_AUTH_PATH)}` as never,
-              )
-            }
-            variant="secondary"
-          />
-          <ActionButton
-            label="Continue as Guest"
-            onPress={handleGuest}
-            loading={guestBusy}
-            disabled={guestBusy}
-            variant="secondary"
-          />
-        </View>
-
-        <View style={styles.footer}>
-          <Pressable onPress={() => router.push('/privacy')} style={({ pressed }) => pressed && styles.pressed}>
-            <Text style={styles.footerLink}>Privacy</Text>
-          </Pressable>
-          <Text style={styles.footerDot}>•</Text>
-          <Pressable onPress={() => router.push('/terms')} style={({ pressed }) => pressed && styles.pressed}>
-            <Text style={styles.footerLink}>Terms</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -175,166 +335,116 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: palette.background,
   },
-  scroll: {
+  page: {
     flex: 1,
-    backgroundColor: palette.background,
-  },
-  content: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.xl,
-    paddingBottom: spacing.xxxl,
-    gap: spacing.lg,
-  },
-  heroCard: {
-    overflow: 'hidden',
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.xl,
-    gap: spacing.lg,
-    borderWidth: 1,
-    borderColor: palette.border,
-  },
-  heroGlowLarge: {
-    position: 'absolute',
-    top: -24,
-    right: -8,
-    width: 168,
-    height: 168,
-    borderRadius: 999,
-    backgroundColor: 'rgba(79, 118, 166, 0.18)',
-  },
-  heroGlowSmall: {
-    position: 'absolute',
-    bottom: -30,
-    left: -36,
-    width: 128,
-    height: 128,
-    borderRadius: 999,
-    backgroundColor: 'rgba(145, 178, 224, 0.12)',
-  },
-  heroTopRow: {
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
+    backgroundColor: palette.background,
+    overflow: 'hidden',
+  },
+  glowTop: {
+    position: 'absolute',
+    top: -70,
+    right: -40,
+    width: 260,
+    height: 260,
+    borderRadius: 999,
+    backgroundColor: 'rgba(79, 118, 166, 0.14)',
+  },
+  glowBottom: {
+    position: 'absolute',
+    bottom: -90,
+    left: -70,
+    width: 240,
+    height: 240,
+    borderRadius: 999,
+    backgroundColor: 'rgba(145, 178, 224, 0.08)',
+  },
+  topContent: {
+    gap: spacing.lg,
+  },
+  heroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: spacing.md,
   },
-  eyebrowPill: {
-    backgroundColor: 'rgba(3, 10, 18, 0.3)',
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  eyebrow: {
+  brandTitle: {
+    flex: 1,
     color: palette.muted,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 42,
+    lineHeight: 46,
     fontWeight: '700',
-    letterSpacing: 0.8,
+    letterSpacing: 0.6,
     fontFamily: fontFamilySans,
   },
-  heroPinWrap: {
-    width: 90,
-    height: 90,
-    alignItems: 'center',
-    justifyContent: 'center',
+  hero: {
+    gap: spacing.md,
   },
   heroPin: {
-    width: 88,
-    height: 88,
+    width: 132,
+    height: 132,
+    marginRight: spacing.sm,
   },
-  heroTextBlock: {
+  heroText: {
     gap: spacing.sm,
   },
   heroTitle: {
     color: palette.text,
-    fontSize: 34,
-    lineHeight: 40,
+    fontSize: 40,
+    lineHeight: 44,
     fontWeight: '700',
     fontFamily: fontFamilySans,
   },
-  heroBody: {
-    color: palette.muted,
-    fontSize: 16,
-    lineHeight: 23,
-    fontFamily: fontFamilySans,
-    maxWidth: 560,
+  highlightList: {
+    gap: spacing.md,
   },
-  heroBadgeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  heroBadge: {
+  highlightRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: 'rgba(3, 10, 18, 0.38)',
-    borderRadius: radii.pill,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  heroBadgeText: {
-    color: palette.text,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '600',
-    fontFamily: fontFamilySans,
-  },
-  benefitList: {
-    gap: spacing.sm,
-  },
-  benefitCard: {
-    flexDirection: 'row',
     gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
   },
-  benefitIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  highlightIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: palette.accent,
   },
-  benefitText: {
+  highlightText: {
     flex: 1,
-    gap: spacing.xs,
-  },
-  benefitTitle: {
-    color: palette.text,
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: '700',
-    fontFamily: fontFamilySans,
-  },
-  benefitBody: {
     color: palette.muted,
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 17,
+    lineHeight: 24,
     fontFamily: fontFamilySans,
   },
-  errorCard: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    backgroundColor: palette.danger,
-  },
-  errorText: {
-    color: palette.text,
-    fontSize: 15,
-    lineHeight: 21,
-    fontFamily: fontFamilySans,
+  bottomContent: {
+    gap: spacing.md,
   },
   actions: {
     gap: spacing.sm,
+  },
+  secondaryActionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  secondaryAction: {
+    flex: 1,
+  },
+  errorText: {
+    color: palette.error,
+    fontSize: 14,
+    lineHeight: 19,
+    fontFamily: fontFamilySans,
   },
   footer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: spacing.sm,
-    paddingTop: spacing.xs,
   },
   footerLink: {
     color: palette.muted,
