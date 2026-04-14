@@ -11,7 +11,7 @@ import {
 
 export const runtime = "nodejs";
 
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+const MAX_AVATAR_BYTES = 8 * 1024 * 1024;
 
 function getExtension(fileName: string | null | undefined, mimeType: string | null | undefined) {
   const safeMimeType = typeof mimeType === "string" ? mimeType.trim().toLowerCase() : "";
@@ -21,13 +21,26 @@ function getExtension(fileName: string | null | undefined, mimeType: string | nu
   if (safeMimeType === "image/webp") {
     return "webp";
   }
+  if (safeMimeType === "image/heic") {
+    return "heic";
+  }
+  if (safeMimeType === "image/heif") {
+    return "heif";
+  }
   if (safeMimeType === "image/jpeg" || safeMimeType === "image/jpg") {
     return "jpg";
   }
 
   const match = typeof fileName === "string" ? fileName.match(/\.([a-z0-9]+)$/i) : null;
   const extension = match?.[1]?.toLowerCase();
-  if (extension === "png" || extension === "webp" || extension === "jpg" || extension === "jpeg") {
+  if (
+    extension === "png" ||
+    extension === "webp" ||
+    extension === "jpg" ||
+    extension === "jpeg" ||
+    extension === "heic" ||
+    extension === "heif"
+  ) {
     return extension === "jpeg" ? "jpg" : extension;
   }
 
@@ -79,7 +92,7 @@ export async function POST(request: Request) {
   const fileSize = typeof avatar.size === "number" ? avatar.size : 0;
   if (!fileSize || fileSize > MAX_AVATAR_BYTES) {
     return NextResponse.json(
-      { error: "Profile pictures must be 5 MB or smaller." },
+      { error: "Profile pictures must be 8 MB or smaller." },
       { status: 400 }
     );
   }

@@ -24,8 +24,14 @@ type UploadSelection = {
   uri: string;
   mimeType?: string | null;
   fileName?: string | null;
+  fileSize?: number | null;
   webFile?: File | null;
 };
+
+const IMAGE_PICKER_OPTIONS = {
+  mediaTypes: ['images'],
+  quality: 0.6,
+} satisfies ImagePicker.ImagePickerOptions;
 
 export default function ChooseAvatarScreen() {
   const router = useRouter();
@@ -93,14 +99,8 @@ export default function ChooseAvatarScreen() {
 
       const result =
         source === 'camera'
-          ? await ImagePicker.launchCameraAsync({
-              mediaTypes: ['images'],
-              quality: 0.8,
-            })
-          : await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ['images'],
-              quality: 0.8,
-            });
+          ? await ImagePicker.launchCameraAsync(IMAGE_PICKER_OPTIONS)
+          : await ImagePicker.launchImageLibraryAsync(IMAGE_PICKER_OPTIONS);
 
       if (result.canceled || !result.assets?.length) {
         return;
@@ -113,6 +113,7 @@ export default function ChooseAvatarScreen() {
         uri: asset.uri,
         fileName: asset.fileName ?? 'avatar.jpg',
         mimeType: asset.mimeType ?? 'image/jpeg',
+        fileSize: asset.fileSize ?? null,
         webFile: 'file' in asset ? (asset.file as File | null | undefined) ?? null : null,
       });
     } catch (nextError) {

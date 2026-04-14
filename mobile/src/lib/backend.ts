@@ -278,12 +278,19 @@ export async function removeOwnProfileAvatar() {
   });
 }
 
+const MAX_PROFILE_AVATAR_BYTES = 8 * 1024 * 1024;
+
 export async function uploadOwnProfileAvatar(payload: {
   uri: string;
   mimeType?: string | null;
   fileName?: string | null;
+  fileSize?: number | null;
   webFile?: File | null;
 }) {
+  if (typeof payload.fileSize === 'number' && payload.fileSize > MAX_PROFILE_AVATAR_BYTES) {
+    throw new Error('Profile pictures must be 8 MB or smaller.');
+  }
+
   const formData = new FormData();
 
   if (Platform.OS === 'web') {
