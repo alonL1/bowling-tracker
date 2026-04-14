@@ -261,6 +261,7 @@ export default function SessionDetailScreen() {
   const pagerRef = useRef<ScrollView | null>(null);
   const comparisonCategoryScrollRef = useRef<ScrollView | null>(null);
   const pagerViewportYRef = useRef(0);
+  const lastAlignedPagerWidthRef = useRef(0);
   const compareSectionYRef = useRef(0);
   const comparisonCategoryLayoutsRef = useRef<
     Partial<Record<LivePlayerComparisonMetric, { x: number; width: number }>>
@@ -269,6 +270,42 @@ export default function SessionDetailScreen() {
   const { width: windowWidth } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const pagerWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
+  const stats = useMemo(() => buildLoggedSessionStats(group?.games ?? []), [group?.games]);
+  const playerComparisons = useMemo(
+    () =>
+      buildLivePlayerComparisons(
+        (group?.games ?? []).map((game) => ({ extraction: game.scoreboard_extraction })),
+      ),
+    [group?.games],
+  );
+  const comparisonRows = useMemo(() => {
+    return [...playerComparisons].sort((left, right) => {
+      const leftValue = getComparisonMetricValue(left, selectedComparisonMetric);
+      const rightValue = getComparisonMetricValue(right, selectedComparisonMetric);
+      const normalizedLeft = leftValue ?? -1;
+      const normalizedRight = rightValue ?? -1;
+      if (normalizedRight !== normalizedLeft) {
+        return normalizedRight - normalizedLeft;
+      }
+      return left.label.localeCompare(right.label);
+    });
+  }, [playerComparisons, selectedComparisonMetric]);
+  const comparisonMaxValue = useMemo(() => {
+    return comparisonRows.reduce((max, row) => {
+      const value = getComparisonMetricValue(row, selectedComparisonMetric);
+      return value !== null && value > max ? value : max;
+    }, 0);
+  }, [comparisonRows, selectedComparisonMetric]);
+  const editableGameSelections = useMemo(
+    () =>
+      (group?.games ?? []).map((game) => ({
+        game,
+        title: grouping.gameTitleMap.get(game.id) || game.game_name?.trim() || 'Game',
+        selectedKey: draftSelectedPlayerKeys[game.id] || getSelectedSelfPlayerKey(game),
+        players: getResolvedPlayersForGame({ extraction: game.scoreboard_extraction }),
+      })),
+    [draftSelectedPlayerKeys, group?.games, grouping.gameTitleMap],
+  );
 
   useEffect(() => {
     if (!group || group.isSessionless) {
@@ -433,42 +470,6 @@ export default function SessionDetailScreen() {
   const moveTargets = grouping.groups.filter(
     (target) => !target.isSessionless && target.sessionId !== group.sessionId,
   );
-  const stats = useMemo(() => buildLoggedSessionStats(group.games), [group.games]);
-  const playerComparisons = useMemo(
-    () =>
-      buildLivePlayerComparisons(
-        group.games.map((game) => ({ extraction: game.scoreboard_extraction })),
-      ),
-    [group.games],
-  );
-  const comparisonRows = useMemo(() => {
-    return [...playerComparisons].sort((left, right) => {
-      const leftValue = getComparisonMetricValue(left, selectedComparisonMetric);
-      const rightValue = getComparisonMetricValue(right, selectedComparisonMetric);
-      const normalizedLeft = leftValue ?? -1;
-      const normalizedRight = rightValue ?? -1;
-      if (normalizedRight !== normalizedLeft) {
-        return normalizedRight - normalizedLeft;
-      }
-      return left.label.localeCompare(right.label);
-    });
-  }, [playerComparisons, selectedComparisonMetric]);
-  const comparisonMaxValue = useMemo(() => {
-    return comparisonRows.reduce((max, row) => {
-      const value = getComparisonMetricValue(row, selectedComparisonMetric);
-      return value !== null && value > max ? value : max;
-    }, 0);
-  }, [comparisonRows, selectedComparisonMetric]);
-  const editableGameSelections = useMemo(
-    () =>
-      group.games.map((game) => ({
-        game,
-        title: grouping.gameTitleMap.get(game.id) || game.game_name?.trim() || 'Game',
-        selectedKey: draftSelectedPlayerKeys[game.id] || getSelectedSelfPlayerKey(game),
-        players: getResolvedPlayersForGame({ extraction: game.scoreboard_extraction }),
-      })),
-    [draftSelectedPlayerKeys, group.games, grouping.gameTitleMap],
-  );
   const readOnlyUntilSynced = Boolean(
     group.session?.local_sync?.isReadOnlyUntilSynced ||
       group.games.some((game) => game.local_sync?.isReadOnlyUntilSynced),
@@ -547,10 +548,19 @@ export default function SessionDetailScreen() {
       return;
     }
 
+    if (lastAlignedPagerWidthRef.current === pagerWidth) {
+      return;
+    }
+
+    lastAlignedPagerWidthRef.current = pagerWidth;
     requestAnimationFrame(() => {
-      scrollToTab(activeTab, false);
+      pagerRef.current?.scrollTo({
+        x: activeTab === 'stats' ? pagerWidth : 0,
+        y: 0,
+        animated: false,
+      });
     });
-  }, [pagerWidth]);
+  }, [activeTab, pagerWidth]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>

@@ -205,6 +205,7 @@ export default function MultiPlayerFrameGrid({
               key={`${player.playerKey}-${player.playerName}`}
               style={[
                 styles.playerSection,
+                isSelected && styles.selectedPlayerSection,
                 playerIndex < players.length - 1 && styles.playerSectionDivider,
               ]}>
               <View
@@ -214,7 +215,6 @@ export default function MultiPlayerFrameGrid({
                   columnWidths
                     ? { width: columnWidths.player }
                     : { flex: PLAYER_COLUMN_WEIGHT },
-                  isSelected && styles.selectedPlayerNameCell,
                 ]}>
                 <Text
                   style={[
@@ -338,6 +338,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'stretch',
   },
+  selectedPlayerSection: {
+    backgroundColor: palette.accent,
+  },
   playerSectionDivider: {
     borderBottomWidth: 1,
     borderBottomColor: GRID_BORDER_COLOR,
@@ -349,9 +352,6 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: GRID_BORDER_COLOR,
     minWidth: 0,
-  },
-  selectedPlayerNameCell: {
-    backgroundColor: palette.accent,
   },
   frameSection: {
     flexDirection: 'column',
@@ -369,14 +369,14 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   shotCell: {
-    minHeight: 32,
+    minHeight: 22,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 5,
     minWidth: 0,
   },
   runningCell: {
-    minHeight: 30,
+    minHeight: 20,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 3,
