@@ -7,8 +7,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
@@ -150,6 +152,10 @@ export default function ScoreboardGameEditSheet({
   onSave,
 }: ScoreboardGameEditSheetProps) {
   const [players, setPlayers] = useState<EditablePlayer[]>([]);
+  const { width: windowWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const safeWindowWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
+  const previewWidth = Math.max(0, safeWindowWidth - spacing.lg * 2);
 
   useEffect(() => {
     setPlayers(createEditablePlayers(extraction));
@@ -184,7 +190,7 @@ export default function ScoreboardGameEditSheet({
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}>
             {previewPlayers.length > 0 ? (
-              <View style={styles.previewWrap}>
+              <View style={[styles.previewWrap, previewWidth ? { width: previewWidth } : null]}>
                 <MultiPlayerFrameGrid
                   players={previewPlayers}
                   selectedPlayerKeys={previewSelectedPlayerKeys}
@@ -341,12 +347,15 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flexGrow: 0,
+    marginHorizontal: -10,
   },
   scrollContent: {
     gap: spacing.md,
+    paddingHorizontal: 10,
     paddingBottom: spacing.xs,
   },
   previewWrap: {
+    alignSelf: 'center',
     gap: spacing.sm,
   },
   playerList: {

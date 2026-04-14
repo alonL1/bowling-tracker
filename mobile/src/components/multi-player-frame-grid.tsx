@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import SurfaceCard from '@/components/surface-card';
 import { palette, radii } from '@/constants/palette';
@@ -15,14 +16,16 @@ type MultiPlayerFrameGridProps = {
 };
 
 const BOARD_TEXT_SIZE = 12;
-const PLAYER_COLUMN_WEIGHT = 45;
-const FRAME_COLUMN_WEIGHTS = [31, 31, 31, 31, 31, 31, 31, 31, 31, 38] as const;
+const PLAYER_COLUMN_WEIGHT = 47;
+const FRAME_COLUMN_WEIGHTS = [31, 31, 31, 31, 31, 31, 31, 31, 31, 36] as const;
 const FRAME_SECTION_WEIGHT = FRAME_COLUMN_WEIGHTS.reduce((sum, weight) => sum + weight, 0);
 const TOTAL_COLUMN_WEIGHT = PLAYER_COLUMN_WEIGHT + FRAME_SECTION_WEIGHT;
 const FRAME_HEADERS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
 const GRID_BORDER_COLOR = '#313744';
 const DOUBLE_SPACE = '\u00A0\u00A0';
 const SINGLE_SPACE = '\u00A0';
+const BOARD_SIDE_GUTTER = 10;
+const BOARD_SIDE_EXPANSION = 10;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -115,7 +118,7 @@ function buildColumnWidths(totalWidth: number) {
 function buildResponsiveBoardMetrics(columnWidths: ReturnType<typeof buildColumnWidths> | null) {
   const tightestFrameWidth = columnWidths ? Math.min(...columnWidths.frames) : FRAME_COLUMN_WEIGHTS[0];
   const widestFrameWidth = columnWidths ? Math.max(...columnWidths.frames) : FRAME_COLUMN_WEIGHTS[9];
-  const scale = clamp((tightestFrameWidth - 13) / 16, 0.72, 1);
+  const scale = clamp((tightestFrameWidth - 18) / 14, 0.72, 1);
   const textSize = Math.round(BOARD_TEXT_SIZE * scale * 10) / 10;
   const lineHeight = Math.max(12, Math.round(textSize * 1.35));
 
@@ -123,7 +126,7 @@ function buildResponsiveBoardMetrics(columnWidths: ReturnType<typeof buildColumn
     textSize,
     lineHeight,
     headerPaddingHorizontal: 0,
-    playerPaddingHorizontal: clamp(Math.round((columnWidths?.player ?? PLAYER_COLUMN_WEIGHT) * 0.08), 3, 8),
+    playerPaddingHorizontal: 1,
     shotPaddingHorizontal: 0,
     runningPaddingHorizontal: 0,
     shotSeparator: widestFrameWidth <= 34 || tightestFrameWidth <= 28 ? SINGLE_SPACE : DOUBLE_SPACE,
@@ -136,9 +139,20 @@ export default function MultiPlayerFrameGrid({
 }: MultiPlayerFrameGridProps) {
   const selectedKeySet = new Set(selectedPlayerKeys.map(normalizePlayerKey));
   const [boardWidth, setBoardWidth] = useState(0);
+  const { width: windowWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const visualBoardWidth = useMemo(() => {
+    if (!boardWidth) {
+      return 0;
+    }
+
+    const safeWindowWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
+    const maxBoardWidth = Math.max(0, safeWindowWidth - BOARD_SIDE_GUTTER * 2);
+    return Math.min(boardWidth + BOARD_SIDE_EXPANSION * 2, maxBoardWidth);
+  }, [boardWidth, insets.left, insets.right, windowWidth]);
   const columnWidths = useMemo(
-    () => (boardWidth > 0 ? buildColumnWidths(boardWidth) : null),
-    [boardWidth],
+    () => (visualBoardWidth > 0 ? buildColumnWidths(visualBoardWidth) : null),
+    [visualBoardWidth],
   );
   const boardMetrics = useMemo(
     () => buildResponsiveBoardMetrics(columnWidths),
@@ -154,7 +168,7 @@ export default function MultiPlayerFrameGrid({
         }
         setBoardWidth(nextWidth);
       }}>
-      <SurfaceCard style={styles.surface}>
+      <SurfaceCard style={[styles.surface, visualBoardWidth ? { width: visualBoardWidth } : null]}>
         <View style={styles.grid}>
         <View style={styles.headerRow}>
           <View
@@ -300,6 +314,7 @@ export default function MultiPlayerFrameGrid({
 
 const styles = StyleSheet.create({
   surface: {
+    alignSelf: 'center',
     overflow: 'hidden',
     borderRadius: radii.lg,
   },
