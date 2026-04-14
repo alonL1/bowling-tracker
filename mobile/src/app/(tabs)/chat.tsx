@@ -2,6 +2,7 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import {
   Image,
   Keyboard,
@@ -20,12 +21,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import IconAction from '@/components/icon-action';
+import InfoBanner from '@/components/info-banner';
 import SurfaceCard from '@/components/surface-card';
 import { queryKeys, sendChat } from '@/lib/backend';
 import { buildOfflineChatResult } from '@/lib/offline-chat';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import type { GameListItem } from '@/lib/types';
+import { useAuth } from '@/providers/auth-provider';
 
 type Message = {
   role: 'user' | 'assistant';
@@ -110,8 +113,10 @@ function renderMessageContent(content: string, isUser: boolean) {
 }
 
 export default function ChatScreen() {
+  const router = useRouter();
   const tabBarHeight = useBottomTabBarHeight();
   const queryClient = useQueryClient();
+  const { isGuest } = useAuth();
   const scrollRef = useRef<ScrollView | null>(null);
   const inputRef = useRef<TextInput | null>(null);
   const questionRef = useRef('');
@@ -184,6 +189,11 @@ export default function ChatScreen() {
   };
 
   const handleAsk = async () => {
+    if (isGuest) {
+      router.push('/login?next=/(tabs)/chat');
+      return;
+    }
+
     const nextQuestion = questionRef.current.trim();
     if (!nextQuestion || chatStatus === 'loading') {
       return;
@@ -296,6 +306,32 @@ export default function ChatScreen() {
   const handleSubmitEditing = () => {
     void handleAsk();
   };
+
+  if (isGuest) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <View style={styles.page}>
+          <View style={styles.header}>
+            <View style={styles.pinRow}>
+              <View style={styles.pinSlot}>
+                <Image source={PIN_IMAGES.happy} style={styles.pinImage} resizeMode="contain" />
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.guestContent}>
+            <SurfaceCard tone="raised" style={styles.guestCard}>
+              <InfoBanner text="AI chat requires a signed-in account so PinPoint can enforce limits and prevent abuse." />
+              <ActionButton
+                label="Sign In / Create Account"
+                onPress={() => router.push('/login?next=/(tabs)/chat')}
+              />
+            </SurfaceCard>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -514,6 +550,17 @@ const styles = StyleSheet.create({
   },
   viewport: {
     flex: 1,
+  },
+  guestContent: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
+    justifyContent: 'center',
+  },
+  guestCard: {
+    gap: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
   },
   messagesContent: {
     paddingHorizontal: spacing.lg,

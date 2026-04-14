@@ -140,6 +140,7 @@ export default function DeleteAccountScreen() {
           <Bullet>Account profile and authentication records</Bullet>
           <Bullet>Bowling sessions, games, frame data, shot data, and related stats</Bullet>
           <Bullet>Live sessions, recording drafts, and associated processing jobs</Bullet>
+          <Bullet>Chat usage-limit and abuse-prevention records linked to your account</Bullet>
           <Bullet>Friend relationships and invite-link records associated with your account</Bullet>
           <Bullet>Temporary uploaded scoreboard files associated with your account workflows</Bullet>
         </Section>

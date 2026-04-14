@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getUserFromRequest } from "../utils/auth";
@@ -5,6 +6,12 @@ import { getUserFromRequest } from "../utils/auth";
 export const runtime = "nodejs";
 
 const SQL_CONTEXT_FALLBACK_TOKEN = "__USE_CONTEXT__";
+const DEFAULT_CHAT_MAX_REQUESTS_PER_USER_PER_MINUTE = 3;
+const DEFAULT_CHAT_MAX_REQUESTS_PER_USER_PER_TEN_MINUTES = 10;
+const DEFAULT_CHAT_MAX_REQUESTS_PER_USER_PER_24H = 40;
+const DEFAULT_CHAT_MAX_REQUESTS_PER_IP_PER_MINUTE = 12;
+const DEFAULT_CHAT_MAX_QUESTION_CHARS = 400;
+const DEFAULT_CHAT_CONTEXT_RECENT_LIMIT = 15;
 
 type SupabaseAnyClient = SupabaseClient<any, "public", any>;
 
@@ -659,13 +666,40 @@ function buildAnswerMeta(
   return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
-function normalizeQuestion(question: string) {
-  return question
-    .trim()
-    .toLowerCase()
-    .replace(/\d+/g, "x")
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, " ");
+function readOptionalPositiveIntEnv(name: string, fallback: number) {
+  const rawValue = process.env[name];
+  if (!rawValue) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  if (parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function getClientIp(request: Request) {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const first = forwarded
+      .split(",")
+      .map((value) => value.trim())
+      .find(Boolean);
+    if (first) {
+      return first;
+    }
+  }
+  return request.headers.get("x-real-ip") || null;
+}
+
+function hashIp(ip: string | null) {
+  if (!ip) {
+    return null;
+  }
+  return createHash("sha256").update(ip).digest("hex");
 }
 
 function summarizeOnlineError(raw: string) {
@@ -695,27 +729,6 @@ function summarizeOnlineError(raw: string) {
     return "Network error. Please try again.";
   }
   return "Something went wrong while answering. Please try again.";
-}
-
-async function logQuestionAnswer(
-  supabase: SupabaseAnyClient,
-  normalizedQuestion: string,
-  answer: string
-) {
-  if (!normalizedQuestion) {
-    return;
-  }
-  const payload = {
-    normalized_question: normalizedQuestion,
-    last_answer: answer,
-    updated_at: new Date().toISOString()
-  };
-  const { error } = await supabase
-    .from("chat_questions")
-    .upsert(payload, { onConflict: "normalized_question" });
-  if (error) {
-    console.warn("Failed to log question:", error.message);
-  }
 }
 
 function applyOfflineBold(text: string) {
@@ -1713,6 +1726,26 @@ export async function POST(request: Request) {
     chatModeRaw === "sql" || chatModeRaw === "context" || chatModeRaw === "mix"
       ? chatModeRaw
       : "mix";
+  const maxRequestsPerUserPerMinute = readOptionalPositiveIntEnv(
+    "CHAT_MAX_REQUESTS_PER_USER_PER_MINUTE",
+    DEFAULT_CHAT_MAX_REQUESTS_PER_USER_PER_MINUTE
+  );
+  const maxRequestsPerUserPerTenMinutes = readOptionalPositiveIntEnv(
+    "CHAT_MAX_REQUESTS_PER_USER_PER_TEN_MINUTES",
+    DEFAULT_CHAT_MAX_REQUESTS_PER_USER_PER_TEN_MINUTES
+  );
+  const maxRequestsPerUserPer24H = readOptionalPositiveIntEnv(
+    "CHAT_MAX_REQUESTS_PER_USER_PER_24H",
+    DEFAULT_CHAT_MAX_REQUESTS_PER_USER_PER_24H
+  );
+  const maxRequestsPerIpPerMinute = readOptionalPositiveIntEnv(
+    "CHAT_MAX_REQUESTS_PER_IP_PER_MINUTE",
+    DEFAULT_CHAT_MAX_REQUESTS_PER_IP_PER_MINUTE
+  );
+  const maxQuestionChars = readOptionalPositiveIntEnv(
+    "CHAT_MAX_QUESTION_CHARS",
+    DEFAULT_CHAT_MAX_QUESTION_CHARS
+  );
   const showMethod = process.env.CHAT_SHOW_METHOD === "true";
   const showTiming = process.env.CHAT_SHOW_TIMING === "true";
   const startedAt = Date.now();
@@ -1753,21 +1786,154 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  const question = payload.question.trim();
+  if (!question) {
+    return NextResponse.json(
+      { error: "Question is required." },
+      { status: 400 }
+    );
+  }
+  if (maxQuestionChars !== null && question.length > maxQuestionChars) {
+    return NextResponse.json(
+      {
+        error: `Question is too long. Max ${maxQuestionChars} characters.`
+      },
+      { status: 400 }
+    );
+  }
 
   const authStart = Date.now();
-  const { userId, accessToken: userAccessToken } =
-    (await getUserFromRequest(request)) || { userId: null, accessToken: null };
+  const { userId, accessToken: userAccessToken, isGuest } =
+    (await getUserFromRequest(request)) || {
+      userId: null,
+      accessToken: null,
+      isGuest: false
+    };
   timings.authMs = Date.now() - authStart;
   const effectiveUserId = userId || devUserId || null;
   if (!effectiveUserId) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
-  const question = payload.question;
+  if (isGuest) {
+    return NextResponse.json(
+      { error: "Sign in to use AI chat." },
+      { status: 403 }
+    );
+  }
 
   const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { persistSession: false }
   });
-  const normalizedQuestion = normalizeQuestion(question);
+  const ipHash = hashIp(getClientIp(request));
+  const now = new Date();
+  const minuteAgoIso = new Date(now.getTime() - 60 * 1000).toISOString();
+  const tenMinutesAgoIso = new Date(now.getTime() - 10 * 60 * 1000).toISOString();
+  const dayAgoIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+
+  const [
+    userMinuteCountResult,
+    userTenMinuteCountResult,
+    userDayCountResult,
+    ipMinuteCountResult
+  ] = await Promise.all([
+    maxRequestsPerUserPerMinute === null
+      ? Promise.resolve({ count: 0, error: null })
+      : supabase
+          .from("chat_request_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", effectiveUserId)
+          .gte("created_at", minuteAgoIso),
+    maxRequestsPerUserPerTenMinutes === null
+      ? Promise.resolve({ count: 0, error: null })
+      : supabase
+          .from("chat_request_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", effectiveUserId)
+          .gte("created_at", tenMinutesAgoIso),
+    maxRequestsPerUserPer24H === null
+      ? Promise.resolve({ count: 0, error: null })
+      : supabase
+          .from("chat_request_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("user_id", effectiveUserId)
+          .gte("created_at", dayAgoIso),
+    maxRequestsPerIpPerMinute === null || !ipHash
+      ? Promise.resolve({ count: 0, error: null })
+      : supabase
+          .from("chat_request_logs")
+          .select("id", { count: "exact", head: true })
+          .eq("ip_hash", ipHash)
+          .gte("created_at", minuteAgoIso)
+  ]);
+
+  if (
+    userMinuteCountResult.error ||
+    userTenMinuteCountResult.error ||
+    userDayCountResult.error ||
+    ipMinuteCountResult.error
+  ) {
+    return NextResponse.json(
+      { error: "Failed to evaluate chat limits. Please try again." },
+      { status: 500 }
+    );
+  }
+
+  const userRequestsLastMinute = userMinuteCountResult.count ?? 0;
+  if (
+    maxRequestsPerUserPerMinute !== null &&
+    userRequestsLastMinute >= maxRequestsPerUserPerMinute
+  ) {
+    return NextResponse.json(
+      { error: "Too many chat requests. Please wait a minute before trying again." },
+      { status: 429 }
+    );
+  }
+
+  const userRequestsLastTenMinutes = userTenMinuteCountResult.count ?? 0;
+  if (
+    maxRequestsPerUserPerTenMinutes !== null &&
+    userRequestsLastTenMinutes >= maxRequestsPerUserPerTenMinutes
+  ) {
+    return NextResponse.json(
+      { error: "Rate limit reached for chat. Please wait a few minutes and try again." },
+      { status: 429 }
+    );
+  }
+
+  const userRequestsLastDay = userDayCountResult.count ?? 0;
+  if (
+    maxRequestsPerUserPer24H !== null &&
+    userRequestsLastDay >= maxRequestsPerUserPer24H
+  ) {
+    return NextResponse.json(
+      { error: "Daily chat request limit reached. Try again later." },
+      { status: 429 }
+    );
+  }
+
+  const ipRequestsLastMinute = ipMinuteCountResult.count ?? 0;
+  if (
+    maxRequestsPerIpPerMinute !== null &&
+    ipRequestsLastMinute >= maxRequestsPerIpPerMinute
+  ) {
+    return NextResponse.json(
+      { error: "Too many chat requests from this network. Please wait a minute and try again." },
+      { status: 429 }
+    );
+  }
+
+  const { error: chatLogError } = await supabase.from("chat_request_logs").insert({
+    user_id: effectiveUserId,
+    ip_hash: ipHash,
+    question_chars: question.length
+  });
+
+  if (chatLogError) {
+    return NextResponse.json(
+      { error: "Failed to log chat usage. Please try again." },
+      { status: 500 }
+    );
+  }
 
   let games: Game[] = [];
   let scope = "all games";
@@ -2091,7 +2257,6 @@ export async function POST(request: Request) {
           console.log("Chat timings:", timings);
         }
         const finalAnswer = formatAnswer(sqlResult.answer, question);
-        void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
         const extraOverhead =
           showTiming
             ? `Overhead parse ${formatTiming(timings.parseRequestMs)}, auth ${formatTiming(timings.authMs)}, games ${formatTiming(timings.loadGamesMs)}, sessions ${formatTiming(timings.loadSessionsMs)}, build ${formatTiming(timings.buildIndexMs)}`
@@ -2123,8 +2288,17 @@ export async function POST(request: Request) {
   };
 
   const attemptContext = async () => {
-    const contextLimit = 15;
-    const contextGames = onlineGames.slice(0, contextLimit).map((game) => ({
+    const contextLimit = readOptionalPositiveIntEnv(
+      "CHAT_CONTEXT_RECENT_LIMIT",
+      DEFAULT_CHAT_CONTEXT_RECENT_LIMIT
+    );
+    const contextSourceGames = hasTimeFilter ? offlineGames : onlineGames;
+    const contextIndexSourceGames = hasTimeFilter ? offlineGames : selectedGames;
+    const recentContextGames =
+      contextLimit === null ? contextSourceGames : contextSourceGames.slice(-contextLimit);
+    const contextSummary = hasTimeFilter ? summaryOffline : summaryOnline;
+    const contextFrameStats = hasTimeFilter ? frameStatsOffline : frameStatsOnline;
+    const contextGames = recentContextGames.map((game) => ({
       gameName: getGameLabel(game),
       playedAt: game.played_at,
       totalScore: game.total_score,
@@ -2149,7 +2323,7 @@ export async function POST(request: Request) {
 
     const sessionGameIndex = sessionIndex
       .map((session) => {
-        const gamesInSession = sessionFilteredGames
+        const gamesInSession = contextIndexSourceGames
           .filter((game) => game.session_id === session.sessionId)
           .slice()
           .sort((a, b) => {
@@ -2181,7 +2355,7 @@ export async function POST(request: Request) {
         };
       })
       .filter(Boolean);
-    const sessionlessGames = sessionFilteredGames
+    const sessionlessGames = contextIndexSourceGames
       .filter((game) => !game.session_id)
       .slice()
       .sort((a, b) => {
@@ -2212,11 +2386,12 @@ export async function POST(request: Request) {
     }
 
     const contextPayload = {
-      truncated: onlineGames.length > contextLimit,
+      truncated:
+        contextLimit !== null && contextSourceGames.length > contextLimit,
       contextGames,
       sessionGameIndex,
-      summary: summaryOnline,
-      frameStats: frameStatsOnline
+      summary: contextSummary,
+      frameStats: contextFrameStats
     };
 
     try {
@@ -2241,7 +2416,6 @@ export async function POST(request: Request) {
         console.log("Chat timings:", timings);
       }
       const finalAnswer = formatAnswer(contextAnswer, question);
-      void logQuestionAnswer(supabase, normalizedQuestion, finalAnswer);
       const extraOverhead =
         showTiming
           ? `Overhead parse ${formatTiming(timings.parseRequestMs)}, auth ${formatTiming(timings.authMs)}, games ${formatTiming(timings.loadGamesMs)}, sessions ${formatTiming(timings.loadSessionsMs)}, build ${formatTiming(timings.buildIndexMs)}`
@@ -2325,7 +2499,6 @@ export async function POST(request: Request) {
       ? applyOfflineBold(ensureSentence(shortcut.answer))
       : "Offline mode could not answer this question with basic stats.";
   const finalOfflineAnswer = formatOfflineAnswer(offlineAnswer);
-  void logQuestionAnswer(supabase, normalizedQuestion, finalOfflineAnswer);
   return NextResponse.json({
     onlineError: debugError ? onlineError : summarizeOnlineError(onlineError),
     offlineAnswer: finalOfflineAnswer,

@@ -76,9 +76,9 @@ export default function PrivacyScreen() {
           <Bullet>Scoreboard images that you upload or capture through the app for score extraction and processing</Bullet>
 
           <Text style={styles.subheading}>Chat and App Interaction Data</Text>
-          <Bullet>Questions you submit through PinPoint&apos;s chat feature</Bullet>
-          <Bullet>Generated chat responses</Bullet>
-          <Bullet>Limited records needed to operate, improve, secure, and troubleshoot the chat and score-processing features</Bullet>
+          <Bullet>Questions you submit through PinPoint&apos;s chat feature while a response is being generated</Bullet>
+          <Bullet>Generated chat responses shown in the app</Bullet>
+          <Bullet>Limited chat-usage records such as timestamps, question length, and hashed network identifiers used to enforce limits, prevent abuse, and troubleshoot the service</Bullet>
 
           <Text style={styles.subheading}>Friends and Social Features</Text>
           <Bullet>Friend relationships</Bullet>
@@ -128,6 +128,12 @@ export default function PrivacyScreen() {
             context, may be processed to provide the feature.
           </Paragraph>
           <Paragraph>
+            To protect the service, we may retain limited chat-usage metadata such as timestamps,
+            request size, and hashed network identifiers for rate limiting, abuse prevention, and
+            reliability. We do not rely on a persistent personalized chat-history store on our
+            backend to operate the feature.
+          </Paragraph>
+          <Paragraph>
             You should not submit highly sensitive personal information through chat or image uploads
             unless it is necessary for your use of the app.
           </Paragraph>
@@ -169,6 +175,7 @@ export default function PrivacyScreen() {
           <Paragraph>In general:</Paragraph>
           <Bullet>Scoreboard images are stored temporarily for processing and then removed when no longer needed for that purpose</Bullet>
           <Bullet>Extracted bowling data may remain in your account until you delete it or request deletion</Bullet>
+          <Bullet>Limited chat-usage and abuse-prevention records may be retained for as long as reasonably necessary to protect the service</Bullet>
           <Bullet>Some records may be retained for security, fraud prevention, operational, legal, or compliance reasons</Bullet>
         </Section>
 

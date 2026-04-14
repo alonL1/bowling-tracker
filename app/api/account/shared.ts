@@ -10,6 +10,7 @@ export type DeletionCounts = {
   games: number;
   sessions: number;
   submitLogs: number;
+  chatRequestLogs: number;
   storageObjects: number;
 };
 
@@ -195,7 +196,12 @@ export async function purgeUserData(supabase: SupabaseClient, userId: string) {
     throw new Error(draftsError.message || "Failed to delete recording drafts.");
   }
 
-  const [{ count: games, error: gamesError }, { count: sessions, error: sessionsError }, { count: submitLogs, error: submitLogsError }] =
+  const [
+    { count: games, error: gamesError },
+    { count: sessions, error: sessionsError },
+    { count: submitLogs, error: submitLogsError },
+    { count: chatRequestLogs, error: chatRequestLogsError }
+  ] =
     await Promise.all([
       supabase
         .from("games")
@@ -209,6 +215,10 @@ export async function purgeUserData(supabase: SupabaseClient, userId: string) {
         .from("submit_request_logs")
         .delete({ count: "exact" })
         .eq("user_id", userId),
+      supabase
+        .from("chat_request_logs")
+        .delete({ count: "exact" })
+        .eq("user_id", userId),
     ]);
 
   if (gamesError) {
@@ -219,6 +229,9 @@ export async function purgeUserData(supabase: SupabaseClient, userId: string) {
   }
   if (submitLogsError) {
     throw new Error(submitLogsError.message || "Failed to delete submit logs.");
+  }
+  if (chatRequestLogsError) {
+    throw new Error(chatRequestLogsError.message || "Failed to delete chat request logs.");
   }
 
   if (storageKeys.length > 0) {
@@ -239,6 +252,7 @@ export async function purgeUserData(supabase: SupabaseClient, userId: string) {
     games: games ?? 0,
     sessions: sessions ?? 0,
     submitLogs: submitLogs ?? 0,
+    chatRequestLogs: chatRequestLogs ?? 0,
     storageObjects: storageKeys.length,
   } satisfies DeletionCounts;
 }
