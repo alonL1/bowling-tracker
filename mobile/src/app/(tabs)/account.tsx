@@ -35,7 +35,7 @@ export default function AccountScreen() {
 
     try {
       await signOutToGuestSession();
-      router.replace('/login');
+      router.replace('/welcome');
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Failed to sign out.');
     } finally {
@@ -107,6 +107,22 @@ export default function AccountScreen() {
       ) : null}
 
       {error ? <InfoBanner text={error} tone="error" /> : null}
+
+      <SurfaceCard style={styles.linksCard} tone="raised">
+        <Text style={styles.linksTitle}>Getting Started</Text>
+        <Text style={styles.linksDescription}>
+          Replay the short tutorial anytime if you want a refresher on logging, reviewing, and using your data.
+        </Text>
+        <ActionButton
+          label="View Tutorial"
+          onPress={() =>
+            router.push(
+              `/getting-started?replay=1&next=${encodeURIComponent('/(tabs)/account')}` as never,
+            )
+          }
+          variant="secondary"
+        />
+      </SurfaceCard>
 
       <SurfaceCard style={styles.linksCard} tone="raised">
         <Text style={styles.linksTitle}>Uploads & Processing</Text>

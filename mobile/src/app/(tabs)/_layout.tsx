@@ -58,7 +58,7 @@ export default function TabsLayout() {
   }
 
   if (!user) {
-    return <SafeRedirect href="/login" />;
+    return <SafeRedirect href="/welcome" />;
   }
 
   return (

@@ -14,13 +14,15 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import CenteredState from '@/components/centered-state';
+import EmptyStateCard from '@/components/empty-state-card';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
 import LiveGameEditSheet from '@/components/live-game-edit-sheet';
@@ -227,7 +229,6 @@ export default function LiveSessionScreen() {
   const [selectedComparisonMetric, setSelectedComparisonMetric] =
     useState<LivePlayerComparisonMetric>('average');
   const [comparisonLoading, setComparisonLoading] = useState(false);
-  const [pagerWidth, setPagerWidth] = useState(0);
   const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const [endDockHeight, setEndDockHeight] = useState(0);
   const selectionRevisionRef = useRef(0);
@@ -241,6 +242,9 @@ export default function LiveSessionScreen() {
     Partial<Record<LivePlayerComparisonMetric, { x: number; width: number }>>
   >({});
   const comparisonCategoryViewportWidthRef = useRef(0);
+  const { width: windowWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const pagerWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
 
   const liveSessionQuery = useQuery({
     queryKey: queryKeys.liveSession,
@@ -881,19 +885,10 @@ export default function LiveSessionScreen() {
           </View>
 
           <View
-            style={styles.pagerViewport}
+            style={[styles.pagerViewport, pagerWidth ? { width: pagerWidth } : null]}
             onLayout={(event) => {
               const nextLayout = event.nativeEvent.layout;
               pagerViewportYRef.current = nextLayout.y;
-              const nextWidth = Math.round(nextLayout.width);
-              if (!nextWidth || nextWidth === pagerWidth) {
-                return;
-              }
-
-              setPagerWidth(nextWidth);
-              requestAnimationFrame(() => {
-                scrollToTab(activeTab, false);
-              });
             }}>
             <ScrollView
               ref={pagerRef}
@@ -979,12 +974,10 @@ export default function LiveSessionScreen() {
                     )}
                   </View>
                 ) : (
-                  <SurfaceCard style={styles.emptyCard}>
-                    <Text style={styles.emptyTitle}>No live games yet</Text>
-                    <Text style={styles.emptyBody}>
-                      After you finish a game, add a scoreboard photo here. Once it is processed, the draft game card will appear below.
-                    </Text>
-                  </SurfaceCard>
+                  <EmptyStateCard
+                    title="No live games yet"
+                    body="Add a scoreboard after each game and it will appear here once it finishes processing."
+                  />
                 )}
               </View>
 
@@ -1357,10 +1350,13 @@ const styles = StyleSheet.create({
     color: palette.text,
   },
   pagerViewport: {
-    overflow: 'visible',
+    alignSelf: 'center',
+    overflow: 'hidden',
   },
   pagerPage: {
     gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    flexShrink: 0,
   },
   statsSection: {
     gap: spacing.sm,

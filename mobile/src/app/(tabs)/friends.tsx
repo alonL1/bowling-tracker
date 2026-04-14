@@ -11,12 +11,15 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type LayoutChangeEvent,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
 import CenteredState from '@/components/centered-state';
+import EmptyStateCard from '@/components/empty-state-card';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
 import ProfileAvatar from '@/components/profile-avatar';
@@ -94,11 +97,13 @@ export default function FriendsScreen() {
   const [invitePayload, setInvitePayload] = useState<InviteLinkResponse | null>(null);
   const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
   const [tabLabelWidths, setTabLabelWidths] = useState<MetricTabWidths>({});
-  const [pagerWidth, setPagerWidth] = useState(0);
   const tabScrollRef = useRef<ScrollView | null>(null);
   const pagerRef = useRef<ScrollView | null>(null);
   const tabLayoutsRef = useRef<Partial<Record<LeaderboardMetric, MetricTabLayout>>>({});
   const tabViewportWidthRef = useRef(0);
+  const { width: windowWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const pagerWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
 
   const leaderboardQuery = useQuery({
     queryKey: queryKeys.leaderboard,
@@ -131,6 +136,10 @@ export default function FriendsScreen() {
 
   const participants = isGuest ? [] : leaderboardQuery.data?.participants ?? [];
   const selfUserId = isGuest ? '' : leaderboardQuery.data?.selfUserId ?? '';
+  const onlyShowingSelf =
+    !isGuest &&
+    participants.length > 0 &&
+    participants.every((participant) => participant.userId === selfUserId);
 
   const rankedRowsByMetric = useMemo<RankedRowsByMetric>(() => {
     return METRIC_TABS.reduce<RankedRowsByMetric>((accumulator, entry) => {
@@ -393,16 +402,7 @@ export default function FriendsScreen() {
         />
       ) : null}
 
-      <View
-        style={styles.pagerViewport}
-        onLayout={(event) => {
-          const nextWidth = Math.round(event.nativeEvent.layout.width);
-          if (!nextWidth || nextWidth === pagerWidth) {
-            return;
-          }
-
-          setPagerWidth(nextWidth);
-        }}>
+      <View style={[styles.pagerViewport, pagerWidth ? { width: pagerWidth } : null]}>
         <ScrollView
           ref={pagerRef}
           horizontal
@@ -439,38 +439,58 @@ export default function FriendsScreen() {
 
               <View style={styles.leaderboardList}>
                 {page.rankedRows.length === 0 ? (
-                  <SurfaceCard style={styles.emptyCard} tone="raised">
-                    <Text style={styles.emptyTitle}>
-                      {isGuest ? 'Sign in to view friends' : 'No leaderboard entries yet'}
-                    </Text>
-                    <Text style={styles.emptyText}>
-                      {isGuest
-                        ? 'Guests cannot have friends. Sign in with an account to invite friends and compare stats.'
-                        : 'Invite a friend to start comparing stats.'}
-                    </Text>
-                  </SurfaceCard>
+                  <EmptyStateCard
+                    title={isGuest ? 'Sign in to view friends' : 'No leaderboard entries yet'}
+                    body={
+                      isGuest
+                        ? 'Create an account to invite friends and compare stats.'
+                        : 'Invite a friend to start comparing stats.'
+                    }
+                    actionLabel={isGuest ? 'Sign In / Create Account' : 'Invite a Friend'}
+                    onAction={() => {
+                      if (isGuest) {
+                        router.push('/login?next=/(tabs)/friends');
+                        return;
+                      }
+                      inviteMutation.mutate();
+                    }}
+                    tone="raised"
+                  />
                 ) : (
-                  page.rankedRows.map((row) => (
-                    <View key={row.userId} style={styles.leaderboardRow}>
-                      <Text style={styles.rankText}>{row.rank}</Text>
-                      <ProfileAvatar
-                        size={42}
-                        avatarKind={row.avatarKind}
-                        avatarPresetId={row.avatarPresetId}
-                        avatarUrl={row.avatarUrl}
-                        initials={row.initials}
-                        username={row.username}
+                  <>
+                    {onlyShowingSelf ? (
+                      <EmptyStateCard
+                        title="No friends yet"
+                        body="Invite a friend to start comparing stats."
+                        actionLabel="Invite a Friend"
+                        onAction={() => {
+                          inviteMutation.mutate();
+                        }}
+                        tone="raised"
                       />
-                      <Text
-                        style={[styles.rowName, row.userId === selfUserId && styles.rowNameSelf]}
-                        numberOfLines={1}>
-                        {formatHandle(row.username)}
-                      </Text>
-                      <Text style={styles.rowValue}>
-                        {formatMetricValue(page.metric, row.metricValue)}
-                      </Text>
-                    </View>
-                  ))
+                    ) : null}
+                    {page.rankedRows.map((row) => (
+                      <View key={row.userId} style={styles.leaderboardRow}>
+                        <Text style={styles.rankText}>{row.rank}</Text>
+                        <ProfileAvatar
+                          size={42}
+                          avatarKind={row.avatarKind}
+                          avatarPresetId={row.avatarPresetId}
+                          avatarUrl={row.avatarUrl}
+                          initials={row.initials}
+                          username={row.username}
+                        />
+                        <Text
+                          style={[styles.rowName, row.userId === selfUserId && styles.rowNameSelf]}
+                          numberOfLines={1}>
+                          {formatHandle(row.username)}
+                        </Text>
+                        <Text style={styles.rowValue}>
+                          {formatMetricValue(page.metric, row.metricValue)}
+                        </Text>
+                      </View>
+                    ))}
+                  </>
                 )}
               </View>
             </View>
@@ -633,10 +653,13 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   pagerViewport: {
-    overflow: 'visible',
+    alignSelf: 'center',
+    overflow: 'hidden',
   },
   pagerPage: {
     gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    flexShrink: 0,
   },
   bottomOverlay: {
     position: 'absolute',

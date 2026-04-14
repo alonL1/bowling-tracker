@@ -294,47 +294,40 @@ export type SessionSnapshot = {
   accessToken: string | null;
 };
 
-export async function ensureMobileSession(): Promise<SessionSnapshot> {
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (!userError && userData.user) {
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (sessionData.session?.access_token) {
-      return {
-        user: userData.user,
-        session: sessionData.session,
-        accessToken: sessionData.session.access_token,
-      };
-    }
+export async function getExistingSessionSnapshot(): Promise<SessionSnapshot> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) {
+    throw error;
   }
 
-  const { data: anonymousData, error: anonymousError } = await supabase.auth.signInAnonymously();
-  if (anonymousError || !anonymousData.session?.access_token) {
-    throw anonymousError || new Error('Failed to start guest session.');
-  }
+  const session = data.session ?? null;
+  const user = session?.user ?? null;
 
   return {
-    user: anonymousData.session.user,
-    session: anonymousData.session,
-    accessToken: anonymousData.session.access_token,
+    user,
+    session,
+    accessToken: session?.access_token ?? null,
   };
 }
 
-export async function getSessionSnapshot() {
-  return ensureMobileSession();
+export async function startGuestSession(): Promise<SessionSnapshot> {
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error || !data.session?.access_token) {
+    throw error || new Error('Failed to start guest session.');
+  }
+
+  return {
+    user: data.session.user,
+    session: data.session,
+    accessToken: data.session.access_token,
+  };
 }
 
-export async function signOutToGuest() {
+export async function signOutCurrentSession() {
   const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
   if (signOutError && signOutError.status !== 403) {
     throw signOutError;
   }
-
-  const { data, error } = await supabase.auth.signInAnonymously();
-  if (error || !data.user) {
-    throw error || new Error('Failed to start guest session.');
-  }
-
-  return data.user;
 }
 
 AppState.addEventListener('change', (state) => {

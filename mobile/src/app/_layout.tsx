@@ -1,4 +1,4 @@
-import { Stack, usePathname } from 'expo-router';
+import { Stack, useGlobalSearchParams, usePathname, type Href } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { View } from 'react-native';
@@ -10,15 +10,36 @@ import CenteredState from '@/components/centered-state';
 import GlobalAppNav from '@/components/global-app-nav';
 import SafeRedirect from '@/components/safe-redirect';
 import { palette } from '@/constants/palette';
+import { DEFAULT_POST_AUTH_PATH, getSafePostAuthPath } from '@/lib/onboarding';
 import { queryClient, queryPersistOptions } from '@/lib/query-client';
 import { AuthProvider } from '@/providers/auth-provider';
 import { UploadsProcessingProvider } from '@/providers/uploads-processing-provider';
 import { useAuth } from '@/providers/auth-provider';
 
+function isSignedOutPublicPath(pathname: string) {
+  return (
+    pathname === '/welcome' ||
+    pathname === '/login' ||
+    pathname === '/privacy' ||
+    pathname === '/terms' ||
+    pathname === '/delete-account' ||
+    pathname === '/delete-data' ||
+    pathname.startsWith('/invite/')
+  );
+}
+
 function isProfileGuardExemptPath(pathname: string) {
   return (
-    pathname === '/login' ||
     pathname === '/complete-profile' ||
+    pathname === '/privacy' ||
+    pathname === '/terms' ||
+    pathname === '/delete-account' ||
+    pathname === '/delete-data'
+  );
+}
+
+function isAvatarGuardExemptPath(pathname: string) {
+  return (
     pathname === '/choose-avatar' ||
     pathname === '/privacy' ||
     pathname === '/terms' ||
@@ -27,27 +48,138 @@ function isProfileGuardExemptPath(pathname: string) {
   );
 }
 
+function isTutorialGuardExemptPath(pathname: string) {
+  return (
+    pathname === '/complete-profile' ||
+    pathname === '/choose-avatar' ||
+    pathname === '/getting-started' ||
+    pathname === '/privacy' ||
+    pathname === '/terms' ||
+    pathname === '/delete-account' ||
+    pathname === '/delete-data'
+  );
+}
+
+function usesDefaultPostAuthFallback(pathname: string) {
+  return (
+    pathname === '/' ||
+    pathname === '/welcome' ||
+    pathname === '/login' ||
+    pathname === '/complete-profile' ||
+    pathname === '/choose-avatar' ||
+    pathname === '/getting-started'
+  );
+}
+
+function isAuthEntryPath(pathname: string) {
+  return pathname === '/welcome' || pathname === '/';
+}
+
 function RootNavigator() {
   const pathname = usePathname();
-  const { user, loading, isGuest, profileComplete, avatarStepNeeded } = useAuth();
-  const nextPath = pathname || '/(tabs)/sessions';
+  const params = useGlobalSearchParams<{ next?: string; replay?: string }>();
+  const { user, loading, isGuest, profileComplete, avatarStepNeeded, tutorialSeen } = useAuth();
+  const currentPath = pathname || DEFAULT_POST_AUTH_PATH;
+  const nextPath = getSafePostAuthPath(
+    params.next,
+    usesDefaultPostAuthFallback(currentPath) ? DEFAULT_POST_AUTH_PATH : currentPath,
+  );
+  const replayTutorial = params.replay === '1';
 
   if (loading) {
     return <CenteredState title="Loading account..." loading />;
   }
 
-  if (user && !isGuest) {
-    if (!profileComplete && !isProfileGuardExemptPath(nextPath)) {
-      return <SafeRedirect href={`/complete-profile?next=${encodeURIComponent(nextPath)}`} />;
+  if (!user && !isSignedOutPublicPath(currentPath)) {
+    return <SafeRedirect href={`/welcome?next=${encodeURIComponent(nextPath)}`} />;
+  }
+
+  if (!user) {
+    return (
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: {
+            backgroundColor: palette.background,
+          },
+        }}
+      />
+    );
+  }
+
+  if (isGuest) {
+    if (currentPath === '/complete-profile' || currentPath === '/choose-avatar') {
+      return <SafeRedirect href={nextPath as Href} />;
     }
 
-    if (profileComplete && avatarStepNeeded && !isProfileGuardExemptPath(nextPath)) {
+    if (!tutorialSeen && currentPath !== '/welcome' && currentPath !== '/login' && !isTutorialGuardExemptPath(currentPath)) {
+      return <SafeRedirect href={`/getting-started?next=${encodeURIComponent(nextPath)}`} />;
+    }
+
+    if (currentPath === '/getting-started' && tutorialSeen && !replayTutorial) {
+      return <SafeRedirect href={nextPath as Href} />;
+    }
+
+    if (currentPath === '/') {
+      return <SafeRedirect href={nextPath as Href} />;
+    }
+
+    return (
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: {
+            backgroundColor: palette.background,
+          },
+        }}
+      />
+    );
+  }
+
+  if (!profileComplete) {
+    if (!isProfileGuardExemptPath(currentPath)) {
+      return <SafeRedirect href={`/complete-profile?next=${encodeURIComponent(nextPath)}`} />;
+    }
+  } else if (currentPath === '/complete-profile') {
+    if (avatarStepNeeded) {
       return <SafeRedirect href={`/choose-avatar?next=${encodeURIComponent(nextPath)}`} />;
     }
 
-    if (!profileComplete && nextPath === '/choose-avatar') {
-      return <SafeRedirect href={`/complete-profile?next=${encodeURIComponent('/(tabs)/sessions')}`} />;
+    if (!tutorialSeen) {
+      return <SafeRedirect href={`/getting-started?next=${encodeURIComponent(nextPath)}`} />;
     }
+
+    return <SafeRedirect href={nextPath as Href} />;
+  }
+
+  if (profileComplete && avatarStepNeeded) {
+    if (!isAvatarGuardExemptPath(currentPath)) {
+      return <SafeRedirect href={`/choose-avatar?next=${encodeURIComponent(nextPath)}`} />;
+    }
+  } else if (currentPath === '/choose-avatar') {
+    if (!avatarStepNeeded && !tutorialSeen) {
+      return <SafeRedirect href={`/getting-started?next=${encodeURIComponent(nextPath)}`} />;
+    }
+
+    return <SafeRedirect href={nextPath as Href} />;
+  }
+
+  if (profileComplete && !avatarStepNeeded && !tutorialSeen && !isTutorialGuardExemptPath(currentPath)) {
+    return <SafeRedirect href={`/getting-started?next=${encodeURIComponent(nextPath)}`} />;
+  }
+
+  if (
+    currentPath === '/getting-started' &&
+    profileComplete &&
+    !avatarStepNeeded &&
+    tutorialSeen &&
+    !replayTutorial
+  ) {
+    return <SafeRedirect href={nextPath as Href} />;
+  }
+
+  if (isAuthEntryPath(currentPath)) {
+    return <SafeRedirect href={nextPath as Href} />;
   }
 
   return (

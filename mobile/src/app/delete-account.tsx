@@ -8,10 +8,11 @@ import PageBackButton from '@/components/page-back-button';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { deleteOwnAccount } from '@/lib/backend';
+import { PUBLIC_WEBSITE_URL } from '@/lib/urls';
 import { useAuth } from '@/providers/auth-provider';
 import { useRouter } from 'expo-router';
 
-const WEBSITE_URL = 'https://bowling-tracker-six.vercel.app';
+const WEBSITE_URL = PUBLIC_WEBSITE_URL;
 const DELETE_ACCOUNT_URL = `${WEBSITE_URL}/delete-account`;
 const DELETE_DATA_URL = `${WEBSITE_URL}/delete-data`;
 const CONTACT_EMAIL = 'alonlevy04@gmail.com';
@@ -67,7 +68,7 @@ export default function DeleteAccountScreen() {
     try {
       await deleteOwnAccount();
       await signOutToGuestSession();
-      router.replace('/login');
+      router.replace('/welcome');
     } catch (nextError) {
       setError(
         nextError instanceof Error ? nextError.message : 'Failed to delete the account.',

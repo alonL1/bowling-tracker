@@ -7,7 +7,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import ActionButton from '@/components/action-button';
 import AvatarPickerPanel from '@/components/avatar-picker-panel';
 import InfoBanner from '@/components/info-banner';
-import SafeRedirect from '@/components/safe-redirect';
 import ScreenShell from '@/components/screen-shell';
 import { spacing } from '@/constants/palette';
 import {
@@ -17,6 +16,7 @@ import {
   updateOwnProfile,
   uploadOwnProfileAvatar,
 } from '@/lib/backend';
+import { DEFAULT_POST_AUTH_PATH, getSafePostAuthPath } from '@/lib/onboarding';
 import type { AvatarKind, AvatarPresetId } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -27,28 +27,15 @@ type UploadSelection = {
   webFile?: File | null;
 };
 
-function getSafeNextPath(raw: string | string[] | undefined) {
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
-    return '/(tabs)/sessions';
-  }
-  if (
-    trimmed.startsWith('/login') ||
-    trimmed.startsWith('/complete-profile') ||
-    trimmed.startsWith('/choose-avatar')
-  ) {
-    return '/(tabs)/sessions';
-  }
-  return trimmed || '/(tabs)/sessions';
-}
-
 export default function ChooseAvatarScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const params = useLocalSearchParams<{ next?: string }>();
   const { user, loading, isGuest, profile, refreshProfile } = useAuth();
-  const nextPath = useMemo(() => getSafeNextPath(params.next), [params.next]);
+  const nextPath = useMemo(
+    () => getSafePostAuthPath(params.next, DEFAULT_POST_AUTH_PATH),
+    [params.next],
+  );
   const [selectedMode, setSelectedMode] = useState<AvatarKind>('initials');
   const [selectedPresetId, setSelectedPresetId] = useState<AvatarPresetId | null>(null);
   const [selectedUpload, setSelectedUpload] = useState<UploadSelection | null>(null);
@@ -69,16 +56,8 @@ export default function ChooseAvatarScreen() {
     return <ScreenShell title="Choose Avatar" subtitle="Loading account..." />;
   }
 
-  if (!user || isGuest) {
-    return <SafeRedirect href="/login" />;
-  }
-
-  if (!profile?.profileComplete) {
-    return <SafeRedirect href={`/complete-profile?next=${encodeURIComponent(nextPath)}`} />;
-  }
-
-  if (!profile.avatarStepNeeded) {
-    return <SafeRedirect href={nextPath as Href} />;
+  if (!user || isGuest || !profile?.profileComplete || !profile.avatarStepNeeded) {
+    return <ScreenShell title="Choose Avatar" subtitle="Loading account..." />;
   }
 
   const previewAvatarKind =

@@ -152,11 +152,8 @@ export default function ScoreboardGameEditSheet({
   const [players, setPlayers] = useState<EditablePlayer[]>([]);
 
   useEffect(() => {
-    if (!visible) {
-      return;
-    }
     setPlayers(createEditablePlayers(extraction));
-  }, [extraction, visible]);
+  }, [extraction]);
 
   const initialPlayers = useMemo(() => normalizeLivePlayers(extraction), [extraction]);
   const previewPlayers = useMemo(() => buildPreviewPlayers(players), [players]);
@@ -164,6 +161,10 @@ export default function ScoreboardGameEditSheet({
     () => syncPreviewSelectedPlayerKeys(initialPlayers, previewPlayers, selectedPlayerKeys),
     [initialPlayers, previewPlayers, selectedPlayerKeys],
   );
+
+  if (!visible) {
+    return null;
+  }
 
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>

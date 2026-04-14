@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import CenteredState from '@/components/centered-state';
+import EmptyStateCard from '@/components/empty-state-card';
 import InfoBanner from '@/components/info-banner';
 import ScreenShell from '@/components/screen-shell';
 import SessionCard, { type SessionMetaSegment } from '@/components/session-card';
@@ -307,12 +308,12 @@ export default function SessionsScreen() {
 
         <View style={styles.list}>
           {sessionSortEntries.length === 0 ? (
-            <SurfaceCard style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No sessions yet</Text>
-              <Text style={styles.emptyText}>
-                Once you log games with the mobile or web app, they will show up here.
-              </Text>
-            </SurfaceCard>
+            <EmptyStateCard
+              title="No sessions yet"
+              body="Log your first games and they will show up here."
+              actionLabel="Go to Record"
+              onAction={() => router.push('/(tabs)/record')}
+            />
           ) : (
             sessionSortEntries.map(({ session, metaSegments }) => (
               <SessionCard
@@ -331,38 +332,40 @@ export default function SessionsScreen() {
         </View>
       </ScreenShell>
 
-      <Modal transparent animationType="fade" visible={sortOpen} onRequestClose={() => setSortOpen(false)}>
-        <Pressable style={styles.sortOverlay} onPress={() => setSortOpen(false)}>
-          <Pressable
-            style={[
-              styles.sortMenu,
-              {
-                top: sortMenuTop,
-                left: sortMenuLeft,
-                width: SORT_MENU_WIDTH,
-              },
-            ]}
-            onPress={() => {}}>
-            {sortOptions.map((option) => {
-              const active = option.key === sortOption;
-              return (
-                <Pressable
-                  key={option.key}
-                  onPress={() => {
-                    setSortOption(option.key);
-                    setSortOpen(false);
-                  }}
-                  style={({ pressed }) => [styles.sortOption, pressed && styles.sortOptionPressed]}>
-                  <Text style={[styles.sortOptionLabel, active && styles.sortOptionLabelActive]}>
-                    {option.label}
-                  </Text>
-                  {active ? <MaterialIcons name="check" size={18} color={palette.text} /> : null}
-                </Pressable>
-              );
-            })}
+      {sortOpen ? (
+        <Modal transparent animationType="fade" visible={sortOpen} onRequestClose={() => setSortOpen(false)}>
+          <Pressable style={styles.sortOverlay} onPress={() => setSortOpen(false)}>
+            <Pressable
+              style={[
+                styles.sortMenu,
+                {
+                  top: sortMenuTop,
+                  left: sortMenuLeft,
+                  width: SORT_MENU_WIDTH,
+                },
+              ]}
+              onPress={() => {}}>
+              {sortOptions.map((option) => {
+                const active = option.key === sortOption;
+                return (
+                  <Pressable
+                    key={option.key}
+                    onPress={() => {
+                      setSortOption(option.key);
+                      setSortOpen(false);
+                    }}
+                    style={({ pressed }) => [styles.sortOption, pressed && styles.sortOptionPressed]}>
+                    <Text style={[styles.sortOptionLabel, active && styles.sortOptionLabelActive]}>
+                      {option.label}
+                    </Text>
+                    {active ? <MaterialIcons name="check" size={18} color={palette.text} /> : null}
+                  </Pressable>
+                );
+              })}
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
+      ) : null}
     </>
   );
 }

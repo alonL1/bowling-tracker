@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
+import EmptyStateCard from '@/components/empty-state-card';
 import InfoBanner from '@/components/info-banner';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
@@ -127,12 +128,10 @@ export default function UploadsProcessingScreen() {
       ) : null}
 
       {ready && entries.length === 0 ? (
-        <SurfaceCard style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>Nothing is waiting</Text>
-          <Text style={styles.emptyBody}>
-            New offline captures and background finalization work will appear here automatically.
-          </Text>
-        </SurfaceCard>
+        <EmptyStateCard
+          title="Nothing is waiting"
+          body="Background captures and finalization work will appear here automatically."
+        />
       ) : null}
 
       {ready

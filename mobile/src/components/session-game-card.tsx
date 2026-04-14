@@ -102,7 +102,7 @@ export default function SessionGameCard({
             delayLongPress={240}
             style={({ pressed }) => [styles.summaryPressable, pressed && styles.pressed]}>
             <View style={styles.summary}>
-              <StackBadge lines={badgeLines} />
+              <StackBadge lines={badgeLines} lineStyle={styles.titleBadgeLine} />
               <View style={styles.scoreBlock}>
                 <Text style={styles.scoreValue}>{scoreLabel}</Text>
                 {syncBadgeLabel ? (
@@ -187,14 +187,15 @@ export default function SessionGameCard({
         ) : null}
       </View>
 
-      <GameEditSheet visible={editOpen} game={game} onClose={() => setEditOpen(false)} />
+      {editOpen ? (
+        <GameEditSheet visible={editOpen} game={game} onClose={() => setEditOpen(false)} />
+      ) : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    paddingHorizontal: 2,
     paddingVertical: 6,
     gap: 10,
   },
@@ -212,7 +213,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     minWidth: 0,
-    paddingLeft: 6,
   },
   scoreBlock: {
     flex: 1,
@@ -235,6 +235,10 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilySans,
     paddingLeft: 0,
   },
+  titleBadgeLine: {
+    fontSize: 15,
+    lineHeight: 18,
+  },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -243,12 +247,11 @@ const styles = StyleSheet.create({
   },
   expandedBody: {
     gap: 8,
-    paddingLeft: 6,
   },
   loadingText: {
     color: palette.muted,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 19,
     fontFamily: fontFamilySans,
   },
   pressed: {
@@ -273,8 +276,8 @@ const styles = StyleSheet.create({
   },
   readOnlyHint: {
     color: palette.muted,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 19,
     fontFamily: fontFamilySans,
   },
 });

@@ -5,8 +5,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import PageBackButton from '@/components/page-back-button';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { PUBLIC_WEBSITE_URL } from '@/lib/urls';
 
-const WEBSITE_URL = 'https://bowling-tracker-six.vercel.app';
+const WEBSITE_URL = PUBLIC_WEBSITE_URL;
 const PRIVACY_URL = `${WEBSITE_URL}/privacy`;
 const CONTACT_EMAIL = 'alonlevy04@gmail.com';
 

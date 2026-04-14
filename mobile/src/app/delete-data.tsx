@@ -10,10 +10,11 @@ import { fontFamilySans } from '@/constants/typography';
 import { deleteOwnData } from '@/lib/backend';
 import { clearOfflineChatGames } from '@/lib/offline-chat';
 import { queryClient } from '@/lib/query-client';
+import { PUBLIC_WEBSITE_URL } from '@/lib/urls';
 import { useAuth } from '@/providers/auth-provider';
 import { useRouter } from 'expo-router';
 
-const WEBSITE_URL = 'https://bowling-tracker-six.vercel.app';
+const WEBSITE_URL = PUBLIC_WEBSITE_URL;
 const DELETE_DATA_URL = `${WEBSITE_URL}/delete-data`;
 const CONTACT_EMAIL = 'alonlevy04@gmail.com';
 

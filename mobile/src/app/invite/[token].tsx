@@ -25,7 +25,7 @@ function getAppInviteUrl(token: string) {
 export default function InviteScreen() {
   const router = useRouter();
   const { token, browser } = useLocalSearchParams<{ token: string; browser?: string }>();
-  const { loading: authLoading, isGuest } = useAuth();
+  const { loading: authLoading, isGuest, user } = useAuth();
   const [acceptMessage, setAcceptMessage] = useState('');
   const [acceptError, setAcceptError] = useState('');
   const [showOpenInAppHint, setShowOpenInAppHint] = useState(false);
@@ -38,10 +38,10 @@ export default function InviteScreen() {
     if (authLoading || isWeb) {
       return;
     }
-    if (isGuest) {
+    if (!user || isGuest) {
       router.replace(`/login?next=/invite/${token}`);
     }
-  }, [authLoading, isGuest, isWeb, router, token]);
+  }, [authLoading, isGuest, isWeb, router, token, user]);
 
   useEffect(() => {
     if (!isWeb || !token || !appInviteUrl || browserMode) {
@@ -72,7 +72,7 @@ export default function InviteScreen() {
   const inviteQuery = useQuery({
     queryKey: queryKeys.inviteLookup(token),
     queryFn: () => lookupInvite(token),
-    enabled: Boolean(token) && !authLoading && (isWeb || !isGuest),
+    enabled: Boolean(token) && !authLoading && (isWeb || (!isGuest && Boolean(user))),
   });
   const canGoToFriends =
     (!isWeb || browserMode) && (Boolean(acceptMessage) || Boolean(inviteQuery.data?.alreadyFriends));

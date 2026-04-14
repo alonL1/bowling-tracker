@@ -5,36 +5,23 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import ActionButton from '@/components/action-button';
 import InfoBanner from '@/components/info-banner';
-import SafeRedirect from '@/components/safe-redirect';
 import ScreenShell from '@/components/screen-shell';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { queryKeys, updateOwnProfile } from '@/lib/backend';
+import { DEFAULT_POST_AUTH_PATH, getSafePostAuthPath } from '@/lib/onboarding';
 import { formatHandle, normalizeUsernameInput } from '@/lib/profile';
 import { useAuth } from '@/providers/auth-provider';
-
-function getSafeNextPath(raw: string | string[] | undefined) {
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
-    return '/(tabs)/sessions';
-  }
-  if (
-    trimmed.startsWith('/login') ||
-    trimmed.startsWith('/complete-profile') ||
-    trimmed.startsWith('/choose-avatar')
-  ) {
-    return '/(tabs)/sessions';
-  }
-  return trimmed || '/(tabs)/sessions';
-}
 
 export default function CompleteProfileScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const params = useLocalSearchParams<{ next?: string }>();
   const { user, loading, isGuest, profile, refreshProfile } = useAuth();
-  const nextPath = useMemo(() => getSafeNextPath(params.next), [params.next]);
+  const nextPath = useMemo(
+    () => getSafePostAuthPath(params.next, DEFAULT_POST_AUTH_PATH),
+    [params.next],
+  );
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
@@ -56,15 +43,8 @@ export default function CompleteProfileScreen() {
     return <ScreenShell title="Complete Profile" subtitle="Loading account..." />;
   }
 
-  if (!user || isGuest) {
-    return <SafeRedirect href="/login" />;
-  }
-
-  if (profile?.profileComplete) {
-    if (profile.avatarStepNeeded) {
-      return <SafeRedirect href={`/choose-avatar?next=${encodeURIComponent(nextPath)}`} />;
-    }
-    return <SafeRedirect href={nextPath as Href} />;
+  if (!user || isGuest || profile?.profileComplete) {
+    return <ScreenShell title="Complete Profile" subtitle="Loading account..." />;
   }
 
   const handleSave = async () => {

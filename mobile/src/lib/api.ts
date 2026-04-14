@@ -1,7 +1,8 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
-import { ensureMobileSession, supabase } from '@/lib/supabase';
+import { getExistingSessionSnapshot, supabase } from '@/lib/supabase';
+import { normalizePublicAppUrl } from '@/lib/urls';
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, '');
@@ -9,7 +10,7 @@ function trimTrailingSlash(value: string) {
 
 function deriveWebApiBaseUrl(envBase?: string) {
   if (typeof window === 'undefined') {
-    return envBase ? trimTrailingSlash(envBase) : 'http://localhost:3000';
+    return envBase ? normalizePublicAppUrl(envBase) : 'http://localhost:3000';
   }
 
   const { origin, hostname, port } = window.location;
@@ -17,10 +18,10 @@ function deriveWebApiBaseUrl(envBase?: string) {
     (hostname === 'localhost' || hostname === '127.0.0.1') && (port === '8081' || port === '19006');
 
   if (isExpoDevHost) {
-    return envBase ? trimTrailingSlash(envBase) : 'http://localhost:3000';
+    return envBase ? normalizePublicAppUrl(envBase) : 'http://localhost:3000';
   }
 
-  return trimTrailingSlash(origin);
+  return normalizePublicAppUrl(origin);
 }
 
 function deriveDevApiBaseUrl() {
@@ -48,23 +49,36 @@ export function getApiBaseUrl() {
     return deriveWebApiBaseUrl(envBase);
   }
   if (envBase) {
-    return trimTrailingSlash(envBase);
+    return normalizePublicAppUrl(envBase);
   }
   return deriveDevApiBaseUrl();
 }
 
-export async function apiFetch(path: string, init?: RequestInit) {
-  const { accessToken } = await ensureMobileSession();
-  if (!accessToken) {
+type ApiRequestInit = RequestInit & {
+  authRequired?: boolean;
+  accessToken?: string | null;
+};
+
+export async function apiFetch(path: string, init?: ApiRequestInit) {
+  const { authRequired = true, accessToken: accessTokenOverride, ...requestInit } = init ?? {};
+  const sessionSnapshot = accessTokenOverride ? null : await getExistingSessionSnapshot();
+  const accessToken = accessTokenOverride ?? sessionSnapshot?.accessToken ?? null;
+  if (authRequired && !accessToken) {
     throw new Error('No mobile auth token is available.');
   }
 
-  const headers = new Headers(init?.headers || {});
-  headers.set('Authorization', `Bearer ${accessToken}`);
+  const headers = new Headers(requestInit.headers || {});
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
 
   const targetUrl = path.startsWith('http') ? path : `${getApiBaseUrl()}${path}`;
-  const response = await fetch(targetUrl, { ...init, headers });
-  if (response.status !== 401) {
+  const response = await fetch(targetUrl, { ...requestInit, headers });
+  if (!authRequired || response.status !== 401) {
+    return response;
+  }
+
+  if (accessTokenOverride) {
     return response;
   }
 
@@ -73,9 +87,9 @@ export async function apiFetch(path: string, init?: RequestInit) {
     return response;
   }
 
-  const retryHeaders = new Headers(init?.headers || {});
+  const retryHeaders = new Headers(requestInit.headers || {});
   retryHeaders.set('Authorization', `Bearer ${data.session.access_token}`);
-  return fetch(targetUrl, { ...init, headers: retryHeaders });
+  return fetch(targetUrl, { ...requestInit, headers: retryHeaders });
 }
 
 export async function parseJsonResponse<T>(response: Response) {
@@ -91,7 +105,7 @@ export async function parseJsonResponse<T>(response: Response) {
   }
 }
 
-export async function apiJson<T>(path: string, init?: RequestInit) {
+export async function apiJson<T>(path: string, init?: ApiRequestInit) {
   const response = await apiFetch(path, init);
   const payload = await parseJsonResponse<T & { error?: string }>(response);
   if (!response.ok) {

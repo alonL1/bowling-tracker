@@ -13,9 +13,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
@@ -250,15 +251,14 @@ export default function SessionDetailScreen() {
   const [pendingDeleteMoveTargetId, setPendingDeleteMoveTargetId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<'games' | 'stats'>('games');
+  const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const [selectedComparisonMetric, setSelectedComparisonMetric] =
     useState<LivePlayerComparisonMetric>('average');
-  const [pagerWidth, setPagerWidth] = useState(0);
-  const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
   const [draftSelectedPlayerKeys, setDraftSelectedPlayerKeys] = useState<Record<string, string>>(
     {},
   );
-  const pagerRef = useRef<ScrollView | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
+  const pagerRef = useRef<ScrollView | null>(null);
   const comparisonCategoryScrollRef = useRef<ScrollView | null>(null);
   const pagerViewportYRef = useRef(0);
   const compareSectionYRef = useRef(0);
@@ -266,6 +266,9 @@ export default function SessionDetailScreen() {
     Partial<Record<LivePlayerComparisonMetric, { x: number; width: number }>>
   >({});
   const comparisonCategoryViewportWidthRef = useRef(0);
+  const { width: windowWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const pagerWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
 
   useEffect(() => {
     if (!group || group.isSessionless) {
@@ -492,18 +495,6 @@ export default function SessionDetailScreen() {
     setDeleteOptionsOpen(true);
   };
 
-  const scrollToTab = (tab: 'games' | 'stats', animated: boolean) => {
-    if (!pagerWidth) {
-      return;
-    }
-
-    pagerRef.current?.scrollTo({
-      x: tab === 'stats' ? pagerWidth : 0,
-      y: 0,
-      animated,
-    });
-  };
-
   const scrollToCompareSection = () => {
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({
@@ -538,6 +529,28 @@ export default function SessionDetailScreen() {
       scrollToCompareSection();
     });
   };
+
+  const scrollToTab = (tab: 'games' | 'stats', animated: boolean) => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    pagerRef.current?.scrollTo({
+      x: tab === 'stats' ? pagerWidth : 0,
+      y: 0,
+      animated,
+    });
+  };
+
+  useEffect(() => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      scrollToTab(activeTab, false);
+    });
+  }, [pagerWidth]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -635,19 +648,10 @@ export default function SessionDetailScreen() {
         </View>
 
         <View
-          style={styles.pagerViewport}
+          style={[styles.pagerViewport, pagerWidth ? { width: pagerWidth } : null]}
           onLayout={(event) => {
             const nextLayout = event.nativeEvent.layout;
             pagerViewportYRef.current = nextLayout.y;
-            const nextWidth = Math.round(nextLayout.width);
-            if (!nextWidth || nextWidth === pagerWidth) {
-              return;
-            }
-
-            setPagerWidth(nextWidth);
-            requestAnimationFrame(() => {
-              scrollToTab(activeTab, false);
-            });
           }}>
           <ScrollView
             ref={pagerRef}
@@ -655,11 +659,13 @@ export default function SessionDetailScreen() {
             pagingEnabled
             scrollEnabled={pagerScrollEnabled}
             nestedScrollEnabled
+            directionalLockEnabled
             showsHorizontalScrollIndicator={false}
             onMomentumScrollEnd={(event) => {
               if (!pagerWidth) {
                 return;
               }
+
               const nextTab =
                 Math.round(event.nativeEvent.contentOffset.x / pagerWidth) === 1 ? 'stats' : 'games';
               setActiveTab(nextTab);
@@ -687,7 +693,6 @@ export default function SessionDetailScreen() {
                 ))}
               </View>
             </View>
-
             <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
               <View style={styles.statsGrid}>
                 {comparisonCategories.map((category) => (
@@ -711,15 +716,15 @@ export default function SessionDetailScreen() {
                     horizontal
                     nestedScrollEnabled
                     showsHorizontalScrollIndicator={false}
-                    onLayout={(event) => {
-                      comparisonCategoryViewportWidthRef.current = event.nativeEvent.layout.width;
-                    }}
                     onTouchStart={() => setPagerScrollEnabled(false)}
                     onTouchEnd={() => setPagerScrollEnabled(true)}
                     onTouchCancel={() => setPagerScrollEnabled(true)}
                     onScrollBeginDrag={() => setPagerScrollEnabled(false)}
                     onScrollEndDrag={() => setPagerScrollEnabled(true)}
                     onMomentumScrollEnd={() => setPagerScrollEnabled(true)}
+                    onLayout={(event) => {
+                      comparisonCategoryViewportWidthRef.current = event.nativeEvent.layout.width;
+                    }}
                     contentContainerStyle={styles.comparisonCategoryRow}>
                     {comparisonCategories.map((category) => (
                       <Pressable
@@ -784,224 +789,232 @@ export default function SessionDetailScreen() {
         </View>
       </ScrollView>
 
-      <Modal transparent animationType="fade" visible={editing} onRequestClose={() => setEditing(false)}>
-        <KeyboardAvoidingView
-          behavior="padding"
-          enabled={Platform.OS === 'ios'}
-          style={styles.modalBackdrop}>
-          <SurfaceCard style={styles.modalCard} tone="raised">
-            <Text style={styles.modalTitle}>Edit session</Text>
-            <KeyboardAwareScrollView
-              style={styles.editScroll}
-              contentContainerStyle={styles.editScrollContent}
-              showsVerticalScrollIndicator={false}>
-              <TextInput
-                placeholder="Session name"
-                placeholderTextColor={palette.muted}
-                style={styles.input}
-                value={draftName}
-                onChangeText={setDraftName}
-              />
-              <TextInput
-                placeholder="Description"
-                placeholderTextColor={palette.muted}
-                style={[styles.input, styles.inputMultiline]}
-                multiline
-                value={draftDescription}
-                onChangeText={setDraftDescription}
-              />
-              <View style={styles.selectionSection}>
-                <Text style={styles.selectionSectionTitle}>Who are you in each game?</Text>
-                <Text style={styles.selectionSectionBody}>
-                  Choose exactly one player for every logged scoreboard in this session.
-                </Text>
-                <View style={styles.selectionGameList}>
-                  {editableGameSelections.map(({ game, title, selectedKey, players }, index) => (
-                    <SurfaceCard key={game.id} style={styles.selectionGameCard}>
-                      <Text style={styles.selectionGameTitle}>
-                        {title || `Game ${index + 1}`}
-                      </Text>
-                      <View style={styles.selectionOptionList}>
-                        {players.map((player) => {
-                          const checked = player.playerKey === selectedKey;
-                          return (
-                            <Pressable
-                              key={`${game.id}-${player.playerKey}`}
-                              onPress={() =>
-                                setDraftSelectedPlayerKeys((current) => ({
-                                  ...current,
-                                  [game.id]: player.playerKey,
-                                }))
-                              }
-                              style={({ pressed }) => [
-                                styles.selectionOptionRow,
-                                pressed && styles.pressed,
-                              ]}>
-                              <MaterialIcons
-                                name={checked ? 'radio-button-checked' : 'radio-button-unchecked'}
-                                size={22}
-                                color={checked ? palette.accent : palette.muted}
-                              />
-                              <Text style={styles.selectionOptionLabel}>
-                                {canonicalizePlayerLabel(player.playerName)}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    </SurfaceCard>
-                  ))}
-                </View>
-              </View>
-            </KeyboardAwareScrollView>
-            <ActionButton
-              label={updateMutation.isPending ? 'Saving...' : 'Save session'}
-              onPress={() => updateMutation.mutate()}
-              disabled={updateMutation.isPending}
-            />
-            <ActionButton
-              label="Cancel"
-              onPress={() => setEditing(false)}
-              variant="secondary"
-            />
-          </SurfaceCard>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal
-        transparent
-        animationType="fade"
-        visible={deleteOptionsOpen}
-        onRequestClose={() => setDeleteOptionsOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <SurfaceCard style={styles.modalCard} tone="raised">
-            <Text style={styles.modalTitle}>Delete Session</Text>
-            <Text style={styles.modalBody}>Choose how to handle the games in this session.</Text>
-            <ActionButton
-              label="Move to different session"
-              onPress={() => {
-                setDeleteOptionsOpen(false);
-                setMoveDeletingSession(true);
-              }}
-            />
-            <ActionButton
-              label="Delete games too"
-              variant="danger"
-              onPress={async () => {
-                try {
-                  setDeleteOptionsOpen(false);
-                  await deleteSession(group.sessionId as string, 'delete_games');
-                  await Promise.all([
-                    queryClient.invalidateQueries({ queryKey: queryKeys.games }),
-                    queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-                  ]);
-                  leaveSessionDetail();
-                } catch (nextError) {
-                  setError(nextError instanceof Error ? nextError.message : 'Failed to delete session.');
-                }
-              }}
-            />
-            <ActionButton
-              label="Cancel"
-              onPress={() => setDeleteOptionsOpen(false)}
-              variant="secondary"
-            />
-          </SurfaceCard>
-        </View>
-      </Modal>
-
-      <Modal
-        transparent
-        animationType="fade"
-        visible={moveDeletingSession}
-        onRequestClose={() => setMoveDeletingSession(false)}>
-        <View style={styles.modalBackdrop}>
-          <SurfaceCard style={styles.modalCard} tone="raised">
-            <Text style={styles.modalTitle}>Move games before deleting</Text>
-            <ScrollView style={styles.targetList} contentContainerStyle={styles.targetListContent}>
-              <Pressable
-                onPress={() => moveSessionMutation.mutate(NEW_SESSION_TARGET)}
-                disabled={moveSessionMutation.isPending}
-                style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
-                <View style={styles.targetButtonInner}>
-                  <Text style={[styles.targetButtonText, styles.targetButtonTextAccent]}>
-                    New Session
+      {editing ? (
+        <Modal transparent animationType="fade" visible={editing} onRequestClose={() => setEditing(false)}>
+          <KeyboardAvoidingView
+            behavior="padding"
+            enabled={Platform.OS === 'ios'}
+            style={styles.modalBackdrop}>
+            <SurfaceCard style={styles.modalCard} tone="raised">
+              <Text style={styles.modalTitle}>Edit session</Text>
+              <KeyboardAwareScrollView
+                style={styles.editScroll}
+                contentContainerStyle={styles.editScrollContent}
+                showsVerticalScrollIndicator={false}>
+                <TextInput
+                  placeholder="Session name"
+                  placeholderTextColor={palette.muted}
+                  style={styles.input}
+                  value={draftName}
+                  onChangeText={setDraftName}
+                />
+                <TextInput
+                  placeholder="Description"
+                  placeholderTextColor={palette.muted}
+                  style={[styles.input, styles.inputMultiline]}
+                  multiline
+                  value={draftDescription}
+                  onChangeText={setDraftDescription}
+                />
+                <View style={styles.selectionSection}>
+                  <Text style={styles.selectionSectionTitle}>Who are you in each game?</Text>
+                  <Text style={styles.selectionSectionBody}>
+                    Choose exactly one player for every logged scoreboard in this session.
                   </Text>
-                  {moveSessionMutation.isPending && pendingDeleteMoveTargetId === NEW_SESSION_TARGET ? (
-                    <BowlingBallSpinner size={16} holeColor={palette.field} />
-                  ) : null}
+                  <View style={styles.selectionGameList}>
+                    {editableGameSelections.map(({ game, title, selectedKey, players }, index) => (
+                      <SurfaceCard key={game.id} style={styles.selectionGameCard}>
+                        <Text style={styles.selectionGameTitle}>
+                          {title || `Game ${index + 1}`}
+                        </Text>
+                        <View style={styles.selectionOptionList}>
+                          {players.map((player) => {
+                            const checked = player.playerKey === selectedKey;
+                            return (
+                              <Pressable
+                                key={`${game.id}-${player.playerKey}`}
+                                onPress={() =>
+                                  setDraftSelectedPlayerKeys((current) => ({
+                                    ...current,
+                                    [game.id]: player.playerKey,
+                                  }))
+                                }
+                                style={({ pressed }) => [
+                                  styles.selectionOptionRow,
+                                  pressed && styles.pressed,
+                                ]}>
+                                <MaterialIcons
+                                  name={checked ? 'radio-button-checked' : 'radio-button-unchecked'}
+                                  size={22}
+                                  color={checked ? palette.accent : palette.muted}
+                                />
+                                <Text style={styles.selectionOptionLabel}>
+                                  {canonicalizePlayerLabel(player.playerName)}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </SurfaceCard>
+                    ))}
+                  </View>
                 </View>
-              </Pressable>
-              {moveTargets.map((target) => (
+              </KeyboardAwareScrollView>
+              <ActionButton
+                label={updateMutation.isPending ? 'Saving...' : 'Save session'}
+                onPress={() => updateMutation.mutate()}
+                disabled={updateMutation.isPending}
+              />
+              <ActionButton
+                label="Cancel"
+                onPress={() => setEditing(false)}
+                variant="secondary"
+              />
+            </SurfaceCard>
+          </KeyboardAvoidingView>
+        </Modal>
+      ) : null}
+
+      {deleteOptionsOpen ? (
+        <Modal
+          transparent
+          animationType="fade"
+          visible={deleteOptionsOpen}
+          onRequestClose={() => setDeleteOptionsOpen(false)}>
+          <View style={styles.modalBackdrop}>
+            <SurfaceCard style={styles.modalCard} tone="raised">
+              <Text style={styles.modalTitle}>Delete Session</Text>
+              <Text style={styles.modalBody}>Choose how to handle the games in this session.</Text>
+              <ActionButton
+                label="Move to different session"
+                onPress={() => {
+                  setDeleteOptionsOpen(false);
+                  setMoveDeletingSession(true);
+                }}
+              />
+              <ActionButton
+                label="Delete games too"
+                variant="danger"
+                onPress={async () => {
+                  try {
+                    setDeleteOptionsOpen(false);
+                    await deleteSession(group.sessionId as string, 'delete_games');
+                    await Promise.all([
+                      queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+                      queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+                    ]);
+                    leaveSessionDetail();
+                  } catch (nextError) {
+                    setError(nextError instanceof Error ? nextError.message : 'Failed to delete session.');
+                  }
+                }}
+              />
+              <ActionButton
+                label="Cancel"
+                onPress={() => setDeleteOptionsOpen(false)}
+                variant="secondary"
+              />
+            </SurfaceCard>
+          </View>
+        </Modal>
+      ) : null}
+
+      {moveDeletingSession ? (
+        <Modal
+          transparent
+          animationType="fade"
+          visible={moveDeletingSession}
+          onRequestClose={() => setMoveDeletingSession(false)}>
+          <View style={styles.modalBackdrop}>
+            <SurfaceCard style={styles.modalCard} tone="raised">
+              <Text style={styles.modalTitle}>Move games before deleting</Text>
+              <ScrollView style={styles.targetList} contentContainerStyle={styles.targetListContent}>
                 <Pressable
-                  key={target.sessionId}
-                  onPress={() => moveSessionMutation.mutate(target.sessionId as string)}
+                  onPress={() => moveSessionMutation.mutate(NEW_SESSION_TARGET)}
                   disabled={moveSessionMutation.isPending}
                   style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
                   <View style={styles.targetButtonInner}>
-                    <Text style={styles.targetButtonText}>{target.title}</Text>
-                    {moveSessionMutation.isPending &&
-                    pendingDeleteMoveTargetId === target.sessionId ? (
+                    <Text style={[styles.targetButtonText, styles.targetButtonTextAccent]}>
+                      New Session
+                    </Text>
+                    {moveSessionMutation.isPending && pendingDeleteMoveTargetId === NEW_SESSION_TARGET ? (
                       <BowlingBallSpinner size={16} holeColor={palette.field} />
                     ) : null}
                   </View>
                 </Pressable>
-              ))}
-            </ScrollView>
-            <ActionButton
-              label="Cancel"
-              onPress={() => setMoveDeletingSession(false)}
-              variant="secondary"
-            />
-          </SurfaceCard>
-        </View>
-      </Modal>
+                {moveTargets.map((target) => (
+                  <Pressable
+                    key={target.sessionId}
+                    onPress={() => moveSessionMutation.mutate(target.sessionId as string)}
+                    disabled={moveSessionMutation.isPending}
+                    style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
+                    <View style={styles.targetButtonInner}>
+                      <Text style={styles.targetButtonText}>{target.title}</Text>
+                      {moveSessionMutation.isPending &&
+                      pendingDeleteMoveTargetId === target.sessionId ? (
+                        <BowlingBallSpinner size={16} holeColor={palette.field} />
+                      ) : null}
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <ActionButton
+                label="Cancel"
+                onPress={() => setMoveDeletingSession(false)}
+                variant="secondary"
+              />
+            </SurfaceCard>
+          </View>
+        </Modal>
+      ) : null}
 
-      <Modal
-        transparent
-        animationType="fade"
-        visible={Boolean(moveGameId)}
-        onRequestClose={() => setMoveGameId(null)}>
-        <View style={styles.modalBackdrop}>
-          <SurfaceCard style={styles.modalCard} tone="raised">
-            <Text style={styles.modalTitle}>Move game</Text>
-            <ScrollView style={styles.targetList} contentContainerStyle={styles.targetListContent}>
-              <Pressable
-                onPress={() => moveMutation.mutate(NEW_SESSION_TARGET)}
-                disabled={moveMutation.isPending}
-                style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
-                <View style={styles.targetButtonInner}>
-                  <Text style={[styles.targetButtonText, styles.targetButtonTextAccent]}>
-                    New Session
-                  </Text>
-                  {moveMutation.isPending && pendingMoveTargetId === NEW_SESSION_TARGET ? (
-                    <BowlingBallSpinner size={16} holeColor={palette.field} />
-                  ) : null}
-                </View>
-              </Pressable>
-              {moveTargets.map((target) => (
+      {moveGameId ? (
+        <Modal
+          transparent
+          animationType="fade"
+          visible={Boolean(moveGameId)}
+          onRequestClose={() => setMoveGameId(null)}>
+          <View style={styles.modalBackdrop}>
+            <SurfaceCard style={styles.modalCard} tone="raised">
+              <Text style={styles.modalTitle}>Move game</Text>
+              <ScrollView style={styles.targetList} contentContainerStyle={styles.targetListContent}>
                 <Pressable
-                  key={target.sessionId}
-                  onPress={() => moveMutation.mutate(target.sessionId as string)}
+                  onPress={() => moveMutation.mutate(NEW_SESSION_TARGET)}
                   disabled={moveMutation.isPending}
                   style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
                   <View style={styles.targetButtonInner}>
-                    <Text style={styles.targetButtonText}>{target.title}</Text>
-                    {moveMutation.isPending && pendingMoveTargetId === target.sessionId ? (
+                    <Text style={[styles.targetButtonText, styles.targetButtonTextAccent]}>
+                      New Session
+                    </Text>
+                    {moveMutation.isPending && pendingMoveTargetId === NEW_SESSION_TARGET ? (
                       <BowlingBallSpinner size={16} holeColor={palette.field} />
                     ) : null}
                   </View>
                 </Pressable>
-              ))}
-            </ScrollView>
-            <ActionButton
-              label="Cancel"
-              onPress={() => setMoveGameId(null)}
-              variant="secondary"
-            />
-          </SurfaceCard>
-        </View>
-      </Modal>
+                {moveTargets.map((target) => (
+                  <Pressable
+                    key={target.sessionId}
+                    onPress={() => moveMutation.mutate(target.sessionId as string)}
+                    disabled={moveMutation.isPending}
+                    style={({ pressed }) => [styles.targetButton, pressed && styles.pressed]}>
+                    <View style={styles.targetButtonInner}>
+                      <Text style={styles.targetButtonText}>{target.title}</Text>
+                      {moveMutation.isPending && pendingMoveTargetId === target.sessionId ? (
+                        <BowlingBallSpinner size={16} holeColor={palette.field} />
+                      ) : null}
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <ActionButton
+                label="Cancel"
+                onPress={() => setMoveGameId(null)}
+                variant="secondary"
+              />
+            </SurfaceCard>
+          </View>
+        </Modal>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -1085,14 +1098,14 @@ const styles = StyleSheet.create({
   },
   description: {
     color: palette.muted,
-    fontSize: 14,
+    fontSize: 15,
     lineHeight: 20,
     fontFamily: fontFamilySans,
   },
   guidance: {
     color: palette.muted,
-    fontSize: 14,
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 20,
     fontFamily: fontFamilySans,
   },
   tabRow: {
@@ -1127,10 +1140,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   pagerViewport: {
-    overflow: 'visible',
+    alignSelf: 'center',
+    overflow: 'hidden',
   },
   pagerPage: {
     gap: spacing.md,
+    flexShrink: 0,
+    paddingHorizontal: spacing.lg,
   },
   tabDot: {
     width: 8,
@@ -1308,8 +1324,8 @@ const styles = StyleSheet.create({
   },
   selectionGameTitle: {
     color: palette.text,
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: '600',
     fontFamily: fontFamilySans,
   },

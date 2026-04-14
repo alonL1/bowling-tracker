@@ -19,6 +19,7 @@ import DraggableFlatList, { ScaleDecorator, type RenderItemParams } from 'react-
 
 import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
+import EmptyStateCard from '@/components/empty-state-card';
 import InfoBanner from '@/components/info-banner';
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import RecordingDraftGameCard from '@/components/recording-draft-game-card';
@@ -105,6 +106,26 @@ function getPrimaryButtonLabel(mode: RecordingDraftMode, hasTargetSession: boole
 
 function getFinalizeButtonLabel(mode: RecordingDraftMode) {
   return mode === 'add_existing_session' ? 'Add to Session' : 'Add to Log';
+}
+
+function getDraftEmptyState(mode: RecordingDraftMode) {
+  switch (mode) {
+    case 'upload_session':
+      return {
+        title: 'No scoreboards yet',
+        body: 'Add scoreboard images to start building this session.',
+      };
+    case 'add_multiple_sessions':
+      return {
+        title: 'No scoreboards yet',
+        body: 'Add scoreboard images and PinPoint will sort them into sessions.',
+      };
+    case 'add_existing_session':
+      return {
+        title: 'No scoreboards yet',
+        body: 'Add scoreboard images, then choose which existing session they belong to.',
+      };
+  }
 }
 
 function getTargetSessionButtonLabel(targetSessionId: string | null) {
@@ -352,6 +373,7 @@ export default function UploadSessionForm({
     updateDraftLocal,
   } = useUploadsProcessing();
   const mode = useMemo(() => getDraftMode(sessionMode), [sessionMode]);
+  const emptyState = useMemo(() => getDraftEmptyState(mode), [mode]);
 
   const [error, setError] = useState('');
   const [finalizeOpen, setFinalizeOpen] = useState(false);
@@ -1082,12 +1104,7 @@ export default function UploadSessionForm({
           dragItemOverflow
           ListHeaderComponent={topContent}
           ListEmptyComponent={
-            <SurfaceCard style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No scoreboards yet</Text>
-              <Text style={styles.emptyBody}>
-                Choose scoreboard images and they will appear here one by one as they finish processing.
-              </Text>
-            </SurfaceCard>
+            <EmptyStateCard title={emptyState.title} body={emptyState.body} />
           }
           renderItem={renderFlatRow}
           onScrollToIndexFailed={({ index, averageItemLength }) => {
@@ -1168,12 +1185,7 @@ export default function UploadSessionForm({
               )}
             </View>
           ) : (
-            <SurfaceCard style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>No scoreboards yet</Text>
-              <Text style={styles.emptyBody}>
-                Choose scoreboard images and they will appear here one by one as they finish processing.
-              </Text>
-            </SurfaceCard>
+            <EmptyStateCard title={emptyState.title} body={emptyState.body} />
           )}
         </KeyboardAwareScrollView>
       )}

@@ -1,0 +1,25 @@
+# Dependencies are installed on the EAS builders.
+node_modules/
+
+# Local Expo / Metro / web build outputs.
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Generated native folders are local-only in this repo.
+android/
+ios/
+
+# Local logs and TypeScript caches.
+*.log
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Local environment files are pulled explicitly when needed.
+.env*.local
+
+# Desktop clutter.
+.DS_Store

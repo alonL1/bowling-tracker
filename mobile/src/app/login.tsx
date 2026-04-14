@@ -11,9 +11,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
 import CenteredState from '@/components/centered-state';
@@ -23,10 +24,11 @@ import SafeRedirect from '@/components/safe-redirect';
 import SurfaceCard from '@/components/surface-card';
 import { checkUsernameAvailability } from '@/lib/backend';
 import { claimGuest } from '@/lib/backend';
+import { DEFAULT_POST_AUTH_PATH, getSafePostAuthPath } from '@/lib/onboarding';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { formatHandle, normalizeUsernameInput } from '@/lib/profile';
-import { getSessionSnapshot, isGuestUser } from '@/lib/supabase';
+import { getExistingSessionSnapshot, isGuestUser } from '@/lib/supabase';
 import { useAuth } from '@/providers/auth-provider';
 
 type AuthMode = 'signIn' | 'signUp';
@@ -36,34 +38,25 @@ type TransferPrompt = {
   guestUserId: string;
 };
 
-type AuthAction = 'password' | 'apple' | 'google' | 'guest' | null;
-
-function getSafeNextPath(raw: string | string[] | undefined) {
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
-    return '/(tabs)/sessions';
-  }
-  if (trimmed.startsWith('/login')) {
-    return '/(tabs)/sessions';
-  }
-  return trimmed || '/(tabs)/sessions';
-}
+type AuthAction = 'password' | 'apple' | 'google' | null;
 
 export default function LoginScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ next?: string }>();
+  const params = useLocalSearchParams<{ next?: string; mode?: string }>();
   const {
     user,
     loading,
     isGuest,
+    profileComplete,
+    avatarStepNeeded,
+    tutorialSeen,
     signInWithApple,
     signInWithPassword,
     signUpWithPassword,
     signInWithGoogle,
-    continueAsGuest,
   } = useAuth();
-  const [mode, setMode] = useState<AuthMode>('signIn');
+  const requestedMode: AuthMode = params.mode === 'signUp' ? 'signUp' : 'signIn';
+  const [mode, setMode] = useState<AuthMode>(requestedMode);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
@@ -78,9 +71,14 @@ export default function LoginScreen() {
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferError, setTransferError] = useState('');
   const pagerRef = useRef<ScrollView | null>(null);
-  const [pagerWidth, setPagerWidth] = useState(0);
+  const { width: windowWidth } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const pagerWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
 
-  const nextPath = useMemo(() => getSafeNextPath(params.next) as Href, [params.next]);
+  const nextPath = useMemo(
+    () => getSafePostAuthPath(params.next, DEFAULT_POST_AUTH_PATH),
+    [params.next],
+  );
   const currentSubtitle =
     mode === 'signIn'
       ? 'Sign in to access your sessions, uploads, chat, and friends.'
@@ -106,6 +104,10 @@ export default function LoginScreen() {
     setMode(nextMode);
     scrollToMode(nextMode, true);
   };
+
+  useEffect(() => {
+    setMode(requestedMode);
+  }, [requestedMode]);
 
   useEffect(() => {
     let active = true;
@@ -159,12 +161,21 @@ export default function LoginScreen() {
     return <CenteredState title="Loading account..." loading />;
   }
 
-  if (user && !isGuest && !transferPrompt && !busy && !transferBusy) {
-    return <SafeRedirect href={nextPath} />;
+  if (
+    user &&
+    !isGuest &&
+    !transferPrompt &&
+    !busy &&
+    !transferBusy &&
+    profileComplete &&
+    !avatarStepNeeded &&
+    tutorialSeen
+  ) {
+    return <SafeRedirect href={nextPath as Href} />;
   }
 
   const finishAuthentication = async (guestAccessToken: string, guestUserId: string) => {
-    const afterSession = await getSessionSnapshot();
+    const afterSession = await getExistingSessionSnapshot();
     const nextUser = afterSession.user;
 
     if (nextUser && !isGuestUser(nextUser)) {
@@ -187,8 +198,7 @@ export default function LoginScreen() {
         }
       }
 
-      router.replace(nextPath);
-      return true;
+      return false;
     }
 
     return false;
@@ -206,7 +216,7 @@ export default function LoginScreen() {
     setTransferError('');
 
     try {
-      const beforeSession = await getSessionSnapshot();
+      const beforeSession = await getExistingSessionSnapshot();
       const guestBefore =
         beforeSession.user && beforeSession.accessToken && isGuestUser(beforeSession.user)
           ? {
@@ -240,10 +250,9 @@ export default function LoginScreen() {
         return;
       }
 
-      const afterSession = await getSessionSnapshot();
+      const afterSession = await getExistingSessionSnapshot();
       const nextUser = afterSession.user;
       if (nextUser && !isGuestUser(nextUser)) {
-        router.replace(nextPath);
         return;
       }
 
@@ -272,7 +281,7 @@ export default function LoginScreen() {
     setTransferError('');
 
     try {
-      const beforeSession = await getSessionSnapshot();
+      const beforeSession = await getExistingSessionSnapshot();
       const guestBefore =
         beforeSession.user && beforeSession.accessToken && isGuestUser(beforeSession.user)
           ? {
@@ -293,9 +302,8 @@ export default function LoginScreen() {
         return;
       }
 
-      const afterSession = await getSessionSnapshot();
+      const afterSession = await getExistingSessionSnapshot();
       if (afterSession.user && !isGuestUser(afterSession.user)) {
-        router.replace(nextPath);
         return;
       }
 
@@ -320,7 +328,7 @@ export default function LoginScreen() {
     setTransferError('');
 
     try {
-      const beforeSession = await getSessionSnapshot();
+      const beforeSession = await getExistingSessionSnapshot();
       const guestBefore =
         beforeSession.user && beforeSession.accessToken && isGuestUser(beforeSession.user)
           ? {
@@ -341,9 +349,8 @@ export default function LoginScreen() {
         return;
       }
 
-      const afterSession = await getSessionSnapshot();
+      const afterSession = await getExistingSessionSnapshot();
       if (afterSession.user && !isGuestUser(afterSession.user)) {
-        router.replace(nextPath);
         return;
       }
 
@@ -356,36 +363,12 @@ export default function LoginScreen() {
     }
   };
 
-  const handleGuest = async () => {
-    if (busy || transferBusy) {
-      return;
-    }
-
-    setBusy(true);
-    setActiveAction('guest');
-    setError('');
-    setInfo('');
-
-    try {
-      if (!isGuest) {
-        await continueAsGuest();
-      }
-      router.replace(nextPath);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Failed to start guest session.');
-    } finally {
-      setBusy(false);
-      setActiveAction(null);
-    }
-  };
-
   const handleStartBlank = () => {
     if (transferBusy) {
       return;
     }
     setTransferPrompt(null);
     setTransferError('');
-    router.replace(nextPath);
   };
 
   const handleSaveLogs = async () => {
@@ -397,7 +380,6 @@ export default function LoginScreen() {
     try {
       await claimGuest(transferPrompt.guestAccessToken, 'move');
       setTransferPrompt(null);
-      router.replace(nextPath);
     } catch (nextError) {
       setTransferError(
         nextError instanceof Error ? nextError.message : 'Failed to move guest logs.',
@@ -495,59 +477,6 @@ export default function LoginScreen() {
         }
         loading={activeAction === 'password'}
       />
-
-      {Platform.OS === 'ios' && appleSignInAvailable ? (
-        activeAction === 'apple' ? (
-          <ActionButton
-            label="Continue with Apple"
-            onPress={handleApple}
-            disabled={busy || transferBusy}
-            loading
-            variant="secondary"
-            leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
-          />
-        ) : (
-          <View
-            pointerEvents={busy || transferBusy ? 'none' : 'auto'}
-            style={busy || transferBusy ? styles.oauthButtonDisabled : undefined}>
-            <AppleAuthentication.AppleAuthenticationButton
-              buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
-              buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-              cornerRadius={14}
-              onPress={handleApple}
-              style={styles.appleButton}
-            />
-          </View>
-        )
-      ) : null}
-
-      {Platform.OS === 'web' && appleSignInAvailable ? (
-        <ActionButton
-          label="Continue with Apple"
-          onPress={handleApple}
-          disabled={busy || transferBusy}
-          loading={activeAction === 'apple'}
-          variant="secondary"
-          leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
-        />
-      ) : null}
-
-      <ActionButton
-        label="Continue with Google"
-        onPress={handleGoogle}
-        disabled={busy || transferBusy}
-        loading={activeAction === 'google'}
-        variant="secondary"
-        leftIcon={<Ionicons name="logo-google" size={18} color={palette.text} />}
-      />
-
-      <ActionButton
-        label="Continue as Guest"
-        onPress={handleGuest}
-        disabled={busy || transferBusy}
-        loading={activeAction === 'guest'}
-        variant="secondary"
-      />
     </View>
   );
 
@@ -563,8 +492,61 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
+            <Pressable
+              onPress={() => router.replace(`/welcome?next=${encodeURIComponent(nextPath)}` as never)}
+              style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}>
+              <Ionicons name="chevron-back" size={16} color={palette.muted} />
+              <Text style={styles.backText}>Welcome</Text>
+            </Pressable>
             <Text style={styles.headerTitle}>PinPoint</Text>
             <Text style={styles.headerSubtitle}>{currentSubtitle}</Text>
+          </View>
+
+          <View style={styles.socialActions}>
+            {Platform.OS === 'ios' && appleSignInAvailable ? (
+              activeAction === 'apple' ? (
+                <ActionButton
+                  label="Continue with Apple"
+                  onPress={handleApple}
+                  disabled={busy || transferBusy}
+                  loading
+                  variant="secondary"
+                  leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
+                />
+              ) : (
+                <View
+                  pointerEvents={busy || transferBusy ? 'none' : 'auto'}
+                  style={busy || transferBusy ? styles.oauthButtonDisabled : undefined}>
+                  <AppleAuthentication.AppleAuthenticationButton
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                    cornerRadius={14}
+                    onPress={handleApple}
+                    style={styles.appleButton}
+                  />
+                </View>
+              )
+            ) : null}
+
+            {Platform.OS === 'web' && appleSignInAvailable ? (
+              <ActionButton
+                label="Continue with Apple"
+                onPress={handleApple}
+                disabled={busy || transferBusy}
+                loading={activeAction === 'apple'}
+                variant="secondary"
+                leftIcon={<Ionicons name="logo-apple" size={18} color={palette.text} />}
+              />
+            ) : null}
+
+            <ActionButton
+              label="Continue with Google"
+              onPress={handleGoogle}
+              disabled={busy || transferBusy}
+              loading={activeAction === 'google'}
+              variant="secondary"
+              leftIcon={<Ionicons name="logo-google" size={18} color={palette.text} />}
+            />
           </View>
 
           <View style={styles.modeRowWrap}>
@@ -600,15 +582,7 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          <View
-            style={styles.pagerViewport}
-            onLayout={(event) => {
-              const nextWidth = Math.round(event.nativeEvent.layout.width);
-              if (!nextWidth || nextWidth === pagerWidth) {
-                return;
-              }
-              setPagerWidth(nextWidth);
-            }}>
+          <View style={[styles.pagerViewport, pagerWidth ? { width: pagerWidth } : null]}>
             <ScrollView
               ref={pagerRef}
               horizontal
@@ -691,6 +665,19 @@ const styles = StyleSheet.create({
   header: {
     gap: spacing.md,
   },
+  backButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  backText: {
+    color: palette.muted,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
+  },
   headerTitle: {
     color: palette.text,
     fontSize: 42,
@@ -704,6 +691,9 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontFamily: fontFamilySans,
     maxWidth: 480,
+  },
+  socialActions: {
+    gap: spacing.sm,
   },
   modeRowWrap: {
     width: '100%',
@@ -743,9 +733,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   pagerViewport: {
+    alignSelf: 'center',
     overflow: 'hidden',
   },
-  pagerPage: {},
+  pagerPage: {
+    paddingHorizontal: spacing.lg,
+    flexShrink: 0,
+  },
   pageContentInner: {
     width: '100%',
     maxWidth: 480,

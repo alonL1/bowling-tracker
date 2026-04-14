@@ -3,14 +3,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchOwnProfile } from '@/lib/backend';
+import {
+  clearTutorialSeen,
+  getTutorialIdentity,
+  loadTutorialSeen,
+  saveTutorialSeen,
+} from '@/lib/onboarding';
 import { buildLegacyProfileFallback } from '@/lib/profile';
 import { queryClient, QUERY_CACHE_OWNER_STORAGE_KEY } from '@/lib/query-client';
 import {
-  ensureMobileSession,
+  getExistingSessionSnapshot,
   isGuestUser,
   signInWithApple as signInWithAppleFlow,
   signInWithGoogleOAuth,
-  signOutToGuest,
+  signOutCurrentSession,
+  startGuestSession,
   supabase,
 } from '@/lib/supabase';
 import type { UserProfile } from '@/lib/types';
@@ -31,7 +38,10 @@ type AuthContextValue = {
   isGuest: boolean;
   profileComplete: boolean;
   avatarStepNeeded: boolean;
+  tutorialSeen: boolean;
   refreshProfile: () => Promise<UserProfile | null>;
+  markTutorialSeen: () => Promise<void>;
+  resetTutorialSeen: () => Promise<void>;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   signUpWithPassword: (input: SignUpWithPasswordInput) => Promise<void>;
   signInWithApple: () => Promise<boolean>;
@@ -41,6 +51,14 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function getAuthIdentityKey(user: User | null) {
+  if (!user) {
+    return 'signed_out';
+  }
+
+  return `${isGuestUser(user) ? 'guest' : 'user'}:${user.id}`;
+}
 
 function isMissingProfileRouteError(error: unknown) {
   return (
@@ -52,11 +70,13 @@ function isMissingProfileRouteError(error: unknown) {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
-  const [profileLoading, setProfileLoading] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [tutorialSeen, setTutorialSeen] = useState(false);
+  const [resolvedIdentityKey, setResolvedIdentityKey] = useState<string | null>(null);
   const lastUserIdRef = useRef<string | null | undefined>(undefined);
+  const pendingIdentityKeyRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
-  const profileRequestIdRef = useRef(0);
+  const derivedStateRequestIdRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -88,24 +108,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    const syncProfileState = async (nextUser: User | null) => {
-      const requestId = ++profileRequestIdRef.current;
-
+    const syncProfileState = async (
+      nextUser: User | null,
+      requestId: number,
+      accessToken?: string | null,
+    ) => {
       if (!nextUser || isGuestUser(nextUser)) {
-        if (mountedRef.current && profileRequestIdRef.current === requestId) {
+        if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
           setProfile(null);
-          setProfileLoading(false);
         }
         return null;
       }
 
-      if (mountedRef.current) {
-        setProfileLoading(true);
-      }
-
       try {
-        const payload = await fetchOwnProfile();
-        if (mountedRef.current && profileRequestIdRef.current === requestId) {
+        const payload = await fetchOwnProfile(accessToken);
+        if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
           setProfile(payload.profile);
         }
         return payload.profile;
@@ -115,39 +132,93 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn(
             'Account profile route is unavailable on the current backend. Using legacy fallback profile until the backend is updated.',
           );
-          if (mountedRef.current && profileRequestIdRef.current === requestId) {
+          if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
             setProfile(fallbackProfile);
           }
           return fallbackProfile;
         }
 
         console.error('Failed to load account profile.', error);
-        if (mountedRef.current && profileRequestIdRef.current === requestId) {
+        if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
           setProfile(null);
         }
         return null;
-      } finally {
-        if (mountedRef.current && profileRequestIdRef.current === requestId) {
-          setProfileLoading(false);
-        }
       }
     };
 
-    const applySessionSnapshot = async (nextSession: Session | null) => {
+    const syncTutorialState = async (nextUser: User | null, requestId: number) => {
+      const identity = getTutorialIdentity(nextUser);
+
+      if (!identity) {
+        if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
+          setTutorialSeen(false);
+        }
+        return false;
+      }
+
+      try {
+        const seen = await loadTutorialSeen(identity);
+        if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
+          setTutorialSeen(seen);
+        }
+        return seen;
+      } catch (error) {
+        console.error('Failed to load tutorial state.', error);
+        if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
+          setTutorialSeen(false);
+        }
+        return false;
+      }
+    };
+
+    const syncDerivedState = async (nextSession: Session | null, force = false) => {
       const nextUser = nextSession?.user ?? null;
       const nextUserId = nextUser?.id ?? null;
+      const nextIdentityKey = getAuthIdentityKey(nextUser);
+      const identityChanged = force || lastUserIdRef.current !== nextUserId;
+      const duplicatePendingIdentity =
+        !identityChanged && pendingIdentityKeyRef.current === nextIdentityKey;
+
+      lastUserIdRef.current = nextUserId;
+      if (mountedRef.current) {
+        setSession(nextSession);
+      }
+
+      if (identityChanged) {
+        pendingIdentityKeyRef.current = nextIdentityKey;
+        derivedStateRequestIdRef.current += 1;
+        if (mountedRef.current) {
+          setResolvedIdentityKey(null);
+        }
+      } else if (duplicatePendingIdentity) {
+        return;
+      }
+
       await syncQueryCacheOwner(nextUserId);
       if (!mountedRef.current) {
         return;
       }
-      setSession(nextSession);
-      lastUserIdRef.current = nextUserId;
-      await syncProfileState(nextUser);
+
+      if (!identityChanged) {
+        if (mountedRef.current) {
+          setResolvedIdentityKey(nextIdentityKey);
+        }
+        return;
+      }
+
+      const requestId = derivedStateRequestIdRef.current;
+      await syncProfileState(nextUser, requestId, nextSession?.access_token ?? null);
+      await syncTutorialState(nextUser, requestId);
+
+      if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
+        pendingIdentityKeyRef.current = null;
+        setResolvedIdentityKey(nextIdentityKey);
+      }
     };
 
-    ensureMobileSession()
+    getExistingSessionSnapshot()
       .then(async (snapshot) => {
-        await applySessionSnapshot(snapshot.session ?? null);
+        await syncDerivedState(snapshot.session ?? null);
       })
       .catch((error) => {
         console.error('Failed to initialize mobile auth session.', error);
@@ -163,11 +234,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (lastUserIdRef.current !== undefined && lastUserIdRef.current !== nextUserId) {
         void resetQueryCache();
       }
-      void syncQueryCacheOwner(nextUserId);
-      lastUserIdRef.current = nextUserId;
-      setSession(nextSession);
-      void syncProfileState(nextSession?.user ?? null);
       setSessionReady(true);
+      void syncDerivedState(nextSession, false);
     });
 
     return () => {
@@ -176,7 +244,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const loading = !sessionReady || profileLoading;
+  const loading =
+    !sessionReady ||
+    resolvedIdentityKey !== getAuthIdentityKey(session?.user ?? null);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -187,6 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isGuest: isGuestUser(session?.user ?? null),
       profileComplete: Boolean(profile?.profileComplete),
       avatarStepNeeded: Boolean(profile?.avatarStepNeeded),
+      tutorialSeen,
       async refreshProfile() {
         const nextUser = session?.user ?? null;
         if (!nextUser || isGuestUser(nextUser)) {
@@ -194,9 +265,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return null;
         }
 
-        setProfileLoading(true);
         try {
-          const payload = await fetchOwnProfile();
+          const payload = await fetchOwnProfile(session?.access_token ?? null);
           setProfile(payload.profile);
           return payload.profile;
         } catch (error) {
@@ -212,9 +282,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.error('Failed to refresh account profile.', error);
           setProfile(null);
           return null;
-        } finally {
-          setProfileLoading(false);
         }
+      },
+      async markTutorialSeen() {
+        const identity = getTutorialIdentity(session?.user ?? null);
+        await saveTutorialSeen(identity);
+        setTutorialSeen(true);
+      },
+      async resetTutorialSeen() {
+        const identity = getTutorialIdentity(session?.user ?? null);
+        await clearTutorialSeen(identity);
+        setTutorialSeen(false);
       },
       async signInWithPassword(email, password) {
         const { error } = await supabase.auth.signInWithPassword({
@@ -248,17 +326,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return signInWithGoogleOAuth();
       },
       async continueAsGuest() {
-        const { error } = await supabase.auth.signInAnonymously();
-        if (error) {
-          throw error;
-        }
+        await startGuestSession();
       },
       async signOutToGuestSession() {
         await queryClient.cancelQueries();
-        await signOutToGuest();
+        await signOutCurrentSession();
       },
     }),
-    [loading, profile, session],
+    [loading, profile, session, tutorialSeen],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

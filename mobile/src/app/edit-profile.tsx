@@ -67,7 +67,7 @@ export default function EditProfileScreen() {
   }
 
   if (!user || isGuest) {
-    return <SafeRedirect href="/login" />;
+    return <SafeRedirect href="/welcome" />;
   }
 
   if (!profile) {

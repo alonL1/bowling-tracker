@@ -238,13 +238,16 @@ export async function fetchLeaderboard() {
   };
 }
 
-export async function fetchOwnProfile() {
-  return apiJson<{ profile: UserProfile }>('/api/account/profile');
+export async function fetchOwnProfile(accessToken?: string | null) {
+  return apiJson<{ profile: UserProfile }>('/api/account/profile', {
+    accessToken,
+  });
 }
 
 export async function checkUsernameAvailability(username: string) {
   return apiJson<{ available: boolean; username: string }>(
     `/api/account/profile/username?username=${encodeURIComponent(username)}`,
+    { authRequired: false },
   );
 }
 
@@ -339,6 +342,7 @@ export async function createInvite() {
 export async function lookupInvite(token: string) {
   const payload = await apiJson<InviteLookupResponse>(
     `/api/friends/invite/${encodeURIComponent(token)}`,
+    { authRequired: false },
   );
   return normalizeInviteLookupPayload(payload);
 }
