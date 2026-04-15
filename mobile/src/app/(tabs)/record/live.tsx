@@ -33,6 +33,7 @@ import UploadsProcessingBanner from '@/components/uploads-processing-banner';
 import {
   deleteLiveSessionGame,
   discardLiveSession,
+  endLiveSession,
   fetchLiveSession,
   queryKeys,
   updateLiveSession,
@@ -588,17 +589,33 @@ export default function LiveSessionScreen() {
       if (!liveSession) {
         throw new Error('No active live session was found.');
       }
-      return finalizeLiveSessionLocal({
-        liveSession,
-        name: draftName,
-        description: draftDescription,
-      });
+      try {
+        return await finalizeLiveSessionLocal({
+          liveSession,
+          name: draftName,
+          description: draftDescription,
+        });
+      } catch (nextError) {
+        const message = nextError instanceof Error ? nextError.message : '';
+        if (message !== 'Live session local state was not found.') {
+          throw nextError;
+        }
+
+        await updateLiveSession({
+          selectedPlayerKeys,
+          name: draftName,
+          description: draftDescription,
+        });
+
+        return endLiveSession();
+      }
     },
     onSuccess: async (payload) => {
       setError('');
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
       ]);
       navigation.dispatch(StackActions.popToTop());
