@@ -446,6 +446,7 @@ Extract the full scoreboard for every visible player row, not just one player.
 4. Use the board's cumulative totals to resolve ambiguous frame marks whenever possible.
 5. If a shot is unreadable, return null for that shot instead of inventing a value.
 6. If a player row is partially visible but clearly belongs to the scoreboard, include it anyway.
+7. If the player's total score clearly doesn't match the running count underneath frame 10 (which would also be the total score), then that total score is probably the running total from several games so use the frame 10 running score as the total score.
 </rules>
 
 // TASK
