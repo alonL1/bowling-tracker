@@ -67,7 +67,16 @@ npm run env:pull:production
    npm run start:dev-client
    ```
 
+   This now uses LAN by default so it does not depend on ngrok tunnels.
+   If you specifically need an Expo tunnel, use:
+
+   ```bash
+   npm run start:dev-client:tunnel
+   ```
+
 ## Android Play Store workflow
+
+Use the local native Android project for Play Store builds.
 
 1. Pull the production frontend env:
 
@@ -75,16 +84,54 @@ npm run env:pull:production
    npm run env:pull:production
    ```
 
-2. Build the production Android App Bundle:
+2. Build the production Android App Bundle locally with Gradle:
 
    ```bash
-   npm run build:android:production
+   cd android
+   gradlew.bat bundleRelease
    ```
+
+3. Find the generated `.aab` here:
+
+   ```txt
+   android/app/build/outputs/bundle/release/app-release.aab
+   ```
+
+4. Upload that `.aab` in Google Play Console.
+
+If you ever need a local release APK instead of an App Bundle:
+
+```bash
+cd android
+gradlew.bat assembleRelease
+```
 
 This uses the production app identity:
 
 - app name: `PinPoint`
 - Android package: `com.alonl.pinpoint`
+
+## iPhone App Store workflow
+
+Use Expo / EAS for production iPhone builds.
+
+1. Build the production iOS app:
+
+   ```bash
+   npm run build:ios:production
+   ```
+
+2. Upload the latest finished iOS build to App Store Connect:
+
+   ```bash
+   npx eas submit --platform ios --latest
+   ```
+
+3. In App Store Connect:
+
+   - wait for Apple to finish processing the build
+   - add it to TestFlight or your App Store version
+   - submit it for review when ready
 
 ## Web workflow
 

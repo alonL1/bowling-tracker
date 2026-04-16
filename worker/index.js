@@ -418,62 +418,6 @@ function serializeLivePlayers(players) {
   };
 }
 
-function buildStandardPrompt(playerNames) {
-  const nameList = Array.isArray(playerNames)
-    ? playerNames.filter(Boolean)
-    : parsePlayerNames(playerNames);
-  const fallback = nameList.length === 0 ? ["the player"] : nameList;
-  const namesLabel = fallback.join(", ");
-  const quotedNames = fallback.map((name) => `"${name}"`).join(", ");
-  // prompt for scoreboard extraction
-  // You are analyzing a bowling scoreboard photo.
-  // Focus only on the row for the player named "*player name*".
-  // Return strict JSON with this schema and no extra text:
-  // {
-  //   "playerName": string,
-  //   "totalScore": number | null,
-  //   "frames": [
-  //     { "frame": number, "shots": [number|null, number|null, number|null] }
-  //   ]
-  // }
-  // Rules:
-  // - Frames 1-9 have up to 2 shots; frame 10 can have up to 3.
-  // - If a shot is unclear, keep a short list of likely candidates, then use totalScore math (bowling scoring) to resolve.
-  // - Use the per-frame score column if visible to validate shots (e.g., frame shows 18 so shots are likely 9 and 9).
-  // - Use null for any unreadable shot.
-  return `// SYSTEM INSTRUCTIONS
-You are a precision OCR agent specializing in sports data.
-Your goal is to extract bowling frame data for the player matching one of these names: ${quotedNames}.
-Choose the closest matching row and return the selected name in "playerName".
-If no exact match exists, pick the closest match to ${namesLabel}.
-
-// CONTEXT & SCHEMA
-<schema>
-{
-  "playerName": string,
-  "totalScore": number,
-  "frames": [
-    { "frame": number, "shots": [number|null, number|null, number|null] }
-  ]
-}
-</schema>
-
-// EXTRACTION RULES
-<rules>
-1. FOCUS: Only extract data for the row belonging to the best match in ${quotedNames}.
-2. SYMBOLS: Convert "/" to the number of pins needed for a spare, "X" to 10, and "-" or "G" to 0.
-3. MATH VALIDATION: Use the "Cumulative Score" or "Total Score" columns as ground truth.
-   - Before outputting, calculate the sum of the frames using standard bowling rules.
-   - If your calculated total does not match the board's total, re-read the individual shots.
-4. FRAME 10: Ensure you capture all 3 potential shots.
-</rules>
-
-// TASK
-Analyze the image. Perform a internal "Chain of Thought" math check.
-Return ONLY the JSON object. Do not include conversational text or markdown code blocks.
-`;
-}
-
 function buildLivePrompt() {
   return `// SYSTEM INSTRUCTIONS
 You are a precision OCR agent specializing in bowling scoreboards.
@@ -651,7 +595,7 @@ async function processJob() {
       ? "live_session"
       : job.job_type === "recording_draft"
         ? "recording_draft"
-        : "standard";
+        : null;
   const playerName = job.player_name;
   const playerNames = parsePlayerNames(playerName);
   const playerLabel =
@@ -676,6 +620,17 @@ async function processJob() {
     await setRecordingDraftGameStatus(supabase, recordingDraftGameId, "processing", {
       last_error: null
     });
+  }
+  if (!jobType) {
+    await setJobError(
+      supabase,
+      job.id,
+      null,
+      null,
+      null,
+      "Legacy standard scoreboard analysis is no longer supported. Re-upload the scoreboard using the current app."
+    );
+    return { status: "error", jobId: job.id };
   }
   if (jobType !== "live_session" && !playerName) {
     await setJobError(supabase, job.id, null, null, recordingDraftGameId, "Job missing player name.");
@@ -747,9 +702,7 @@ async function processJob() {
     const result = await model.generateContent([
       {
         text:
-          jobType === "live_session" || jobType === "recording_draft"
-            ? buildLivePrompt()
-            : buildStandardPrompt(playerNames.length > 0 ? playerNames : playerName)
+          buildLivePrompt()
       },
       {
         inlineData: {

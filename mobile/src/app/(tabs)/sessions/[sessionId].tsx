@@ -240,6 +240,12 @@ export default function SessionDetailScreen() {
   const pendingOptimisticRoute = store.finalizeOperations.some((operation) =>
     operation.optimisticSessions.some((entry) => entry.sessionId === sessionId),
   );
+  const relevantSessionRouteIds = useMemo(
+    () =>
+      [sessionId, resolvedSessionId, group?.session?.id]
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0),
+    [group?.session?.id, resolvedSessionId, sessionId],
+  );
 
   const [editing, setEditing] = useState(false);
   const [deleteOptionsOpen, setDeleteOptionsOpen] = useState(false);
@@ -449,6 +455,25 @@ export default function SessionDetailScreen() {
     },
   });
 
+  useEffect(() => {
+    if (!pagerWidth) {
+      return;
+    }
+
+    if (lastAlignedPagerWidthRef.current === pagerWidth) {
+      return;
+    }
+
+    lastAlignedPagerWidthRef.current = pagerWidth;
+    requestAnimationFrame(() => {
+      pagerRef.current?.scrollTo({
+        x: activeTab === 'stats' ? pagerWidth : 0,
+        y: 0,
+        animated: false,
+      });
+    });
+  }, [activeTab, pagerWidth]);
+
   if (gamesQuery.isPending) {
     return <CenteredState title="Loading session..." loading />;
   }
@@ -543,25 +568,6 @@ export default function SessionDetailScreen() {
     });
   };
 
-  useEffect(() => {
-    if (!pagerWidth) {
-      return;
-    }
-
-    if (lastAlignedPagerWidthRef.current === pagerWidth) {
-      return;
-    }
-
-    lastAlignedPagerWidthRef.current = pagerWidth;
-    requestAnimationFrame(() => {
-      pagerRef.current?.scrollTo({
-        x: activeTab === 'stats' ? pagerWidth : 0,
-        y: 0,
-        animated: false,
-      });
-    });
-  }, [activeTab, pagerWidth]);
-
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <ScrollView
@@ -622,7 +628,7 @@ export default function SessionDetailScreen() {
         ) : hasPendingLocalSync ? (
           <InfoBanner text="This session is still syncing in the background. Session-level editing and deletion are disabled until it finishes." />
         ) : null}
-        <UploadsProcessingBanner />
+        <UploadsProcessingBanner sessionIds={relevantSessionRouteIds} />
 
         {group.description ? <Text style={styles.description}>{group.description}</Text> : null}
 

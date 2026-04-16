@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node ./scripts/clean-generated.js && expo start",
-    "start:dev-client": "node ./scripts/clean-generated.js && cross-env APP_VARIANT=development expo start --dev-client --tunnel",
+    "start:dev-client": "node ./scripts/clean-generated.js && cross-env APP_VARIANT=development expo start --dev-client --lan",
+    "start:dev-client:tunnel": "node ./scripts/clean-generated.js && cross-env APP_VARIANT=development expo start --dev-client --tunnel",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",

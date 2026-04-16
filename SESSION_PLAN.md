@@ -69,9 +69,9 @@ Goal: add “bowling sessions” to group games together, show sessions in the U
 ## Step 4 — Wire logging flow to selected session
 **Purpose:** Ensure new jobs/games attach to the selected session.
 
-- `/api/submit` accepts `sessionId`.
-- Analysis jobs store `session_id`.
-- Worker attaches `session_id` to newly created games.
+- `/api/recording-draft/upload` attaches captures to the right draft/session flow.
+- Analysis jobs store the relevant live-session or recording-draft ids.
+- Finalization attaches created games to the correct session.
 
 **Validation:**
 - Newly logged games show under the correct session.

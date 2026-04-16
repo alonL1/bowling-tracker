@@ -132,6 +132,15 @@ function getTargetSessionButtonLabel(targetSessionId: string | null) {
   return targetSessionId ? 'Change Existing Session' : 'Choose Existing Session';
 }
 
+function InlineLoadingCard({ label }: { label: string }) {
+  return (
+    <SurfaceCard style={styles.loadingCard}>
+      <BowlingBallSpinner size={24} holeColor={palette.surface} />
+      <Text style={styles.loadingCardText}>{label}</Text>
+    </SurfaceCard>
+  );
+}
+
 function buildDraftFlatRows(groups: RecordingDraftGroup[]) {
   let gameNumber = 0;
 
@@ -414,6 +423,9 @@ export default function UploadSessionForm({
   });
 
   const draft = draftQuery.data?.draft ?? null;
+  const isInitialDraftLoading = draftQuery.isPending && !draftQuery.data;
+  const isInitialSessionsLoading =
+    mode === 'add_existing_session' && sessionsQuery.isPending && !sessionsQuery.data;
   const groups = draft?.groups ?? [];
   const allGames = useMemo(() => groups.flatMap((group) => group.games), [groups]);
   const readyGames = useMemo(() => allGames.filter((game) => game.status === 'ready'), [allGames]);
@@ -471,12 +483,10 @@ export default function UploadSessionForm({
       return;
     }
 
-    setFinalizeName(draft.name?.trim() || '');
-    setFinalizeDescription(draft.description?.trim() || '');
     if (mode === 'add_existing_session') {
       setTargetSessionId(draft.targetSessionId ?? null);
     }
-  }, [draft?.id, draft?.name, draft?.description, draft?.targetSessionId, mode]);
+  }, [draft?.id, draft?.targetSessionId, mode]);
 
   useEffect(() => {
     if (!editingGroup) {
@@ -668,8 +678,8 @@ export default function UploadSessionForm({
 
   const deleteGameMutation = useMutation({
     mutationFn: async (draftGameId: string) => {
-      const deletedLocally = await deleteDraftCapture({ mode, visibleGameId: draftGameId });
-      if (deletedLocally) {
+      const localDeleteResult = await deleteDraftCapture({ mode, visibleGameId: draftGameId });
+      if (!localDeleteResult.remoteDeleteRequired) {
         return { deletedLocally: true };
       }
       const response = await deleteRecordingDraftGame(mode, draftGameId);
@@ -689,6 +699,10 @@ export default function UploadSessionForm({
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to delete draft game.');
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordingDraft(mode) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
+      ]);
     },
     onSettled: (_data, _error, draftGameId) => {
       setDeletingGameIds((current) => current.filter((entry) => entry !== draftGameId));
@@ -890,6 +904,8 @@ export default function UploadSessionForm({
       return;
     }
 
+    setFinalizeName(draft?.name ?? '');
+    setFinalizeDescription(draft?.description ?? '');
     setFinalizeOpen(true);
   };
 
@@ -975,7 +991,9 @@ export default function UploadSessionForm({
           text={draftQuery.error instanceof Error ? draftQuery.error.message : 'Failed to load draft.'}
         />
       ) : null}
-      <UploadsProcessingBanner />
+      <UploadsProcessingBanner sourceFlow={mode} />
+      {isInitialDraftLoading ? <InlineLoadingCard label="Loading draft..." /> : null}
+      {isInitialSessionsLoading ? <InlineLoadingCard label="Loading sessions..." /> : null}
 
       <SurfaceCard style={styles.sectionCard}>
         <Text style={styles.sectionBody}>{helperText}</Text>
@@ -1104,7 +1122,11 @@ export default function UploadSessionForm({
           dragItemOverflow
           ListHeaderComponent={topContent}
           ListEmptyComponent={
-            <EmptyStateCard title={emptyState.title} body={emptyState.body} />
+            isInitialDraftLoading ? (
+              <InlineLoadingCard label="Loading scoreboards..." />
+            ) : (
+              <EmptyStateCard title={emptyState.title} body={emptyState.body} />
+            )
           }
           renderItem={renderFlatRow}
           onScrollToIndexFailed={({ index, averageItemLength }) => {
@@ -1146,7 +1168,9 @@ export default function UploadSessionForm({
           showsVerticalScrollIndicator={false}>
           {topContent}
 
-          {groups.length > 0 ? (
+          {isInitialDraftLoading ? (
+            <InlineLoadingCard label="Loading scoreboards..." />
+          ) : groups.length > 0 ? (
             <View
               style={styles.groupList}
               onLayout={(event) => {
@@ -1456,6 +1480,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     gap: spacing.sm,
+  },
+  loadingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    minHeight: 72,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
+  },
+  loadingCardText: {
+    color: palette.muted,
+    fontSize: 15,
+    lineHeight: 20,
+    fontFamily: fontFamilySans,
   },
   progressTitle: {
     color: palette.text,

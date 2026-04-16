@@ -127,7 +127,10 @@ type UploadsProcessingContextValue = {
     description?: string;
     selectedPlayerKeys?: string[];
   }) => void;
-  deleteLiveCapture: (visibleGameId: string) => Promise<boolean>;
+  deleteLiveCapture: (visibleGameId: string) => Promise<{
+    removed: boolean;
+    remoteDeleteRequired: boolean;
+  }>;
   discardLiveSessionLocal: (payload: { liveSession: LiveSession | null }) => Promise<boolean>;
   finalizeLiveSessionLocal: (payload: {
     liveSession: LiveSession;
@@ -144,7 +147,10 @@ type UploadsProcessingContextValue = {
   deleteDraftCapture: (payload: {
     mode: RecordingDraftMode;
     visibleGameId: string;
-  }) => Promise<boolean>;
+  }) => Promise<{
+    removed: boolean;
+    remoteDeleteRequired: boolean;
+  }>;
   discardDraftLocal: (payload: {
     mode: RecordingDraftMode;
     draft: RecordingDraft | null;
@@ -1266,11 +1272,10 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
           (getLiveSessionVisibleId(entry) === visibleGameId || entry.id === visibleGameId),
       );
       if (!captureItem) {
-        return false;
-      }
-
-      if (captureItem.serverLiveGameId) {
-        return false;
+        return {
+          removed: false,
+          remoteDeleteRequired: true,
+        };
       }
 
       updateStore((current) => {
@@ -1288,7 +1293,10 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         return current;
       });
 
-      return true;
+      return {
+        removed: true,
+        remoteDeleteRequired: Boolean(captureItem.serverLiveGameId),
+      };
     },
     [updateStore],
   );
@@ -1616,11 +1624,10 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
           (getDraftVisibleId(entry) === payload.visibleGameId || entry.id === payload.visibleGameId),
       );
       if (!captureItem) {
-        return false;
-      }
-
-      if (captureItem.serverDraftGameId) {
-        return false;
+        return {
+          removed: false,
+          remoteDeleteRequired: true,
+        };
       }
 
       updateStore((current) => {
@@ -1636,7 +1643,10 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         return current;
       });
 
-      return true;
+      return {
+        removed: true,
+        remoteDeleteRequired: Boolean(captureItem.serverDraftGameId),
+      };
     },
     [updateStore],
   );

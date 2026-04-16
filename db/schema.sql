@@ -175,13 +175,13 @@ create table if not exists analysis_jobs (
   file_size_bytes bigint,
   timezone_offset_minutes integer,
   captured_at_hint timestamptz,
-  job_type text not null default 'standard',
+  job_type text not null,
   status text not null default 'queued',
   attempts integer not null default 0,
   last_error text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint analysis_jobs_job_type_check check (job_type in ('standard', 'live_session', 'recording_draft'))
+  constraint analysis_jobs_job_type_check check (job_type in ('live_session', 'recording_draft'))
 );
 
 create table if not exists mobile_sync_operations (

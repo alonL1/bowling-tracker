@@ -157,8 +157,6 @@ The worker:
 
 ## Main API routes
 
-- `POST /api/submit`
-- `GET /api/status?jobId=...`
 - `GET /api/game?gameId=...`
 - `GET /api/games`
 - `PATCH /api/game`
@@ -167,10 +165,15 @@ The worker:
 - `POST /api/friends/invite`
 - `GET /api/friends/leaderboard`
 - `POST /api/auth/claim-guest`
+- `GET /api/record-entry-status`
 - `GET/PATCH /api/live-session`
 - `POST /api/live-session/capture`
 - `PATCH/DELETE /api/live-session/game`
 - `POST /api/live-session/end`
+- `GET/DELETE /api/recording-draft`
+- `POST /api/recording-draft/upload`
+- `PATCH/DELETE /api/recording-draft/game`
+- `PATCH/DELETE /api/recording-draft/group`
 
 ## Supabase setup
 

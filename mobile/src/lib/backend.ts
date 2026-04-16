@@ -26,8 +26,6 @@ import type {
   RecordingDraftResponse,
   RecordEntryStatusResponse,
   SessionItem,
-  SessionMode,
-  StatusResponse,
   UserProfile,
 } from '@/lib/types';
 
@@ -381,28 +379,6 @@ export type SubmitStorageItem = {
   fileSizeBytes?: number;
   autoGroupIndex?: number;
 };
-
-export async function submitGames(payload: {
-  playerName: string;
-  timezoneOffsetMinutes: string;
-  sessionMode: SessionMode;
-  existingSessionId?: string;
-  storageItems: SubmitStorageItem[];
-}) {
-  return apiJson<{
-    jobs: Array<{ jobId: string; status: string; message: string }>;
-    sessionId?: string | null;
-    sessionIds?: string[];
-  }>('/api/submit', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function fetchStatus(jobId: string) {
-  return apiJson<StatusResponse>(`/api/status?jobId=${encodeURIComponent(jobId)}`);
-}
 
 export async function fetchLiveSession() {
   const payload = await apiJson<LiveSessionResponse>('/api/live-session');

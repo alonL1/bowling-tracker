@@ -6,29 +6,39 @@ import { Ionicons } from '@expo/vector-icons';
 import SurfaceCard from '@/components/surface-card';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import type { UploadsProcessingFlow } from '@/lib/uploads-processing-store';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
+import { getUploadsProcessingSummaryForScope } from '@/lib/uploads-processing-store';
 
 type UploadsProcessingBannerProps = {
   showPending?: boolean;
+  sourceFlow?: UploadsProcessingFlow;
+  sessionIds?: Array<string | null | undefined>;
 };
 
 export default function UploadsProcessingBanner({
   showPending = true,
+  sourceFlow,
+  sessionIds,
 }: UploadsProcessingBannerProps) {
   const router = useRouter();
-  const { summary } = useUploadsProcessing();
-  const visiblePendingCount = showPending ? summary.pendingCount : 0;
+  const { store, summary } = useUploadsProcessing();
+  const scopedSummary =
+    sourceFlow || sessionIds?.length
+      ? getUploadsProcessingSummaryForScope(store, { sourceFlow, sessionIds })
+      : summary;
+  const visiblePendingCount = showPending ? scopedSummary.pendingCount : 0;
 
-  if (visiblePendingCount === 0 && summary.failedCount === 0) {
+  if (visiblePendingCount === 0 && scopedSummary.failedCount === 0) {
     return null;
   }
 
   const detailText =
-    summary.failedCount > 0
-      ? `${summary.failedCount} item${summary.failedCount === 1 ? '' : 's'} need attention.`
+    scopedSummary.failedCount > 0
+      ? `${scopedSummary.failedCount} item${scopedSummary.failedCount === 1 ? '' : 's'} need attention.`
       : `${visiblePendingCount} item${visiblePendingCount === 1 ? '' : 's'} still syncing in the background.`;
   const helperText =
-    summary.failedCount > 0
+    scopedSummary.failedCount > 0
       ? 'Open Uploads & Processing to retry or delete failed scoreboards.'
       : 'Open Uploads & Processing to monitor background uploads and finalization.';
 

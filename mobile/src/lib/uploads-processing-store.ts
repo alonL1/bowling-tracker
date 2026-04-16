@@ -213,6 +213,11 @@ export type UploadsProcessingSummary = {
   finalizeCount: number;
 };
 
+export type UploadsProcessingSummaryScope = {
+  sourceFlow?: UploadsProcessingFlow;
+  sessionIds?: Array<string | null | undefined>;
+};
+
 export function createEmptyUploadsProcessingStore(): UploadsProcessingStore {
   return {
     version: STORE_VERSION,
@@ -464,6 +469,98 @@ function clearSessionLocalSync(session: SessionItem): SessionItem {
   return {
     ...session,
     local_sync: null,
+  };
+}
+
+function getScopedFinalizeOperations(
+  store: UploadsProcessingStore,
+  scope: UploadsProcessingSummaryScope,
+) {
+  const sessionIds = new Set(
+    (scope.sessionIds ?? []).filter(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    ),
+  );
+
+  const scopedAliasOperationIds = new Set(
+    store.sessionRouteAliases
+      .filter((entry) =>
+        sessionIds.size === 0
+          ? true
+          : sessionIds.has(entry.tempSessionId) || sessionIds.has(entry.resolvedSessionId),
+      )
+      .map((entry) => entry.finalizeOperationId)
+      .filter((value): value is string => Boolean(value)),
+  );
+
+  return store.finalizeOperations.filter((item) => {
+    if (scope.sourceFlow && item.sourceFlow !== scope.sourceFlow) {
+      return false;
+    }
+
+    if (sessionIds.size === 0) {
+      return true;
+    }
+
+    if (scopedAliasOperationIds.has(item.id)) {
+      return true;
+    }
+
+    if (item.serverSessionId && sessionIds.has(item.serverSessionId)) {
+      return true;
+    }
+
+    if (item.targetSessionId && sessionIds.has(item.targetSessionId)) {
+      return true;
+    }
+
+    return item.optimisticSessions.some(
+      (session) => Boolean(session.sessionId) && sessionIds.has(session.sessionId as string),
+    );
+  });
+}
+
+export function getUploadsProcessingSummaryForScope(
+  store: UploadsProcessingStore,
+  scope: UploadsProcessingSummaryScope,
+): UploadsProcessingSummary {
+  const scopedFinalizeOperations = getScopedFinalizeOperations(store, scope);
+  const scopedFinalizeOperationIds = new Set(scopedFinalizeOperations.map((item) => item.id));
+  const hasSessionScope = Boolean(scope.sessionIds?.some((value) => typeof value === 'string' && value.trim()));
+
+  const scopedCaptureItems = store.captureItems.filter((item) => {
+    if (scope.sourceFlow && item.sourceFlow !== scope.sourceFlow) {
+      return false;
+    }
+
+    if (!hasSessionScope) {
+      return true;
+    }
+
+    return Boolean(item.finalizeOperationId && scopedFinalizeOperationIds.has(item.finalizeOperationId));
+  });
+
+  const pendingCaptures = scopedCaptureItems.filter((item) =>
+    shouldCountCaptureItemAsPending(item),
+  ).length;
+  const failedCaptures = scopedCaptureItems.filter((item) => item.status === 'failed').length;
+  const pendingFinalizations = scopedFinalizeOperations.filter(
+    (item) =>
+      item.status !== 'synced' &&
+      item.status !== 'discarded' &&
+      item.status !== 'failed',
+  ).length;
+  const failedFinalizations = scopedFinalizeOperations.filter(
+    (item) => item.status === 'failed',
+  ).length;
+
+  return {
+    pendingCount: pendingCaptures + pendingFinalizations,
+    failedCount: failedCaptures + failedFinalizations,
+    captureCount: scopedCaptureItems.filter((item) =>
+      shouldDisplayCaptureItemInUploadsProcessing(item),
+    ).length,
+    finalizeCount: scopedFinalizeOperations.filter((item) => item.status !== 'discarded').length,
   };
 }
 

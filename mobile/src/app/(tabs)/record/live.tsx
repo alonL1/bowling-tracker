@@ -263,11 +263,11 @@ export default function LiveSessionScreen() {
 
   useEffect(() => {
     if (!liveSession) {
+      setDraftName('');
+      setDraftDescription('');
       return;
     }
-    setDraftName(liveSession.name?.trim() || '');
-    setDraftDescription(liveSession.description?.trim() || '');
-  }, [liveSession?.id, liveSession?.name, liveSession?.description]);
+  }, [liveSession?.id]);
 
   useEffect(() => {
     return () => {
@@ -519,8 +519,8 @@ export default function LiveSessionScreen() {
 
   const deleteGameMutation = useMutation({
     mutationFn: async (liveGameId: string) => {
-      const deletedLocally = await deleteLiveCapture(liveGameId);
-      if (deletedLocally) {
+      const localDeleteResult = await deleteLiveCapture(liveGameId);
+      if (!localDeleteResult.remoteDeleteRequired) {
         return { deletedLocally: true, deletedSession: false };
       }
       const response = await deleteLiveSessionGame(liveGameId);
@@ -546,6 +546,10 @@ export default function LiveSessionScreen() {
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to delete live game.');
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
+      ]);
     },
     onSettled: (_data, _error, liveGameId) => {
       setDeletingGameIds((current) => current.filter((entry) => entry !== liveGameId));
@@ -657,6 +661,8 @@ export default function LiveSessionScreen() {
     if (!canEndSession) {
       return;
     }
+    setDraftName(liveSession?.name ?? '');
+    setDraftDescription(liveSession?.description ?? '');
     setEndSessionOpen(true);
   };
 
@@ -819,7 +825,7 @@ export default function LiveSessionScreen() {
               }
             />
           ) : null}
-          <UploadsProcessingBanner showPending={false} />
+          <UploadsProcessingBanner sourceFlow="live_session" showPending={false} />
 
           <SurfaceCard style={styles.sectionCard}>
             <Text style={styles.sectionBody}>

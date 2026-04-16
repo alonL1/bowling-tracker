@@ -1,5 +1,3 @@
-export type JobStatus = 'queued' | 'processing' | 'logged' | 'error';
-
 export type SessionMode = 'auto' | 'new' | 'existing';
 export type AvatarKind = 'initials' | 'preset' | 'uploaded';
 export type AvatarPresetId =
@@ -91,14 +89,6 @@ export type GameListItem = {
 export type QueuedJob = {
   jobId: string;
   message: string;
-};
-
-export type StatusResponse = {
-  jobId: string;
-  status: JobStatus;
-  lastError?: string | null;
-  updatedAt?: string;
-  gameId?: string;
 };
 
 export type LeaderboardMetric =
