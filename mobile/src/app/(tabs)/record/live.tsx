@@ -51,6 +51,8 @@ import {
 import { navigateBackOrFallback } from '@/lib/navigation';
 import { formatTenths } from '@/lib/number-format';
 import { confirmAction } from '@/lib/confirm';
+import { localLogQueryKeys } from '@/hooks/use-logged-data';
+import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import type { LiveSessionGame, LiveSessionResponse, LiveSessionStats } from '@/lib/types';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
@@ -207,7 +209,7 @@ export default function LiveSessionScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
-  const { user, loading: authLoading } = useAuth();
+  const { user, session, loading: authLoading } = useAuth();
   const {
     deleteLiveCapture,
     discardLiveSessionLocal,
@@ -617,9 +619,18 @@ export default function LiveSessionScreen() {
     },
     onSuccess: async (payload) => {
       setError('');
+      if (user) {
+        await syncLocalLogsForUser(user.id, session?.access_token ?? null);
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+        user
+          ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.games(user.id) })
+          : Promise.resolve(),
+        user
+          ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.gameRoot(user.id) })
+          : Promise.resolve(),
         queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
       ]);

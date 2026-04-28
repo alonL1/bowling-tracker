@@ -12,10 +12,13 @@ import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
 import StackBadge from '@/components/stack-badge';
 import { deleteGame, queryKeys } from '@/lib/backend';
 import { confirmAction } from '@/lib/confirm';
+import { localLogQueryKeys } from '@/hooks/use-logged-data';
+import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { getResolvedPlayersForGame } from '@/lib/live-session';
 import type { GameListItem } from '@/lib/types';
+import { useAuth } from '@/providers/auth-provider';
 
 type SessionGameCardProps = {
   game: GameListItem;
@@ -24,6 +27,7 @@ type SessionGameCardProps = {
   onRequestMove: (gameId: string) => void;
   onScoreboardGestureStart?: () => void;
   onScoreboardGestureEnd?: () => void;
+  actionsLocked?: boolean;
 };
 
 function getCollapsedBadgeLines(title: string) {
@@ -42,8 +46,10 @@ export default function SessionGameCard({
   onRequestMove,
   onScoreboardGestureStart,
   onScoreboardGestureEnd,
+  actionsLocked = false,
 }: SessionGameCardProps) {
   const queryClient = useQueryClient();
+  const { user, session } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -52,9 +58,18 @@ export default function SessionGameCard({
     mutationFn: async () => deleteGame(game.id),
     onSuccess: async () => {
       setDeleteError('');
+      if (user) {
+        await syncLocalLogsForUser(user.id, session?.access_token ?? null);
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.game(game.id) }),
+        user
+          ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.games(user.id) })
+          : Promise.resolve(),
+        user
+          ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.game(user.id, game.id) })
+          : Promise.resolve(),
       ]);
     },
     onError: (nextError) => {
@@ -66,7 +81,7 @@ export default function SessionGameCard({
   const badgeLines = useMemo(() => getCollapsedBadgeLines(title), [title]);
   const isReadOnlyUntilSynced = Boolean(game.local_sync?.isReadOnlyUntilSynced);
   const isFailedLocalSync = game.local_sync?.syncState === 'failed';
-  const canEditGame = !isReadOnlyUntilSynced || isFailedLocalSync;
+  const canEditGame = !actionsLocked && (!isReadOnlyUntilSynced || isFailedLocalSync);
   const syncBadgeLabel = game.local_sync
     ? isFailedLocalSync
       ? 'Needs attention'
@@ -98,7 +113,9 @@ export default function SessionGameCard({
         <View style={styles.row}>
           <Pressable
             onPress={() => setExpanded((current) => !current)}
-            onLongPress={isReadOnlyUntilSynced ? undefined : () => onRequestMove(game.id)}
+            onLongPress={
+              actionsLocked || isReadOnlyUntilSynced ? undefined : () => onRequestMove(game.id)
+            }
             delayLongPress={240}
             style={({ pressed }) => [styles.summaryPressable, pressed && styles.pressed]}>
             <View style={styles.summary}>
@@ -128,7 +145,7 @@ export default function SessionGameCard({
                 />
               </>
             ) : null}
-            {!isReadOnlyUntilSynced ? (
+            {!actionsLocked && !isReadOnlyUntilSynced ? (
               <>
                 <IconAction
                   accessibilityLabel="Delete game"

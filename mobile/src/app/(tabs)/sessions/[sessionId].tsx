@@ -3,7 +3,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -41,12 +41,12 @@ import { formatTenths } from '@/lib/number-format';
 import {
   createSession,
   deleteSession,
-  fetchGames,
   moveGameToSession,
   queryKeys,
   updateSession,
 } from '@/lib/backend';
 import { buildSessionGroups } from '@/lib/bowling';
+import { useLoggedGames } from '@/hooks/use-logged-data';
 import { navigateBackOrFallback } from '@/lib/navigation';
 import { getResolvedSessionRouteId } from '@/lib/uploads-processing-store';
 import { palette, radii, spacing } from '@/constants/palette';
@@ -221,14 +221,11 @@ export default function SessionDetailScreen() {
   const queryClient = useQueryClient();
   const { store } = useUploadsProcessing();
 
-  const gamesQuery = useQuery({
-    queryKey: queryKeys.games,
-    queryFn: fetchGames,
-  });
+  const gamesQuery = useLoggedGames();
 
   const grouping = useMemo(
-    () => buildSessionGroups(gamesQuery.data?.games ?? []),
-    [gamesQuery.data?.games],
+    () => buildSessionGroups(gamesQuery.games),
+    [gamesQuery.games],
   );
   const pendingOptimisticGroup = grouping.groups.find((entry) => entry.key === sessionId);
   const resolvedSessionId = getResolvedSessionRouteId(store, sessionId);
@@ -346,11 +343,8 @@ export default function SessionDetailScreen() {
       return;
     }
 
-    void Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.games }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-    ]);
-  }, [group, queryClient, resolvedSessionId]);
+    void gamesQuery.refetch();
+  }, [gamesQuery.refetch, group, resolvedSessionId]);
 
   const leaveSessionDetail = () => {
     if (Platform.OS === 'web') {
@@ -358,6 +352,14 @@ export default function SessionDetailScreen() {
       return;
     }
     navigateBackOrFallback(router, '/(tabs)/sessions', navigation);
+  };
+
+  const refreshLoggedData = async () => {
+    await Promise.all([
+      gamesQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+    ]);
   };
 
   const updateMutation = useMutation({
@@ -381,10 +383,7 @@ export default function SessionDetailScreen() {
     onSuccess: async () => {
       setEditing(false);
       setError('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.games }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-      ]);
+      await refreshLoggedData();
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update session.');
@@ -408,10 +407,7 @@ export default function SessionDetailScreen() {
     onSuccess: async () => {
       setMoveGameId(null);
       setError('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.games }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-      ]);
+      await refreshLoggedData();
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to move game.');
@@ -441,10 +437,7 @@ export default function SessionDetailScreen() {
     onSuccess: async () => {
       setMoveDeletingSession(false);
       setError('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.games }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-      ]);
+      await refreshLoggedData();
       leaveSessionDetail();
     },
     onError: (nextError) => {
@@ -507,7 +500,7 @@ export default function SessionDetailScreen() {
     group.session?.local_sync?.syncState === 'syncing' ||
       group.games.some((game) => game.local_sync?.syncState === 'syncing'),
   );
-  const sessionActionsLocked = readOnlyUntilSynced;
+  const sessionActionsLocked = readOnlyUntilSynced || Boolean(gamesQuery.syncError);
   const firstLocalSyncError =
     group.session?.local_sync?.lastSyncError ||
     group.games.find((game) => game.local_sync?.syncState === 'failed')?.local_sync?.lastSyncError ||
@@ -616,6 +609,10 @@ export default function SessionDetailScreen() {
         </View>
 
         {error ? <InfoBanner tone="error" text={error} /> : null}
+        {gamesQuery.statusLabel ? <InfoBanner text={gamesQuery.statusLabel} /> : null}
+        {gamesQuery.needsOnlineFirst ? (
+          <InfoBanner text="Open PinPoint online once to save your logs on this device." />
+        ) : null}
         {hasFailedLocalSync ? (
           <InfoBanner
             tone="error"
@@ -705,6 +702,7 @@ export default function SessionDetailScreen() {
                     onRequestMove={setMoveGameId}
                     onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
                     onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
+                    actionsLocked={sessionActionsLocked}
                   />
                 ))}
               </View>
@@ -915,10 +913,7 @@ export default function SessionDetailScreen() {
                   try {
                     setDeleteOptionsOpen(false);
                     await deleteSession(group.sessionId as string, 'delete_games');
-                    await Promise.all([
-                      queryClient.invalidateQueries({ queryKey: queryKeys.games }),
-                      queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
-                    ]);
+                    await refreshLoggedData();
                     leaveSessionDetail();
                   } catch (nextError) {
                     setError(nextError instanceof Error ? nextError.message : 'Failed to delete session.');

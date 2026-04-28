@@ -8,6 +8,7 @@ import PageBackButton from '@/components/page-back-button';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { deleteOwnAccount } from '@/lib/backend';
+import { clearLocalLogsForUser } from '@/lib/local-logs-db';
 import { PUBLIC_WEBSITE_URL } from '@/lib/urls';
 import { useAuth } from '@/providers/auth-provider';
 import { useRouter } from 'expo-router';
@@ -41,7 +42,7 @@ function Section({ title, children }: SectionProps) {
 
 export default function DeleteAccountScreen() {
   const router = useRouter();
-  const { isGuest, signOutToGuestSession } = useAuth();
+  const { user, isGuest, signOutToGuestSession } = useAuth();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -67,6 +68,9 @@ export default function DeleteAccountScreen() {
 
     try {
       await deleteOwnAccount();
+      if (user) {
+        await clearLocalLogsForUser(user.id);
+      }
       await signOutToGuestSession();
       router.replace('/welcome');
     } catch (nextError) {

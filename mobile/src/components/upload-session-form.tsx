@@ -48,6 +48,8 @@ import {
   canonicalizePlayerLabel,
   getFirstSelectionValidationError,
 } from '@/lib/live-session';
+import { localLogQueryKeys } from '@/hooks/use-logged-data';
+import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { navigateBackOrFallback } from '@/lib/navigation';
 import { supabase } from '@/lib/supabase';
 import type {
@@ -363,7 +365,7 @@ export default function UploadSessionForm({
   const router = useRouter();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const {
     clearDraftLocalState,
     deleteDraftCapture,
@@ -833,10 +835,19 @@ export default function UploadSessionForm({
       }),
     onSuccess: async () => {
       setError('');
+      if (user) {
+        await syncLocalLogsForUser(user.id, session?.access_token ?? null);
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+        user
+          ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.games(user.id) })
+          : Promise.resolve(),
+        user
+          ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.gameRoot(user.id) })
+          : Promise.resolve(),
       ]);
       navigation.dispatch(StackActions.popToTop());
       router.replace('/(tabs)/sessions' as never);

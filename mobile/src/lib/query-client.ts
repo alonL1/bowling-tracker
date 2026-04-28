@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import { QueryClient } from '@tanstack/react-query';
+import { Platform } from 'react-native';
 
 const DEFAULT_STALE_TIME = 60_000;
 const DEFAULT_GC_TIME = 30 * 60_000;
@@ -10,7 +11,11 @@ const STABLE_STALE_TIME = 5 * 60_000;
 const STABLE_GC_TIME = 60 * 60_000;
 const QUERY_PERSIST_MAX_AGE = 24 * 60 * 60_000;
 export const QUERY_CACHE_OWNER_STORAGE_KEY = 'pinpoint-query-cache-owner';
-const PERSISTED_QUERY_ROOT_KEYS = new Set(['games', 'game', 'sessions', 'leaderboard']);
+const PERSISTED_QUERY_ROOT_KEYS = new Set(
+  Platform.OS === 'web'
+    ? ['games', 'game', 'sessions', 'leaderboard']
+    : ['leaderboard'],
+);
 
 export const queryClient = new QueryClient({
   defaultOptions: {

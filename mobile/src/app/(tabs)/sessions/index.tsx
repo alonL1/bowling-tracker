@@ -1,7 +1,6 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import {
   Modal,
   Pressable,
@@ -17,11 +16,10 @@ import EmptyStateCard from '@/components/empty-state-card';
 import InfoBanner from '@/components/info-banner';
 import ScreenShell from '@/components/screen-shell';
 import SessionCard, { type SessionMetaSegment } from '@/components/session-card';
-import SurfaceCard from '@/components/surface-card';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
-import { fetchGames, queryKeys } from '@/lib/backend';
 import { buildSessionGroups, type SessionGroup } from '@/lib/bowling';
+import { useLoggedGames } from '@/hooks/use-logged-data';
 import { buildLoggedSessionStats } from '@/lib/live-session';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -153,13 +151,10 @@ export default function SessionsScreen() {
   } | null>(null);
   const sortButtonRef = useRef<View | null>(null);
 
-  const gamesQuery = useQuery({
-    queryKey: queryKeys.games,
-    queryFn: fetchGames,
-  });
+  const gamesQuery = useLoggedGames();
 
   const sessionSortEntries = useMemo(() => {
-    const groups = buildSessionGroups(gamesQuery.data?.games ?? []).groups;
+    const groups = buildSessionGroups(gamesQuery.games).groups;
     const normalSessions = groups.filter((group) => !group.isSessionless);
     const sessionlessGroups = groups.filter((group) => group.isSessionless);
 
@@ -235,7 +230,7 @@ export default function SessionsScreen() {
         metaSegments: buildMetaSegments(session, sortOption, '—', '—'),
       })),
     ];
-  }, [gamesQuery.data?.games, sortOption]);
+  }, [gamesQuery.games, sortOption]);
 
   const sortMenuLeft = useMemo(() => {
     if (!sortButtonAnchor) {
@@ -303,7 +298,13 @@ export default function SessionsScreen() {
           <InfoBanner text="You are browsing in a guest session. Sign in to keep these logs on your account." />
         ) : null}
 
-        {gamesQuery.error ? (
+        {gamesQuery.statusLabel ? <InfoBanner text={gamesQuery.statusLabel} /> : null}
+
+        {gamesQuery.needsOnlineFirst ? (
+          <InfoBanner text="Open PinPoint online once to save your logs on this device." />
+        ) : null}
+
+        {gamesQuery.error && !gamesQuery.statusLabel ? (
           <InfoBanner
             tone="error"
             text={gamesQuery.error instanceof Error ? gamesQuery.error.message : 'Failed to load sessions.'}

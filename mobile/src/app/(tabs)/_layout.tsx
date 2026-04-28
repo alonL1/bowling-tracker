@@ -2,6 +2,7 @@ import { Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-ic
 import { Asset } from 'expo-asset';
 import { Tabs } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
 import AccountLoadingState from '@/components/account-loading-state';
@@ -9,10 +10,11 @@ import MobileTabBar from '@/components/mobile-tab-bar';
 import SafeRedirect from '@/components/safe-redirect';
 import { palette } from '@/constants/palette';
 import { fetchGames, fetchLeaderboard, fetchRecordEntryStatus, queryKeys } from '@/lib/backend';
+import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { useAuth } from '@/providers/auth-provider';
 
 export default function TabsLayout() {
-  const { user, loading, isGuest } = useAuth();
+  const { user, session, loading, isGuest } = useAuth();
   const queryClient = useQueryClient();
   const warmedUserIdRef = useRef<string | null>(null);
 
@@ -28,11 +30,16 @@ export default function TabsLayout() {
 
     warmedUserIdRef.current = user.id;
 
+    const logsWarmup =
+      Platform.OS === 'web'
+        ? queryClient.prefetchQuery({
+            queryKey: queryKeys.games,
+            queryFn: fetchGames,
+          })
+        : syncLocalLogsForUser(user.id, session?.access_token ?? null);
+
     void Promise.allSettled([
-      queryClient.prefetchQuery({
-        queryKey: queryKeys.games,
-        queryFn: fetchGames,
-      }),
+      logsWarmup,
       queryClient.prefetchQuery({
         queryKey: queryKeys.recordEntryStatus,
         queryFn: fetchRecordEntryStatus,
@@ -51,7 +58,7 @@ export default function TabsLayout() {
             }),
           ]),
     ]);
-  }, [isGuest, queryClient, user]);
+  }, [isGuest, queryClient, session?.access_token, user]);
 
   if (loading) {
     return <AccountLoadingState />;

@@ -9,6 +9,7 @@ export type DeletionCounts = {
   drafts: number;
   games: number;
   sessions: number;
+  mobileSyncTombstones: number;
   submitLogs: number;
   chatRequestLogs: number;
   storageObjects: number;
@@ -234,6 +235,15 @@ export async function purgeUserData(supabase: SupabaseClient, userId: string) {
     throw new Error(chatRequestLogsError.message || "Failed to delete chat request logs.");
   }
 
+  const { count: mobileSyncTombstones, error: mobileSyncTombstonesError } = await supabase
+    .from("mobile_sync_tombstones")
+    .delete({ count: "exact" })
+    .eq("user_id", userId);
+
+  if (mobileSyncTombstonesError) {
+    throw new Error(mobileSyncTombstonesError.message || "Failed to delete mobile sync tombstones.");
+  }
+
   if (storageKeys.length > 0) {
     const bucket = process.env.SUPABASE_STORAGE_BUCKET || "scoreboards-temp";
     const { error: storageError } = await supabase.storage.from(bucket).remove(storageKeys);
@@ -251,6 +261,7 @@ export async function purgeUserData(supabase: SupabaseClient, userId: string) {
     drafts: drafts ?? 0,
     games: games ?? 0,
     sessions: sessions ?? 0,
+    mobileSyncTombstones: mobileSyncTombstones ?? 0,
     submitLogs: submitLogs ?? 0,
     chatRequestLogs: chatRequestLogs ?? 0,
     storageObjects: storageKeys.length,

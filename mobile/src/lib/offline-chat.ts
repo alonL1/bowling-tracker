@@ -1,11 +1,8 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import { sortGamesByPlayedAtAsc } from '@/lib/bowling';
+import { loadLocalGames } from '@/lib/local-logs-db';
 import { formatRoundedHundredths } from '@/lib/number-format';
 import { getExistingSessionSnapshot } from '@/lib/supabase';
 import type { GameListItem } from '@/lib/types';
-
-const OFFLINE_CHAT_GAMES_STORAGE_KEY_PREFIX = 'pinpoint-offline-chat-games-v2:';
 
 export type OfflineChatResult = {
   answer: string;
@@ -122,56 +119,33 @@ function buildHandledOfflineAnswer(question: string, games: GameListItem[]) {
   return null;
 }
 
-async function getOfflineGamesStorageKey() {
+async function getCurrentOfflineUserId() {
   try {
     const snapshot = await getExistingSessionSnapshot();
-    const userId = snapshot.user?.id;
-    return userId ? `${OFFLINE_CHAT_GAMES_STORAGE_KEY_PREFIX}${userId}` : null;
+    return snapshot.user?.id ?? null;
   } catch {
     return null;
   }
 }
 
-export async function cacheOfflineChatGames(games: GameListItem[]) {
-  try {
-    const storageKey = await getOfflineGamesStorageKey();
-    if (!storageKey) {
-      return;
-    }
-
-    await AsyncStorage.setItem(storageKey, JSON.stringify(games));
-  } catch {
-    // Ignore cache write failures; chat should still work online.
-  }
+export async function cacheOfflineChatGames(_games: GameListItem[]) {
+  // Offline chat now reads the durable mobile logs store instead of keeping a
+  // second AsyncStorage copy of games.
 }
 
 export async function clearOfflineChatGames() {
-  try {
-    const storageKey = await getOfflineGamesStorageKey();
-    if (!storageKey) {
-      return;
-    }
-
-    await AsyncStorage.removeItem(storageKey);
-  } catch {
-    // Ignore cache clear failures; deletion should still succeed server-side.
-  }
+  // Kept for older call sites. Account/data deletion clears the SQLite logs
+  // store directly.
 }
 
 export async function loadOfflineChatGames() {
   try {
-    const storageKey = await getOfflineGamesStorageKey();
-    if (!storageKey) {
+    const userId = await getCurrentOfflineUserId();
+    if (!userId) {
       return [];
     }
 
-    const raw = await AsyncStorage.getItem(storageKey);
-    if (!raw) {
-      return [];
-    }
-
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as GameListItem[]) : [];
+    return loadLocalGames(userId);
   } catch {
     return [];
   }

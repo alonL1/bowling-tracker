@@ -22,6 +22,7 @@ import type {
   LiveSessionCaptureResponse,
   LiveSessionEndResponse,
   LiveSessionResponse,
+  MobileLogsSyncResponse,
   RecordingDraftMode,
   RecordingDraftResponse,
   RecordEntryStatusResponse,
@@ -266,6 +267,13 @@ export async function fetchLeaderboard() {
 
 export async function fetchOwnProfile(accessToken?: string | null) {
   return apiJson<{ profile: UserProfile }>('/api/account/profile', {
+    accessToken,
+  });
+}
+
+export async function fetchMobileLogsSync(since?: string | null, accessToken?: string | null) {
+  const query = since ? `?since=${encodeURIComponent(since)}` : '';
+  return apiJson<MobileLogsSyncResponse>(`/api/mobile-sync/logs${query}`, {
     accessToken,
   });
 }

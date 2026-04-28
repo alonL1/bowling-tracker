@@ -1,7 +1,7 @@
 import { useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Pressable,
   StyleSheet,
@@ -15,8 +15,6 @@ import DetailShell from '@/components/detail-shell';
 import FrameGrid from '@/components/frame-grid';
 import {
   deleteGame,
-  fetchGameById,
-  fetchGames,
   queryKeys,
   updateGame,
 } from '@/lib/backend';
@@ -27,6 +25,7 @@ import {
   toLocalDateInputValue,
   toLocalTimeInputValue,
 } from '@/lib/date-time';
+import { useLoggedGame, useLoggedGames } from '@/hooks/use-logged-data';
 import { navigateBackOrFallback } from '@/lib/navigation';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
@@ -120,45 +119,42 @@ export default function GameDetailScreen() {
   const [playedOnTime, setPlayedOnTime] = useState('');
   const [error, setError] = useState('');
 
-  const gameQuery = useQuery({
-    queryKey: queryKeys.game(gameId),
-    queryFn: () => fetchGameById(gameId),
-    enabled: Boolean(gameId),
-  });
-  const gamesQuery = useQuery({
-    queryKey: queryKeys.games,
-    queryFn: fetchGames,
-  });
+  const gameQuery = useLoggedGame(gameId);
+  const gamesQuery = useLoggedGames();
 
   useEffect(() => {
-    if (gameQuery.data?.game) {
-      setFrames(createEditableFrames(gameQuery.data.game));
-      const dateSource = gameQuery.data.game.played_at || gameQuery.data.game.created_at;
+    if (gameQuery.game) {
+      setFrames(createEditableFrames(gameQuery.game));
+      const dateSource = gameQuery.game.played_at || gameQuery.game.created_at;
       setPlayedOnDate(toLocalDateInputValue(dateSource));
       setPlayedOnTime(toLocalTimeInputValue(dateSource));
     }
-  }, [gameQuery.data?.game]);
+  }, [gameQuery.game]);
 
   const title = useMemo(() => {
-    const feedGames = gamesQuery.data?.games ?? [];
-    const grouping = buildSessionGroups(feedGames);
-    return grouping.gameTitleMap.get(gameId) || gameQuery.data?.game.game_name?.trim() || 'Game';
-  }, [gameId, gameQuery.data?.game.game_name, gamesQuery.data?.games]);
+    const grouping = buildSessionGroups(gamesQuery.games);
+    return grouping.gameTitleMap.get(gameId) || gameQuery.game?.game_name?.trim() || 'Game';
+  }, [gameId, gameQuery.game?.game_name, gamesQuery.games]);
 
   const previewGame = useMemo(() => {
-    if (!gameQuery.data?.game) {
+    if (!gameQuery.game) {
       return null;
     }
-    return buildPreviewGame(gameQuery.data.game, frames);
-  }, [frames, gameQuery.data?.game]);
+    return buildPreviewGame(gameQuery.game, frames);
+  }, [frames, gameQuery.game]);
+
+  const readOnlyOffline = Boolean(gameQuery.syncError);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!gameQuery.data?.game) {
+      if (readOnlyOffline) {
+        throw new Error('Connect to edit this log.');
+      }
+      if (!gameQuery.game) {
         throw new Error('Game was not found.');
       }
       return updateGame({
-        gameId: gameQuery.data.game.id,
+        gameId: gameQuery.game.id,
         playedAt: combineLocalDateAndTime(playedOnDate, playedOnTime),
         frames: frames.map((frame) => ({
           frameId: frame.frameId ?? null,
@@ -174,6 +170,8 @@ export default function GameDetailScreen() {
     onSuccess: async () => {
       setError('');
       await Promise.all([
+        gamesQuery.refetch(),
+        gameQuery.refetch(),
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.game(gameId) }),
       ]);
@@ -187,7 +185,7 @@ export default function GameDetailScreen() {
     return <CenteredState title="Loading game..." loading />;
   }
 
-  const game = gameQuery.data?.game;
+  const game = gameQuery.game;
   if (!game) {
     return (
       <DetailShell title="Game not found" subtitle="This game no longer exists.">
@@ -206,8 +204,14 @@ export default function GameDetailScreen() {
       destructive: true,
       onConfirm: async () => {
         try {
+          if (readOnlyOffline) {
+            throw new Error('Connect to delete this log.');
+          }
           await deleteGame(game.id);
-          await queryClient.invalidateQueries({ queryKey: queryKeys.games });
+          await Promise.all([
+            gamesQuery.refetch(),
+            queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+          ]);
           navigateBackOrFallback(router, '/(tabs)/sessions', navigation);
         } catch (nextError) {
           setError(nextError instanceof Error ? nextError.message : 'Failed to delete game.');
@@ -221,13 +225,25 @@ export default function GameDetailScreen() {
       title={title}
       subtitle={`${typeof game.total_score === 'number' ? game.total_score : '—'} | ${formatGameMeta(game)}`}
       trailing={
-        <Pressable onPress={handleDelete} style={({ pressed }) => [styles.inlineButton, pressed && styles.pressed]}>
+        <Pressable
+          onPress={readOnlyOffline ? undefined : handleDelete}
+          disabled={readOnlyOffline}
+          style={({ pressed }) => [
+            styles.inlineButton,
+            readOnlyOffline && styles.disabled,
+            pressed && styles.pressed,
+          ]}>
           <Text style={styles.inlineButtonText}>Delete</Text>
         </Pressable>
       }>
       {error ? (
         <View style={styles.messageCard}>
           <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+      {readOnlyOffline ? (
+        <View style={styles.messageCard}>
+          <Text style={styles.messageText}>Offline · showing saved game. Connect to edit this log.</Text>
         </View>
       ) : null}
 
@@ -307,10 +323,10 @@ export default function GameDetailScreen() {
 
       <Pressable
         onPress={() => saveMutation.mutate()}
-        disabled={saveMutation.isPending}
+        disabled={saveMutation.isPending || readOnlyOffline}
         style={({ pressed }) => [
           styles.primaryButton,
-          saveMutation.isPending && styles.disabled,
+          (saveMutation.isPending || readOnlyOffline) && styles.disabled,
           pressed && styles.pressed,
         ]}>
         <Text style={styles.primaryButtonText}>{saveMutation.isPending ? 'Saving...' : 'Save game'}</Text>

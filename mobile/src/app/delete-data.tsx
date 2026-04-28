@@ -8,6 +8,7 @@ import PageBackButton from '@/components/page-back-button';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { deleteOwnData } from '@/lib/backend';
+import { clearLocalLogsForUser } from '@/lib/local-logs-db';
 import { clearOfflineChatGames } from '@/lib/offline-chat';
 import { queryClient } from '@/lib/query-client';
 import { PUBLIC_WEBSITE_URL } from '@/lib/urls';
@@ -42,7 +43,7 @@ function Section({ title, children }: SectionProps) {
 
 export default function DeleteDataScreen() {
   const router = useRouter();
-  const { isGuest } = useAuth();
+  const { user, isGuest } = useAuth();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -71,6 +72,9 @@ export default function DeleteDataScreen() {
 
     try {
       await deleteOwnData();
+      if (user) {
+        await clearLocalLogsForUser(user.id);
+      }
       await clearOfflineChatGames();
       queryClient.clear();
       setConfirming(false);

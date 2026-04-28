@@ -24,6 +24,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const isDevelopment = appVariant === 'development';
   const plugins: ExpoConfig['plugins'] = [
     'expo-router',
+    'expo-sqlite',
     'expo-apple-authentication',
     'expo-web-browser',
     [

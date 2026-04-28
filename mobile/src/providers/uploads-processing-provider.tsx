@@ -29,6 +29,8 @@ import {
   uploadToRecordingDraft,
 } from '@/lib/backend';
 import { apiJson } from '@/lib/api';
+import { localLogQueryKeys } from '@/hooks/use-logged-data';
+import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { supabase } from '@/lib/supabase';
 import {
   buildAutoGroupMap,
@@ -387,7 +389,7 @@ function buildResolvedSessionRouteAliases(
 
 export function UploadsProcessingProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const [store, setStore] = useState<UploadsProcessingStore>(createEmptyUploadsProcessingStore());
   const [ready, setReady] = useState(false);
   const storeRef = useRef(store);
@@ -457,6 +459,12 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 
     void Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+      user
+        ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.games(user.id) })
+        : Promise.resolve(),
+      user
+        ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.gameRoot(user.id) })
+        : Promise.resolve(),
       queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
       queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
       queryClient.invalidateQueries({ queryKey: queryKeys.recordingDraft('upload_session') }),
@@ -464,7 +472,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
       queryClient.invalidateQueries({ queryKey: queryKeys.recordingDraft('add_existing_session') }),
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
     ]);
-  }, [queryClient]);
+  }, [queryClient, user]);
 
   const persistAndSetStore = useCallback(
     (nextStore: UploadsProcessingStore) => {
@@ -935,8 +943,17 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 
         return current;
       });
+      if (user) {
+        void syncLocalLogsForUser(user.id, session?.access_token ?? null).finally(() => {
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: localLogQueryKeys.games(user.id) }),
+            queryClient.invalidateQueries({ queryKey: localLogQueryKeys.gameRoot(user.id) }),
+            queryClient.invalidateQueries({ queryKey: localLogQueryKeys.meta(user.id) }),
+          ]);
+        });
+      }
     },
-    [updateStore],
+    [queryClient, session?.access_token, updateStore, user],
   );
 
   const processFinalizeOperation = useCallback(

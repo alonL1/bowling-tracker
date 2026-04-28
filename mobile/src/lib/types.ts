@@ -142,6 +142,16 @@ export type UserProfile = {
   usernameSuggestion: string | null;
 };
 
+export type MobileLogsSyncResponse = {
+  serverTime: string;
+  profile: UserProfile | null;
+  sessions: Array<SessionItem & { updated_at?: string | null }>;
+  games: Array<GameDetail & { session?: SessionItem | null; updated_at?: string | null }>;
+  deletedSessions: string[];
+  deletedGames: string[];
+  nextCursor: string;
+};
+
 export type InviteLinkResponse = {
   token: string;
   inviteUrl: string;

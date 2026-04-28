@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchOwnProfile } from '@/lib/backend';
+import { loadLocalProfile, saveLocalProfile } from '@/lib/local-logs-db';
 import {
   clearTutorialSeen,
   getTutorialIdentity,
@@ -52,7 +53,6 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-const PROFILE_CACHE_KEY_PREFIX = 'pinpoint-profile-cache:';
 
 function getAuthIdentityKey(user: User | null) {
   if (!user) {
@@ -67,41 +67,6 @@ function isMissingProfileRouteError(error: unknown) {
     error instanceof Error &&
     error.message.includes('non-JSON response (404)')
   );
-}
-
-function getProfileCacheKey(userId: string) {
-  return `${PROFILE_CACHE_KEY_PREFIX}${userId}`;
-}
-
-async function loadCachedProfile(userId: string) {
-  try {
-    const raw = await AsyncStorage.getItem(getProfileCacheKey(userId));
-    if (!raw) {
-      return null;
-    }
-
-    const cachedProfile = JSON.parse(raw) as UserProfile;
-    return cachedProfile.userId === userId ? cachedProfile : null;
-  } catch (error) {
-    console.error('Failed to load cached account profile.', error);
-    return null;
-  }
-}
-
-async function saveCachedProfile(profile: UserProfile) {
-  try {
-    await AsyncStorage.setItem(getProfileCacheKey(profile.userId), JSON.stringify(profile));
-  } catch (error) {
-    console.error('Failed to cache account profile.', error);
-  }
-}
-
-async function removeCachedProfile(userId: string) {
-  try {
-    await AsyncStorage.removeItem(getProfileCacheKey(userId));
-  } catch (error) {
-    console.error('Failed to remove cached account profile.', error);
-  }
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -134,9 +99,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const currentOwner = await AsyncStorage.getItem(QUERY_CACHE_OWNER_STORAGE_KEY);
         if (currentOwner !== nextUserId) {
           await resetQueryCache();
-          if (currentOwner) {
-            await removeCachedProfile(currentOwner);
-          }
         }
 
         if (nextUserId) {
@@ -164,7 +126,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const payload = await fetchOwnProfile(accessToken);
-        void saveCachedProfile(payload.profile);
+        void saveLocalProfile(payload.profile);
         if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
           setProfile(payload.profile);
           setProfileUnavailable(false);
@@ -173,7 +135,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         if (isMissingProfileRouteError(error)) {
           const fallbackProfile = buildLegacyProfileFallback(nextUser);
-          void saveCachedProfile(fallbackProfile);
+          void saveLocalProfile(fallbackProfile);
           console.warn(
             'Account profile route is unavailable on the current backend. Using legacy fallback profile until the backend is updated.',
           );
@@ -185,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         console.error('Failed to load account profile.', error);
-        const cachedProfile = await loadCachedProfile(nextUser.id);
+        const cachedProfile = await loadLocalProfile(nextUser.id);
         if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
           setProfile(cachedProfile);
           setProfileUnavailable(!cachedProfile);
@@ -316,14 +278,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         try {
           const payload = await fetchOwnProfile(session?.access_token ?? null);
-          void saveCachedProfile(payload.profile);
+          void saveLocalProfile(payload.profile);
           setProfile(payload.profile);
           setProfileUnavailable(false);
           return payload.profile;
         } catch (error) {
           if (isMissingProfileRouteError(error) && nextUser) {
             const fallbackProfile = buildLegacyProfileFallback(nextUser);
-            void saveCachedProfile(fallbackProfile);
+            void saveLocalProfile(fallbackProfile);
             console.warn(
               'Account profile route is unavailable on the current backend. Using legacy fallback profile until the backend is updated.',
             );
@@ -333,7 +295,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           console.error('Failed to refresh account profile.', error);
-          const cachedProfile = profile ?? (await loadCachedProfile(nextUser.id));
+          const cachedProfile = profile ?? (await loadLocalProfile(nextUser.id));
           setProfile(cachedProfile);
           setProfileUnavailable(!cachedProfile);
           return cachedProfile;

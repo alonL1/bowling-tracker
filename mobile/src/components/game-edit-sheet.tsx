@@ -3,8 +3,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import ScoreboardGameEditSheet from '@/components/scoreboard-game-edit-sheet';
 import { queryKeys, updateGame } from '@/lib/backend';
+import { localLogQueryKeys } from '@/hooks/use-logged-data';
+import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { normalizePlayerKey } from '@/lib/live-session';
 import type { GameListItem } from '@/lib/types';
+import { useAuth } from '@/providers/auth-provider';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
 
 type GameEditSheetProps = {
@@ -19,6 +22,7 @@ export default function GameEditSheet({
   onClose,
 }: GameEditSheetProps) {
   const queryClient = useQueryClient();
+  const { user, session } = useAuth();
   const { repairFailedLoggedGame } = useUploadsProcessing();
   const isFailedLocalSync = game?.local_sync?.syncState === 'failed';
 
@@ -39,10 +43,19 @@ export default function GameEditSheet({
       });
     },
     onSuccess: async () => {
+      if (user) {
+        await syncLocalLogsForUser(user.id, session?.access_token ?? null);
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.games }),
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
         game ? queryClient.invalidateQueries({ queryKey: queryKeys.game(game.id) }) : Promise.resolve(),
+        user
+          ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.games(user.id) })
+          : Promise.resolve(),
+        user && game
+          ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.game(user.id, game.id) })
+          : Promise.resolve(),
       ]);
       onClose();
     },
