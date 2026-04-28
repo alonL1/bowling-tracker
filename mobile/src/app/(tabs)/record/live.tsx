@@ -21,10 +21,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
-import CenteredState from '@/components/centered-state';
 import EmptyStateCard from '@/components/empty-state-card';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
+import InlineLoadingCard from '@/components/inline-loading-card';
 import LiveGameEditSheet from '@/components/live-game-edit-sheet';
 import LiveSessionGameCard from '@/components/live-session-game-card';
 import StackBadge from '@/components/stack-badge';
@@ -260,6 +260,7 @@ export default function LiveSessionScreen() {
   });
 
   const liveSession = liveSessionQuery.data?.liveSession ?? null;
+  const isInitialLiveSessionLoading = authLoading || (liveSessionQuery.isPending && !liveSessionQuery.data);
 
   useEffect(() => {
     if (!liveSession) {
@@ -750,27 +751,6 @@ export default function LiveSessionScreen() {
     });
   };
 
-  if (authLoading || (liveSessionQuery.isPending && !liveSessionQuery.data)) {
-    return <CenteredState title="Loading live session..." loading />;
-  }
-
-  if (liveSessionQuery.error && !liveSessionQuery.data) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <View style={styles.centeredWrap}>
-          <InfoBanner
-            tone="error"
-            text={
-              liveSessionQuery.error instanceof Error
-                ? liveSessionQuery.error.message
-                : 'Failed to load live session.'
-            }
-          />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   const selectedLabels = playerOptions
     .filter((option) => selectedPlayerKeys.includes(option.key))
     .map((option) => canonicalizePlayerLabel(option.label));
@@ -841,40 +821,44 @@ export default function LiveSessionScreen() {
                 )
               }
               onPress={() => setSourceOpen(true)}
-              disabled={captureMutation.isPending}
+              disabled={captureMutation.isPending || isInitialLiveSessionLoading}
             />
           </SurfaceCard>
 
-          <SurfaceCard style={styles.sectionCard}>
-            <Text style={styles.sectionBody}>
-              {'Who are you?\n(may select multiple)'}
-            </Text>
-            {playerOptions.length === 0 ? (
+          {isInitialLiveSessionLoading ? (
+            <InlineLoadingCard label="Loading players..." />
+          ) : (
+            <SurfaceCard style={styles.sectionCard}>
               <Text style={styles.sectionBody}>
-                Add a scoreboard to start extracting player names.
+                {'Who are you?\n(may select multiple)'}
               </Text>
-            ) : (
-              <View style={styles.checkboxList}>
-                {playerOptions.map((option) => {
-                  const checked = selectedPlayerKeys.includes(option.key);
-                  return (
-                    <Pressable
-                      key={option.key}
-                      onPress={() => handleTogglePlayer(option.key)}
-                      hitSlop={8}
-                      style={({ pressed }) => [styles.checkboxRow, pressed && styles.pressed]}>
-                      <MaterialIcons
-                        name={checked ? 'check-box' : 'check-box-outline-blank'}
-                        size={22}
-                        color={checked ? palette.accent : palette.muted}
-                      />
-                      <Text style={styles.checkboxLabel}>{canonicalizePlayerLabel(option.label)}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-          </SurfaceCard>
+              {playerOptions.length === 0 ? (
+                <Text style={styles.sectionBody}>
+                  Add a scoreboard to start extracting player names.
+                </Text>
+              ) : (
+                <View style={styles.checkboxList}>
+                  {playerOptions.map((option) => {
+                    const checked = selectedPlayerKeys.includes(option.key);
+                    return (
+                      <Pressable
+                        key={option.key}
+                        onPress={() => handleTogglePlayer(option.key)}
+                        hitSlop={8}
+                        style={({ pressed }) => [styles.checkboxRow, pressed && styles.pressed]}>
+                        <MaterialIcons
+                          name={checked ? 'check-box' : 'check-box-outline-blank'}
+                          size={22}
+                          color={checked ? palette.accent : palette.muted}
+                        />
+                        <Text style={styles.checkboxLabel}>{canonicalizePlayerLabel(option.label)}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </SurfaceCard>
+          )}
 
           <View style={styles.tabRow}>
             <Pressable
@@ -929,7 +913,9 @@ export default function LiveSessionScreen() {
                 setActiveTab(nextTab);
               }}>
               <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
-                {liveSession?.games?.length ? (
+                {isInitialLiveSessionLoading ? (
+                  <InlineLoadingCard label="Loading live games..." />
+                ) : liveSession?.games?.length ? (
                   <View style={styles.gameList}>
                     {liveSession.games.map((game, index) =>
                       game.status === 'ready' ? (
@@ -1005,101 +991,107 @@ export default function LiveSessionScreen() {
               </View>
 
               <View style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
-              <View style={styles.statsSection}>
-                <View style={styles.statsGrid}>
-                  {comparisonCategories.map((category) => (
-                    <StatsTile
-                      key={category.key}
-                      label={category.label}
-                      value={getStatsTileValue(stats, category.key)}
-                      onPress={() => handlePressStatsTile(category.key)}
-                    />
-                  ))}
-                </View>
-                </View>
-
-                <View
-                  onLayout={(event) => {
-                    compareSectionYRef.current = event.nativeEvent.layout.y;
-                  }}>
-                  <SurfaceCard style={styles.sectionCard}>
-                    <Text style={styles.sectionBody}>Select category to compare players.</Text>
-                    <ScrollView
-                      ref={comparisonCategoryScrollRef}
-                      horizontal
-                      nestedScrollEnabled
-                      showsHorizontalScrollIndicator={false}
-                      onLayout={(event) => {
-                        comparisonCategoryViewportWidthRef.current = event.nativeEvent.layout.width;
-                      }}
-                      onTouchStart={() => setPagerScrollEnabled(false)}
-                      onTouchEnd={() => setPagerScrollEnabled(true)}
-                      onTouchCancel={() => setPagerScrollEnabled(true)}
-                      onScrollBeginDrag={() => setPagerScrollEnabled(false)}
-                      onScrollEndDrag={() => setPagerScrollEnabled(true)}
-                      onMomentumScrollEnd={() => setPagerScrollEnabled(true)}
-                      contentContainerStyle={styles.comparisonCategoryRow}>
-                      {comparisonCategories.map((category) => (
-                        <Pressable
-                          key={category.key}
-                          onPress={() => handleSelectComparisonMetric(category.key)}
-                          onLayout={(event) => {
-                            comparisonCategoryLayoutsRef.current[category.key] = {
-                              x: event.nativeEvent.layout.x,
-                              width: event.nativeEvent.layout.width,
-                            };
-                          }}
-                          style={({ pressed }) => [
-                            styles.comparisonCategoryChip,
-                            selectedComparisonMetric === category.key && styles.comparisonCategoryChipActive,
-                            pressed && styles.pressed,
-                          ]}>
-                          <Text
-                            style={[
-                              styles.comparisonCategoryLabel,
-                              selectedComparisonMetric === category.key && styles.comparisonCategoryLabelActive,
-                            ]}>
-                            {category.label}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </ScrollView>
-
-                    <View style={styles.comparisonList}>
-                      {comparisonRows.map((row) => {
-                        const value = getComparisonMetricValue(row, selectedComparisonMetric);
-                        const fillPercent =
-                          value !== null && comparisonMaxValue > 0
-                            ? Math.max(8, (value / comparisonMaxValue) * 100)
-                            : 0;
-
-                        return (
-                          <View key={row.playerKey} style={styles.comparisonRow}>
-                            <View style={styles.comparisonHeader}>
-                              <Text style={styles.comparisonPlayerLabel}>{row.label}</Text>
-                              <Text style={styles.comparisonValueLabel}>
-                                {getComparisonMetricDisplayLabel(row, selectedComparisonMetric)}
-                              </Text>
-                            </View>
-                            <View style={styles.comparisonBarTrack}>
-                              <View
-                                style={[
-                                  styles.comparisonBarFill,
-                                  { width: fillPercent > 0 ? `${fillPercent}%` : '0%' },
-                                ]}
-                              />
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
-                    {comparisonLoading ? (
-                      <View style={styles.comparisonLoading}>
-                        <BowlingBallSpinner size={28} holeColor={palette.surface} />
+                {isInitialLiveSessionLoading ? (
+                  <InlineLoadingCard label="Loading live stats..." />
+                ) : (
+                  <>
+                    <View style={styles.statsSection}>
+                      <View style={styles.statsGrid}>
+                        {comparisonCategories.map((category) => (
+                          <StatsTile
+                            key={category.key}
+                            label={category.label}
+                            value={getStatsTileValue(stats, category.key)}
+                            onPress={() => handlePressStatsTile(category.key)}
+                          />
+                        ))}
                       </View>
-                    ) : null}
-                  </SurfaceCard>
-                </View>
+                    </View>
+
+                    <View
+                      onLayout={(event) => {
+                        compareSectionYRef.current = event.nativeEvent.layout.y;
+                      }}>
+                      <SurfaceCard style={styles.sectionCard}>
+                        <Text style={styles.sectionBody}>Select category to compare players.</Text>
+                        <ScrollView
+                          ref={comparisonCategoryScrollRef}
+                          horizontal
+                          nestedScrollEnabled
+                          showsHorizontalScrollIndicator={false}
+                          onLayout={(event) => {
+                            comparisonCategoryViewportWidthRef.current = event.nativeEvent.layout.width;
+                          }}
+                          onTouchStart={() => setPagerScrollEnabled(false)}
+                          onTouchEnd={() => setPagerScrollEnabled(true)}
+                          onTouchCancel={() => setPagerScrollEnabled(true)}
+                          onScrollBeginDrag={() => setPagerScrollEnabled(false)}
+                          onScrollEndDrag={() => setPagerScrollEnabled(true)}
+                          onMomentumScrollEnd={() => setPagerScrollEnabled(true)}
+                          contentContainerStyle={styles.comparisonCategoryRow}>
+                          {comparisonCategories.map((category) => (
+                            <Pressable
+                              key={category.key}
+                              onPress={() => handleSelectComparisonMetric(category.key)}
+                              onLayout={(event) => {
+                                comparisonCategoryLayoutsRef.current[category.key] = {
+                                  x: event.nativeEvent.layout.x,
+                                  width: event.nativeEvent.layout.width,
+                                };
+                              }}
+                              style={({ pressed }) => [
+                                styles.comparisonCategoryChip,
+                                selectedComparisonMetric === category.key && styles.comparisonCategoryChipActive,
+                                pressed && styles.pressed,
+                              ]}>
+                              <Text
+                                style={[
+                                  styles.comparisonCategoryLabel,
+                                  selectedComparisonMetric === category.key && styles.comparisonCategoryLabelActive,
+                                ]}>
+                                {category.label}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </ScrollView>
+
+                        <View style={styles.comparisonList}>
+                          {comparisonRows.map((row) => {
+                            const value = getComparisonMetricValue(row, selectedComparisonMetric);
+                            const fillPercent =
+                              value !== null && comparisonMaxValue > 0
+                                ? Math.max(8, (value / comparisonMaxValue) * 100)
+                                : 0;
+
+                            return (
+                              <View key={row.playerKey} style={styles.comparisonRow}>
+                                <View style={styles.comparisonHeader}>
+                                  <Text style={styles.comparisonPlayerLabel}>{row.label}</Text>
+                                  <Text style={styles.comparisonValueLabel}>
+                                    {getComparisonMetricDisplayLabel(row, selectedComparisonMetric)}
+                                  </Text>
+                                </View>
+                                <View style={styles.comparisonBarTrack}>
+                                  <View
+                                    style={[
+                                      styles.comparisonBarFill,
+                                      { width: fillPercent > 0 ? `${fillPercent}%` : '0%' },
+                                    ]}
+                                  />
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                        {comparisonLoading ? (
+                          <View style={styles.comparisonLoading}>
+                            <BowlingBallSpinner size={28} holeColor={palette.surface} />
+                          </View>
+                        ) : null}
+                      </SurfaceCard>
+                    </View>
+                  </>
+                )}
               </View>
             </ScrollView>
           </View>
@@ -1111,25 +1103,36 @@ export default function LiveSessionScreen() {
             const nextHeight = Math.ceil(event.nativeEvent.layout.height) + spacing.md;
             setEndDockHeight((current) => (current === nextHeight ? current : nextHeight));
           }}>
-          {!hasSelectedPlayers ? (
+          {isInitialLiveSessionLoading ? (
+            <Text style={styles.dockNote}>Loading live session...</Text>
+          ) : !hasSelectedPlayers ? (
             <Text style={styles.dockNote}>Choose at least one player before ending the session.</Text>
           ) : projectedLoggedGameCount > 0 ? (
             <Text style={styles.dockNote}>
               Ending this session will log {projectedLoggedGameCount} games from {readyGames.length} scoreboards.
             </Text>
           ) : null}
-          {endSessionBlockers
-            .filter((message) => message !== 'Choose at least one player before ending the session.')
-            .map((message) => (
-              <Text key={message} style={styles.dockNote}>
-                {message}
-              </Text>
-            ))}
+          {!isInitialLiveSessionLoading
+            ? endSessionBlockers
+                .filter((message) => message !== 'Choose at least one player before ending the session.')
+                .map((message) => (
+                  <Text key={message} style={styles.dockNote}>
+                    {message}
+                  </Text>
+                ))
+            : null}
           <ActionButton
-            label={endSessionMutation.isPending ? 'Ending session...' : 'End Session'}
+            label={
+              isInitialLiveSessionLoading
+                ? 'Loading live session...'
+                : endSessionMutation.isPending
+                  ? 'Ending session...'
+                  : 'End Session'
+            }
             onPress={handleEndSession}
+            loading={isInitialLiveSessionLoading || endSessionMutation.isPending}
             disabled={
-              endSessionMutation.isPending || !canEndSession
+              isInitialLiveSessionLoading || endSessionMutation.isPending || !canEndSession
             }
           />
         </View>

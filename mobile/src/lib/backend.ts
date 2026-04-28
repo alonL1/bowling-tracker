@@ -1,7 +1,7 @@
 import { Platform } from 'react-native';
 
 import { apiFetch, apiJson, parseJsonResponse } from '@/lib/api';
-import { cacheOfflineChatGames } from '@/lib/offline-chat';
+import { cacheOfflineChatGames, loadOfflineChatGames } from '@/lib/offline-chat';
 import { buildLegacyUsernameFallback, getProfileInitials } from '@/lib/profile';
 import {
   loadUploadsProcessingStore,
@@ -101,15 +101,43 @@ export const queryKeys = {
   profile: ['profile'] as const,
 };
 
+function isNetworkFetchError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /network request failed/i.test(message) ||
+    /failed to fetch/i.test(message) ||
+    /fetch failed/i.test(message) ||
+    /networkerror/i.test(message) ||
+    /unable to resolve host/i.test(message) ||
+    /internet connection/i.test(message)
+  );
+}
+
 export async function fetchGames() {
-  const payload = await apiJson<{ games: GameListItem[]; count: number | null }>('/api/games');
-  const store = await loadUploadsProcessingStore();
-  const games = mergeGamesWithUploadsProcessing(payload.games, store);
-  void cacheOfflineChatGames(games);
-  return {
-    ...payload,
-    games,
-  };
+  try {
+    const payload = await apiJson<{ games: GameListItem[]; count: number | null }>('/api/games');
+    const store = await loadUploadsProcessingStore();
+    const games = mergeGamesWithUploadsProcessing(payload.games, store);
+    void cacheOfflineChatGames(games);
+    return {
+      ...payload,
+      games,
+    };
+  } catch (error) {
+    if (!isNetworkFetchError(error)) {
+      throw error;
+    }
+
+    const cachedGames = await loadOfflineChatGames();
+    if (cachedGames.length === 0) {
+      throw error;
+    }
+
+    return {
+      games: cachedGames,
+      count: cachedGames.length,
+    };
+  }
 }
 
 export async function fetchGameById(gameId: string) {

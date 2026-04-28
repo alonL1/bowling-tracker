@@ -3,7 +3,20 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 type AppVariant = 'development' | 'production';
 
 function getAppVariant(): AppVariant {
-  return process.env.APP_VARIANT === 'development' ? 'development' : 'production';
+  if (process.env.APP_VARIANT === 'production') {
+    return 'production';
+  }
+
+  if (process.env.APP_VARIANT === 'development') {
+    return 'development';
+  }
+
+  const npmLifecycleEvent = process.env.npm_lifecycle_event;
+  if (npmLifecycleEvent === 'android' || npmLifecycleEvent === 'ios') {
+    return 'development';
+  }
+
+  return 'production';
 }
 
 export default ({ config }: ConfigContext): ExpoConfig => {
@@ -42,7 +55,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: isDevelopment ? 'PinPoint Dev' : 'PinPoint',
     slug: 'bowling-tracker-mobile',
-    version: '1.0.6',
+    version: '1.0.7',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: isDevelopment ? 'pinpoint-dev' : 'pinpoint',
@@ -50,7 +63,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       icon: './assets/images/icon.png',
       usesAppleSignIn: true,
-      buildNumber: isDevelopment ? '20260414.1' : '20260414.1',
+      buildNumber: isDevelopment ? '20260415.1' : '20260415.1',
       bundleIdentifier: isDevelopment
         ? 'com.alonl.pinpoint.dev'
         : 'com.alonl.pinpoint',
@@ -62,7 +75,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       icon: './assets/images/icon.png',
       package: isDevelopment ? 'com.alonl.pinpoint.dev' : 'com.alonl.pinpoint',
-      versionCode: 20260414,
+      versionCode: 20260415,
       softwareKeyboardLayoutMode: 'resize',
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',

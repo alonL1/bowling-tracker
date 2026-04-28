@@ -1,3 +1,5 @@
+import { formatTenths } from '@/lib/number-format';
+
 type SessionRow = {
   id: string;
   name: string | null;
@@ -41,6 +43,19 @@ function formatAverage(scores: number[]) {
   return formatTenths(avg);
 }
 
+function getFirstGameTimestamp(games: GameRow[]) {
+  return games.reduce((earliest, game) => {
+    const timestamp = parseDate(game.played_at || game.created_at);
+    if (timestamp === 0) {
+      return earliest;
+    }
+    if (earliest === 0 || timestamp < earliest) {
+      return timestamp;
+    }
+    return earliest;
+  }, 0);
+}
+
 export function buildSessionSummaries(
   sessions: SessionRow[],
   games: GameRow[],
@@ -66,9 +81,15 @@ export function buildSessionSummaries(
   });
 
   const sortAscending = [...sessionsWithGames].sort((a, b) => {
-    const diff = parseDate(a.created_at) - parseDate(b.created_at);
+    const aFirstGameTs = getFirstGameTimestamp(gamesBySessionId.get(a.id) ?? []);
+    const bFirstGameTs = getFirstGameTimestamp(gamesBySessionId.get(b.id) ?? []);
+    const diff = aFirstGameTs - bFirstGameTs;
     if (diff !== 0) {
       return diff;
+    }
+    const createdAtDiff = parseDate(a.created_at) - parseDate(b.created_at);
+    if (createdAtDiff !== 0) {
+      return createdAtDiff;
     }
     return a.id.localeCompare(b.id);
   });
@@ -79,9 +100,15 @@ export function buildSessionSummaries(
   });
 
   const displaySessions = [...sessionsWithGames].sort((a, b) => {
-    const diff = parseDate(b.created_at) - parseDate(a.created_at);
+    const aFirstGameTs = getFirstGameTimestamp(gamesBySessionId.get(a.id) ?? []);
+    const bFirstGameTs = getFirstGameTimestamp(gamesBySessionId.get(b.id) ?? []);
+    const diff = bFirstGameTs - aFirstGameTs;
     if (diff !== 0) {
       return diff;
+    }
+    const createdAtDiff = parseDate(b.created_at) - parseDate(a.created_at);
+    if (createdAtDiff !== 0) {
+      return createdAtDiff;
     }
     return b.id.localeCompare(a.id);
   });
@@ -92,7 +119,7 @@ export function buildSessionSummaries(
     });
 
     const firstGame = sessionGames[0];
-    const firstDateSource = session.started_at || firstGame?.played_at || firstGame?.created_at;
+    const firstDateSource = firstGame?.played_at || firstGame?.created_at || session.started_at;
     const firstDate = firstDateSource ? new Date(firstDateSource) : null;
     const scores = sessionGames
       .map((game) => game.total_score)
@@ -110,4 +137,3 @@ export function buildSessionSummaries(
     };
   });
 }
-import { formatTenths } from '@/lib/number-format';

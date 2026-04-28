@@ -4,7 +4,7 @@ import { Tabs } from 'expo-router';
 import React, { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
-import CenteredState from '@/components/centered-state';
+import AccountLoadingState from '@/components/account-loading-state';
 import MobileTabBar from '@/components/mobile-tab-bar';
 import SafeRedirect from '@/components/safe-redirect';
 import { palette } from '@/constants/palette';
@@ -54,7 +54,7 @@ export default function TabsLayout() {
   }, [isGuest, queryClient, user]);
 
   if (loading) {
-    return <CenteredState title="Loading account..." loading />;
+    return <AccountLoadingState />;
   }
 
   if (!user) {

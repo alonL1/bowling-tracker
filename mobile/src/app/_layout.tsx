@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 
+import AccountLoadingState from '@/components/account-loading-state';
 import CenteredState from '@/components/centered-state';
 import GlobalAppNav from '@/components/global-app-nav';
 import SafeRedirect from '@/components/safe-redirect';
@@ -78,7 +79,7 @@ function isAuthEntryPath(pathname: string) {
 function RootNavigator() {
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ next?: string; replay?: string; preview?: string }>();
-  const { user, loading, isGuest, profileComplete, avatarStepNeeded, tutorialSeen } = useAuth();
+  const { user, loading, isGuest, profileUnavailable, profileComplete, avatarStepNeeded, tutorialSeen } = useAuth();
   const currentPath = pathname || DEFAULT_POST_AUTH_PATH;
   const nextPath = getSafePostAuthPath(
     params.next,
@@ -88,7 +89,16 @@ function RootNavigator() {
   const tutorialPreview = currentPath === '/getting-started' && params.preview === '1';
 
   if (loading) {
-    return <CenteredState title="Loading account..." loading />;
+    return <AccountLoadingState />;
+  }
+
+  if (user && !isGuest && profileUnavailable) {
+    return (
+      <CenteredState
+        title="Can't load your account"
+        subtitle="Check your connection and reopen PinPoint. Your saved account state could not be loaded while offline."
+      />
+    );
   }
 
   if (!user && !tutorialPreview && !isSignedOutPublicPath(currentPath)) {

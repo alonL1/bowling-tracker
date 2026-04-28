@@ -21,6 +21,7 @@ import ActionButton from '@/components/action-button';
 import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import EmptyStateCard from '@/components/empty-state-card';
 import InfoBanner from '@/components/info-banner';
+import InlineLoadingCard from '@/components/inline-loading-card';
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import RecordingDraftGameCard from '@/components/recording-draft-game-card';
 import RecordingDraftGameEditSheet from '@/components/recording-draft-game-edit-sheet';
@@ -130,15 +131,6 @@ function getDraftEmptyState(mode: RecordingDraftMode) {
 
 function getTargetSessionButtonLabel(targetSessionId: string | null) {
   return targetSessionId ? 'Change Existing Session' : 'Choose Existing Session';
-}
-
-function InlineLoadingCard({ label }: { label: string }) {
-  return (
-    <SurfaceCard style={styles.loadingCard}>
-      <BowlingBallSpinner size={24} holeColor={palette.surface} />
-      <Text style={styles.loadingCardText}>{label}</Text>
-    </SurfaceCard>
-  );
 }
 
 function buildDraftFlatRows(groups: RecordingDraftGroup[]) {
@@ -1480,21 +1472,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     gap: spacing.sm,
-  },
-  loadingCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    minHeight: 72,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.lg,
-  },
-  loadingCardText: {
-    color: palette.muted,
-    fontSize: 15,
-    lineHeight: 20,
-    fontFamily: fontFamilySans,
   },
   progressTitle: {
     color: palette.text,

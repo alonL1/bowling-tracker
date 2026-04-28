@@ -35,6 +35,7 @@ type AuthContextValue = {
   session: Session | null;
   profile: UserProfile | null;
   loading: boolean;
+  profileUnavailable: boolean;
   isGuest: boolean;
   profileComplete: boolean;
   avatarStepNeeded: boolean;
@@ -51,6 +52,7 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const PROFILE_CACHE_KEY_PREFIX = 'pinpoint-profile-cache:';
 
 function getAuthIdentityKey(user: User | null) {
   if (!user) {
@@ -67,10 +69,46 @@ function isMissingProfileRouteError(error: unknown) {
   );
 }
 
+function getProfileCacheKey(userId: string) {
+  return `${PROFILE_CACHE_KEY_PREFIX}${userId}`;
+}
+
+async function loadCachedProfile(userId: string) {
+  try {
+    const raw = await AsyncStorage.getItem(getProfileCacheKey(userId));
+    if (!raw) {
+      return null;
+    }
+
+    const cachedProfile = JSON.parse(raw) as UserProfile;
+    return cachedProfile.userId === userId ? cachedProfile : null;
+  } catch (error) {
+    console.error('Failed to load cached account profile.', error);
+    return null;
+  }
+}
+
+async function saveCachedProfile(profile: UserProfile) {
+  try {
+    await AsyncStorage.setItem(getProfileCacheKey(profile.userId), JSON.stringify(profile));
+  } catch (error) {
+    console.error('Failed to cache account profile.', error);
+  }
+}
+
+async function removeCachedProfile(userId: string) {
+  try {
+    await AsyncStorage.removeItem(getProfileCacheKey(userId));
+  } catch (error) {
+    console.error('Failed to remove cached account profile.', error);
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileUnavailable, setProfileUnavailable] = useState(false);
   const [tutorialSeen, setTutorialSeen] = useState(false);
   const [resolvedIdentityKey, setResolvedIdentityKey] = useState<string | null>(null);
   const lastUserIdRef = useRef<string | null | undefined>(undefined);
@@ -96,6 +134,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const currentOwner = await AsyncStorage.getItem(QUERY_CACHE_OWNER_STORAGE_KEY);
         if (currentOwner !== nextUserId) {
           await resetQueryCache();
+          if (currentOwner) {
+            await removeCachedProfile(currentOwner);
+          }
         }
 
         if (nextUserId) {
@@ -116,33 +157,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!nextUser || isGuestUser(nextUser)) {
         if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
           setProfile(null);
+          setProfileUnavailable(false);
         }
         return null;
       }
 
       try {
         const payload = await fetchOwnProfile(accessToken);
+        void saveCachedProfile(payload.profile);
         if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
           setProfile(payload.profile);
+          setProfileUnavailable(false);
         }
         return payload.profile;
       } catch (error) {
         if (isMissingProfileRouteError(error)) {
           const fallbackProfile = buildLegacyProfileFallback(nextUser);
+          void saveCachedProfile(fallbackProfile);
           console.warn(
             'Account profile route is unavailable on the current backend. Using legacy fallback profile until the backend is updated.',
           );
           if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
             setProfile(fallbackProfile);
+            setProfileUnavailable(false);
           }
           return fallbackProfile;
         }
 
         console.error('Failed to load account profile.', error);
+        const cachedProfile = await loadCachedProfile(nextUser.id);
         if (mountedRef.current && derivedStateRequestIdRef.current === requestId) {
-          setProfile(null);
+          setProfile(cachedProfile);
+          setProfileUnavailable(!cachedProfile);
         }
-        return null;
+        return cachedProfile;
       }
     };
 
@@ -254,6 +302,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       session,
       profile,
       loading,
+      profileUnavailable,
       isGuest: isGuestUser(session?.user ?? null),
       profileComplete: Boolean(profile?.profileComplete),
       avatarStepNeeded: Boolean(profile?.avatarStepNeeded),
@@ -267,21 +316,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         try {
           const payload = await fetchOwnProfile(session?.access_token ?? null);
+          void saveCachedProfile(payload.profile);
           setProfile(payload.profile);
+          setProfileUnavailable(false);
           return payload.profile;
         } catch (error) {
           if (isMissingProfileRouteError(error) && nextUser) {
             const fallbackProfile = buildLegacyProfileFallback(nextUser);
+            void saveCachedProfile(fallbackProfile);
             console.warn(
               'Account profile route is unavailable on the current backend. Using legacy fallback profile until the backend is updated.',
             );
             setProfile(fallbackProfile);
+            setProfileUnavailable(false);
             return fallbackProfile;
           }
 
           console.error('Failed to refresh account profile.', error);
-          setProfile(null);
-          return null;
+          const cachedProfile = profile ?? (await loadCachedProfile(nextUser.id));
+          setProfile(cachedProfile);
+          setProfileUnavailable(!cachedProfile);
+          return cachedProfile;
         }
       },
       async markTutorialSeen() {
@@ -333,7 +388,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await signOutCurrentSession();
       },
     }),
-    [loading, profile, session, tutorialSeen],
+    [loading, profile, profileUnavailable, session, tutorialSeen],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

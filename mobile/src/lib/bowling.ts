@@ -41,6 +41,19 @@ export function sortGamesByPlayedAtAsc<T extends Pick<GameListItem, 'played_at' 
   });
 }
 
+function getFirstGameTimestamp(games: Array<Pick<GameListItem, 'played_at' | 'created_at'>>) {
+  return games.reduce((earliest, game) => {
+    const timestamp = parseDate(game.played_at || game.created_at);
+    if (timestamp === 0) {
+      return earliest;
+    }
+    if (earliest === 0 || timestamp < earliest) {
+      return timestamp;
+    }
+    return earliest;
+  }, 0);
+}
+
 export function formatAverage(scores: number[]) {
   if (scores.length === 0) {
     return '—';
@@ -78,13 +91,23 @@ export function buildSessionGroups(games: GameListItem[]) {
   const orderedSessionRecords = [...grouped.entries()]
     .map(([sessionId, value]) => ({
       sessionId,
-      session: value.session ?? { id: sessionId },
+      session: value.session ?? ({ id: sessionId } as SessionItem),
       games: value.games,
+      createdAtTs: parseDate(value.session?.created_at),
+      firstGameTs: getFirstGameTimestamp(value.games),
     }))
     .sort((left, right) => {
-      const diff = parseDate(left.session.created_at) - parseDate(right.session.created_at);
+      const diff = left.firstGameTs - right.firstGameTs;
       if (diff !== 0) {
         return diff;
+      }
+      const createdAtDiff = left.createdAtTs - right.createdAtTs;
+      if (createdAtDiff !== 0) {
+        return createdAtDiff;
+      }
+      const startedAtDiff = parseDate(left.session.started_at) - parseDate(right.session.started_at);
+      if (startedAtDiff !== 0) {
+        return startedAtDiff;
       }
       return left.sessionId.localeCompare(right.sessionId);
     });
@@ -95,9 +118,17 @@ export function buildSessionGroups(games: GameListItem[]) {
   });
 
   const displaySessionRecords = [...orderedSessionRecords].sort((left, right) => {
-    const diff = parseDate(right.session.created_at) - parseDate(left.session.created_at);
+    const diff = right.firstGameTs - left.firstGameTs;
     if (diff !== 0) {
       return diff;
+    }
+    const createdAtDiff = right.createdAtTs - left.createdAtTs;
+    if (createdAtDiff !== 0) {
+      return createdAtDiff;
+    }
+    const startedAtDiff = parseDate(right.session.started_at) - parseDate(left.session.started_at);
+    if (startedAtDiff !== 0) {
+      return startedAtDiff;
     }
     return right.sessionId.localeCompare(left.sessionId);
   });
@@ -112,7 +143,7 @@ export function buildSessionGroups(games: GameListItem[]) {
 
     const firstGame = orderedGames[0];
     const firstDateSource =
-      record.session.started_at || firstGame?.played_at || firstGame?.created_at || null;
+      firstGame?.played_at || firstGame?.created_at || record.session.started_at || null;
     const firstDate = firstDateSource ? new Date(firstDateSource) : null;
     const scores = orderedGames
       .map((game) => game.total_score)

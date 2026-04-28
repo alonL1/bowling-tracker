@@ -2,9 +2,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { sortGamesByPlayedAtAsc } from '@/lib/bowling';
 import { formatRoundedHundredths } from '@/lib/number-format';
+import { getExistingSessionSnapshot } from '@/lib/supabase';
 import type { GameListItem } from '@/lib/types';
 
-const OFFLINE_CHAT_GAMES_STORAGE_KEY = 'pinpoint-offline-chat-games-v1';
+const OFFLINE_CHAT_GAMES_STORAGE_KEY_PREFIX = 'pinpoint-offline-chat-games-v2:';
 
 export type OfflineChatResult = {
   answer: string;
@@ -121,9 +122,24 @@ function buildHandledOfflineAnswer(question: string, games: GameListItem[]) {
   return null;
 }
 
+async function getOfflineGamesStorageKey() {
+  try {
+    const snapshot = await getExistingSessionSnapshot();
+    const userId = snapshot.user?.id;
+    return userId ? `${OFFLINE_CHAT_GAMES_STORAGE_KEY_PREFIX}${userId}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function cacheOfflineChatGames(games: GameListItem[]) {
   try {
-    await AsyncStorage.setItem(OFFLINE_CHAT_GAMES_STORAGE_KEY, JSON.stringify(games));
+    const storageKey = await getOfflineGamesStorageKey();
+    if (!storageKey) {
+      return;
+    }
+
+    await AsyncStorage.setItem(storageKey, JSON.stringify(games));
   } catch {
     // Ignore cache write failures; chat should still work online.
   }
@@ -131,7 +147,12 @@ export async function cacheOfflineChatGames(games: GameListItem[]) {
 
 export async function clearOfflineChatGames() {
   try {
-    await AsyncStorage.removeItem(OFFLINE_CHAT_GAMES_STORAGE_KEY);
+    const storageKey = await getOfflineGamesStorageKey();
+    if (!storageKey) {
+      return;
+    }
+
+    await AsyncStorage.removeItem(storageKey);
   } catch {
     // Ignore cache clear failures; deletion should still succeed server-side.
   }
@@ -139,7 +160,12 @@ export async function clearOfflineChatGames() {
 
 export async function loadOfflineChatGames() {
   try {
-    const raw = await AsyncStorage.getItem(OFFLINE_CHAT_GAMES_STORAGE_KEY);
+    const storageKey = await getOfflineGamesStorageKey();
+    if (!storageKey) {
+      return [];
+    }
+
+    const raw = await AsyncStorage.getItem(storageKey);
     if (!raw) {
       return [];
     }

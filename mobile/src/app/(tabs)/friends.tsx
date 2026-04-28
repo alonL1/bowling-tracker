@@ -18,10 +18,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
-import CenteredState from '@/components/centered-state';
 import EmptyStateCard from '@/components/empty-state-card';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
+import InlineLoadingCard from '@/components/inline-loading-card';
 import ProfileAvatar from '@/components/profile-avatar';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
@@ -110,6 +110,7 @@ export default function FriendsScreen() {
     queryFn: fetchLeaderboard,
     enabled: !authLoading && !isGuest,
   });
+  const isInitialLeaderboardLoading = leaderboardQuery.isPending && !leaderboardQuery.data && !isGuest;
 
   const inviteMutation = useMutation({
     mutationFn: createInvite,
@@ -295,10 +296,6 @@ export default function FriendsScreen() {
     }
   };
 
-  if (leaderboardQuery.isPending && !isGuest) {
-    return <CenteredState title="Loading leaderboard..." loading />;
-  }
-
   return (
     <ScreenShell
       title="Friends"
@@ -438,7 +435,9 @@ export default function FriendsScreen() {
               </View>
 
               <View style={styles.leaderboardList}>
-                {page.rankedRows.length === 0 ? (
+                {isInitialLeaderboardLoading ? (
+                  <InlineLoadingCard label="Loading leaderboard..." />
+                ) : page.rankedRows.length === 0 ? (
                   <EmptyStateCard
                     title={isGuest ? 'Sign in to view friends' : 'No leaderboard entries yet'}
                     body={

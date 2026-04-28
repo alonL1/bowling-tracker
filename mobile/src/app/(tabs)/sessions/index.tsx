@@ -45,8 +45,8 @@ type SessionSortEntry = {
 
 const SORT_MENU_WIDTH = 212;
 const sortOptions: Array<{ key: SessionSortOption; label: string }> = [
-  { key: 'createdAt', label: 'Created At Date' },
   { key: 'firstGameDate', label: 'First Game Date' },
+  { key: 'createdAt', label: 'Created At Date' },
   { key: 'average', label: 'Average' },
   { key: 'bestGame', label: 'Best Game' },
   { key: 'mostGames', label: 'Most Games' },
@@ -78,12 +78,7 @@ function getCreatedAtTimestamp(session: SessionGroup) {
 }
 
 function getFirstGameTimestamp(session: SessionGroup) {
-  const startedAt = parseDateValue(session.session?.started_at);
-  if (startedAt > 0) {
-    return startedAt;
-  }
-
-  return session.games.reduce((earliest, game) => {
+  const earliestGameTime = session.games.reduce((earliest, game) => {
     const timestamp = parseDateValue(game.played_at || game.created_at);
     if (timestamp === 0) {
       return earliest;
@@ -93,6 +88,12 @@ function getFirstGameTimestamp(session: SessionGroup) {
     }
     return earliest;
   }, 0);
+
+  if (earliestGameTime > 0) {
+    return earliestGameTime;
+  }
+
+  return parseDateValue(session.session?.started_at);
 }
 
 function buildMetaSegments(
@@ -141,7 +142,7 @@ export default function SessionsScreen() {
   const router = useRouter();
   const { width: windowWidth } = useWindowDimensions();
   const { isGuest } = useAuth();
-  const [sortOption, setSortOption] = useState<SessionSortOption>('createdAt');
+  const [sortOption, setSortOption] = useState<SessionSortOption>('firstGameDate');
   const [sortOpen, setSortOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [sortButtonAnchor, setSortButtonAnchor] = useState<{
@@ -207,6 +208,11 @@ export default function SessionsScreen() {
 
         if (diff !== 0) {
           return diff;
+        }
+
+        const firstGameDiff = right.firstGameTs - left.firstGameTs;
+        if (firstGameDiff !== 0) {
+          return firstGameDiff;
         }
 
         const createdAtDiff = right.createdAtTs - left.createdAtTs;
