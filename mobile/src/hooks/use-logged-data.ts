@@ -21,19 +21,9 @@ function isMobileLocalLogs() {
   return Platform.OS !== 'web' && localLogsSupported;
 }
 
-function getOfflineLabel(error: unknown, hasLocalData: boolean, lastSuccessAt?: string | null) {
+function getOfflineLabel(error: unknown, hasLocalData: boolean) {
   if (error && hasLocalData) {
     return 'Offline · showing saved logs';
-  }
-
-  if (lastSuccessAt) {
-    const parsed = new Date(lastSuccessAt);
-    if (!Number.isNaN(parsed.getTime())) {
-      return `Last synced ${parsed.toLocaleDateString('en-US')} ${parsed.toLocaleTimeString('en-US', {
-        hour: 'numeric',
-        minute: '2-digit',
-      })}`;
-    }
   }
 
   return null;
@@ -160,7 +150,7 @@ export function useLoggedGames() {
     isFetching: localQuery.isFetching || sync.isFetching,
     error: localQuery.error ?? syncError,
     syncError,
-    statusLabel: getOfflineLabel(syncError, hasLocalData, metaQuery.data?.last_success_at),
+    statusLabel: getOfflineLabel(syncError, hasLocalData),
     needsOnlineFirst: Boolean(
       syncError &&
         !hasLocalData &&
