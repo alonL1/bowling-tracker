@@ -87,6 +87,7 @@ export default function PrivacyScreen() {
 
           <Text style={styles.subheading}>Device and Local Storage Data</Text>
           <Bullet>Authentication and session tokens stored locally on your device or browser to keep you signed in</Bullet>
+          <Bullet>Saved chat history stored locally on your device or browser if you use chat history features</Bullet>
           <Bullet>Basic technical information necessary to run the app and maintain security and reliability</Bullet>
         </Section>
 
@@ -132,6 +133,12 @@ export default function PrivacyScreen() {
             request size, and hashed network identifiers for rate limiting, abuse prevention, and
             reliability. We do not rely on a persistent personalized chat-history store on our
             backend to operate the feature.
+          </Paragraph>
+          <Paragraph>
+            PinPoint may keep the visible chat transcript locally on your device or browser so it is
+            still available when you return to the app. Local chat history is not synced across
+            devices, and it can be cleared from the chat screen, through data deletion controls, or
+            by deleting app or browser storage.
           </Paragraph>
           <Paragraph>
             You should not submit highly sensitive personal information through chat or image uploads
@@ -182,6 +189,7 @@ export default function PrivacyScreen() {
         <Section title="8. Your Choices">
           <Paragraph>Depending on how you use PinPoint, you may be able to:</Paragraph>
           <Bullet>Edit or delete sessions and games in the app</Bullet>
+          <Bullet>Clear saved chat history from the chat screen</Bullet>
           <Bullet>Sign out of your account</Bullet>
           <Bullet>Use the app as a guest where supported</Bullet>
           <Bullet>Request deletion of your account or personal data by contacting us</Bullet>

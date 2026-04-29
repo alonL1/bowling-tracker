@@ -6,9 +6,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StackActions, useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -1317,10 +1315,12 @@ export default function UploadSessionForm({
       </Modal>
 
       <Modal transparent animationType="fade" visible={finalizeOpen} onRequestClose={() => setFinalizeOpen(false)}>
-        <KeyboardAvoidingView
-          behavior="padding"
-          enabled={Platform.OS === 'ios'}
-          style={styles.modalBackdrop}>
+        <KeyboardAwareScrollView
+          style={styles.modalKeyboardScroll}
+          contentContainerStyle={styles.modalScrollContent}
+          extraScrollHeight={112}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
           <SurfaceCard style={styles.modalCard} tone="raised">
             <Text style={styles.modalTitle}>{getFinalizeButtonLabel(mode)}</Text>
             <Text style={styles.modalBody}>
@@ -1382,14 +1382,16 @@ export default function UploadSessionForm({
               variant="secondary"
             />
           </SurfaceCard>
-        </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
       </Modal>
 
       <Modal transparent animationType="fade" visible={Boolean(editingGroup)} onRequestClose={() => setEditingGroup(null)}>
-        <KeyboardAvoidingView
-          behavior="padding"
-          enabled={Platform.OS === 'ios'}
-          style={styles.modalBackdrop}>
+        <KeyboardAwareScrollView
+          style={styles.modalKeyboardScroll}
+          contentContainerStyle={styles.modalScrollContent}
+          extraScrollHeight={112}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
           <SurfaceCard style={styles.modalCard} tone="raised">
             <Text style={styles.modalTitle}>Edit Draft Session</Text>
             <TextInput
@@ -1418,7 +1420,7 @@ export default function UploadSessionForm({
               variant="secondary"
             />
           </SurfaceCard>
-        </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
       </Modal>
 
       <RecordingDraftGameEditSheet
@@ -1703,6 +1705,16 @@ const styles = StyleSheet.create({
     backgroundColor: palette.overlay,
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
+  },
+  modalKeyboardScroll: {
+    flex: 1,
+    backgroundColor: palette.overlay,
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
   },
   modalCard: {
     borderRadius: radii.xl,

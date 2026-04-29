@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -174,10 +172,7 @@ export default function ScoreboardGameEditSheet({
 
   return (
     <Modal transparent animationType="slide" visible={visible} onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior="padding"
-        enabled={Platform.OS === 'ios'}
-        style={styles.backdrop}>
+      <View style={styles.backdrop}>
         <SurfaceCard style={styles.sheet} tone="raised">
           <View style={styles.handle} />
           <View style={styles.header}>
@@ -301,7 +296,7 @@ export default function ScoreboardGameEditSheet({
             </Pressable>
           </View>
         </SurfaceCard>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

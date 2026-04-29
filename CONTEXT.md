@@ -161,6 +161,7 @@
   - `mobile/src/hooks/use-logged-data.ts` uses SQLite on native and API/React Query on web.
   - `mobile/src/lib/local-logs-sync.ts` syncs local logs from `/api/mobile-sync/logs`.
   - Upload/processing queue is separate from saved logs and lives in `mobile/src/lib/uploads-processing-store.ts` plus `mobile/src/providers/uploads-processing-provider.tsx`.
+  - Chat transcripts are stored locally per signed-in user through `mobile/src/lib/chat-history-store.ts`; this is not server-synced chat history.
 - How games/scores/stats are stored and updated:
   - Server data is in Supabase tables: `bowling_sessions`, `games`, `frames`, `shots`, plus draft/live tables.
   - Scoreboard OCR extracts a `players` payload with frames and shots.
@@ -198,17 +199,18 @@
   - Files: `mobile/src/lib/bowling.ts`, `mobile/src/lib/live-session.ts`, `mobile/src/app/(tabs)/sessions/index.tsx`, `mobile/src/app/(tabs)/record/live.tsx`.
   - Includes session averages, live session stats, strike rate, spare conversion, best scores, series, frame stats.
 - AI chat
-  - Files: `mobile/src/app/(tabs)/chat.tsx`, `app/api/chat/route.ts`, `mobile/src/lib/offline-chat.ts`.
+  - Files: `mobile/src/app/(tabs)/chat.tsx`, `app/api/chat/route.ts`, `mobile/src/lib/offline-chat.ts`, `mobile/src/lib/chat-history-store.ts`.
   - Online chat uses backend route and Gemini.
   - Backend chat includes session-aware indexing/filtering.
   - Mobile offline chat handles simple local questions from cached/native local games.
+  - Signed-in chat transcripts are saved locally with AsyncStorage, capped to the last 100 messages, and can be cleared from the chat screen.
 - Friends and leaderboards
   - Files: `mobile/src/app/(tabs)/friends.tsx`, `app/api/friends/leaderboard/route.ts`, invite routes under `app/api/friends/invite/`.
   - Supports persistent invite links and metric-based leaderboards.
 - Profile, avatars, legal, and data deletion
   - Files: profile routes under `app/api/account/profile/`, `mobile/src/lib/profile.ts`, `mobile/src/app/edit-profile.tsx`, `mobile/src/app/privacy.tsx`, `mobile/src/app/terms.tsx`, `mobile/src/app/delete-account.tsx`, `mobile/src/app/delete-data.tsx`.
   - Avatar presets and uploads are supported.
-  - Account/data deletion also clears local native logs for the current user.
+  - Account/data deletion also clears local native logs and local saved chat history for the current user.
 
 ## Local Storage / Offline Mode
 
@@ -234,6 +236,11 @@
     - `mobile/src/lib/uploads-processing-store.ts`.
     - AsyncStorage key: `pinpoint-uploads-processing-v1`.
     - Local image files under app document directory folder `uploads-processing`.
+  - Local chat history:
+    - `mobile/src/lib/chat-history-store.ts`.
+    - AsyncStorage key prefix: `pinpoint-chat-history-v1:user:`.
+    - Stores one transcript per signed-in user id, capped to the last 100 visible messages.
+    - On web, AsyncStorage maps to browser `window.localStorage`, so the old and new Vercel origins do not share chat history.
 - Files responsible for local/offline logged data:
   - `mobile/src/lib/local-logs-db.native.ts`
   - `mobile/src/lib/local-logs-db.ts`
@@ -261,6 +268,7 @@
   - If there is no local data and no previous sync, the UI can show `Open PinPoint online once to save your logs on this device.`
   - Game detail is read-only when `gameQuery.syncError` is present.
   - Offline mobile chat can answer simple questions like average, count, total, best, and worst from local games.
+  - Saved chat transcripts persist across app closes/reloads, but only on the same device/browser storage. They are lost if the user deletes app storage, uninstalls, or clears browser site data.
   - Web does not use SQLite local logs; it relies on React Query/browser cache for persisted query data.
 - How local data interacts with fetching/caching:
   - On native, `useLoggedGames()` and `useLoggedGame()` disable the normal API query and use local SQLite query keys under `local-logs`.
@@ -281,12 +289,13 @@
 - Files/flows to test carefully:
   - First launch online on native, then open Sessions offline.
   - Native sign-out/sign-in user switch and query cache owner clearing.
-  - Native delete account/data and verify SQLite is cleared for the user.
+  - Native delete account/data and verify SQLite plus saved chat history are cleared for the user.
   - Native upload queue while offline, app restart, then reconnect.
   - Live session finalization while network drops before/after server operation completes.
   - Recording draft finalization with retries and duplicate client operation IDs.
   - Web behavior after refresh/offline, because it does not use SQLite local logs.
   - Offline Chat simple stat questions after local logs have synced.
+  - Chat history persistence after app close/reload, clear chat, sign-out/sign-in, user switch, and delete data/account.
 
 ## Data Model
 
@@ -328,6 +337,10 @@
   - Frontend type: `LocalSyncMetadata` in `mobile/src/lib/types.ts`.
   - Used for local/optimistic UI states such as `syncing` and `failed`.
   - Stored on merged frontend objects, not as a server table field.
+- Local chat message:
+  - Frontend/storage type: `PersistedChatMessage` in `mobile/src/lib/chat-history-store.ts`.
+  - Fields include `id`, `createdAt`, `role`, `content`, optional `variant`, optional `note`, and optional `meta`.
+  - Stored only in AsyncStorage/localStorage under a per-user key; there is no backend chat transcript table for this feature.
 - Local/offline representation:
   - Native SQLite tables in `mobile/src/lib/local-logs-db.native.ts` store server-synced profile, sessions, games, frames, shots, and cursor metadata.
   - Upload-processing queue uses separate AsyncStorage/FileSystem data and can create optimistic local-only session/game IDs until server finalization resolves them.
@@ -422,6 +435,7 @@
   - SQLite local logs for native.
   - React Query persistence for web and leaderboard.
   - AsyncStorage/FileSystem upload-processing queue.
+  - AsyncStorage local chat history per signed-in user.
   - Supabase auth persistence.
   - This is powerful but easy to invalidate incorrectly.
 - Priority 2 - Upload queue/finalization is complex:
@@ -481,7 +495,7 @@
   - Account screen says signing in later can move guest logs into the account.
 - Privacy/data:
   - Privacy, Terms, Delete Account, and Delete Data screens are built into the app.
-  - Account/data deletion routes remove Supabase app data and clear local SQLite logs for the current user on the device.
+  - Account/data deletion routes remove Supabase app data and clear local SQLite logs plus saved chat history for the current user on the device.
   - Scoreboard images are temporarily stored in Supabase Storage and local app files during processing.
 - App Store / Google Play behavior:
   - Camera/photo library usage is explained in `mobile/app.config.ts`.

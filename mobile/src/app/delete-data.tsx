@@ -8,6 +8,7 @@ import PageBackButton from '@/components/page-back-button';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { deleteOwnData } from '@/lib/backend';
+import { clearChatHistory } from '@/lib/chat-history-store';
 import { clearLocalLogsForUser } from '@/lib/local-logs-db';
 import { clearOfflineChatGames } from '@/lib/offline-chat';
 import { queryClient } from '@/lib/query-client';
@@ -74,6 +75,7 @@ export default function DeleteDataScreen() {
       await deleteOwnData();
       if (user) {
         await clearLocalLogsForUser(user.id);
+        await clearChatHistory(user.id);
       }
       await clearOfflineChatGames();
       queryClient.clear();

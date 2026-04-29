@@ -24,19 +24,21 @@ import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
 import SurfaceCard from '@/components/surface-card';
 import { queryKeys, sendChat } from '@/lib/backend';
+import {
+  CHAT_HISTORY_MESSAGE_LIMIT,
+  clearChatHistory,
+  loadChatHistory,
+  saveChatHistory,
+  type PersistedChatMessage,
+} from '@/lib/chat-history-store';
+import { confirmAction } from '@/lib/confirm';
 import { buildOfflineChatResult } from '@/lib/offline-chat';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import type { GameListItem } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 
-type Message = {
-  role: 'user' | 'assistant';
-  content: string;
-  variant?: 'error' | 'offline';
-  note?: string;
-  meta?: string;
-};
+type Message = PersistedChatMessage;
 
 const DEFAULT_ASSISTANT_MESSAGE =
   'Ask about your bowling stats, patterns, sessions, and trends.\n' +
@@ -72,6 +74,43 @@ const MAX_INPUT_HEIGHT = 132;
 const HEADER_SPINNER_SIZE = 34;
 const INPUT_VERTICAL_PADDING = 24;
 const MIN_TEXTAREA_HEIGHT = MIN_INPUT_HEIGHT - INPUT_VERTICAL_PADDING;
+
+function createChatMessage(input: Omit<Message, 'id' | 'createdAt'>): Message {
+  return {
+    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+    createdAt: new Date().toISOString(),
+    ...input,
+  };
+}
+
+function createDefaultAssistantMessage(): Message {
+  return createChatMessage({
+    role: 'assistant',
+    content: DEFAULT_ASSISTANT_MESSAGE,
+  });
+}
+
+function isDefaultAssistantMessage(message: Message) {
+  return (
+    message.role === 'assistant' &&
+    message.content === DEFAULT_ASSISTANT_MESSAGE &&
+    !message.variant &&
+    !message.note &&
+    !message.meta
+  );
+}
+
+function isDefaultTranscript(messages: readonly Message[]) {
+  return messages.length === 1 && isDefaultAssistantMessage(messages[0]);
+}
+
+function hasCompletedAssistantResponse(messages: readonly Message[]) {
+  return messages.some((message) => message.role === 'assistant' && !isDefaultAssistantMessage(message));
+}
+
+function limitChatMessages(messages: Message[]) {
+  return messages.slice(-CHAT_HISTORY_MESSAGE_LIMIT);
+}
 
 function renderInlineMessageContent(content: string) {
   const parts = content.split(/(\*\*.*?\*\*)/g);
@@ -116,23 +155,67 @@ export default function ChatScreen() {
   const router = useRouter();
   const tabBarHeight = useBottomTabBarHeight();
   const queryClient = useQueryClient();
-  const { isGuest } = useAuth();
+  const { user, isGuest } = useAuth();
+  const activeUserId = !isGuest ? user?.id ?? null : null;
   const scrollRef = useRef<ScrollView | null>(null);
   const inputRef = useRef<TextInput | null>(null);
   const questionRef = useRef('');
+  const chatHistoryLoadIdRef = useRef(0);
   const [question, setQuestion] = useState('');
   const [inputShellHeight, setInputShellHeight] = useState(MIN_INPUT_HEIGHT);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content: DEFAULT_ASSISTANT_MESSAGE,
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() => [createDefaultAssistantMessage()]);
+  const [chatHistoryReady, setChatHistoryReady] = useState(false);
   const [chatStatus, setChatStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [showExamples, setShowExamples] = useState(false);
-  const [hasCompletedResponse, setHasCompletedResponse] = useState(false);
+  const hasCompletedResponse = useMemo(() => hasCompletedAssistantResponse(messages), [messages]);
+  const hasClearableTranscript = chatHistoryReady && !isDefaultTranscript(messages);
   const inputCanScroll = inputShellHeight >= MAX_INPUT_HEIGHT;
+
+  useEffect(() => {
+    const loadId = chatHistoryLoadIdRef.current + 1;
+    chatHistoryLoadIdRef.current = loadId;
+    questionRef.current = '';
+    inputRef.current?.clear();
+    setQuestion('');
+    setInputShellHeight(MIN_INPUT_HEIGHT);
+    setChatHistoryReady(false);
+    setChatStatus('idle');
+    setMessages([createDefaultAssistantMessage()]);
+
+    if (!activeUserId) {
+      setChatHistoryReady(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    loadChatHistory(activeUserId).then((savedMessages) => {
+      if (cancelled || chatHistoryLoadIdRef.current !== loadId) {
+        return;
+      }
+
+      setMessages(savedMessages.length > 0 ? savedMessages : [createDefaultAssistantMessage()]);
+      setChatHistoryReady(true);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUserId]);
+
+  useEffect(() => {
+    if (!chatHistoryReady || !activeUserId) {
+      return;
+    }
+
+    if (isDefaultTranscript(messages)) {
+      void clearChatHistory(activeUserId);
+      return;
+    }
+
+    void saveChatHistory(activeUserId, messages);
+  }, [activeUserId, chatHistoryReady, messages]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -195,7 +278,7 @@ export default function ChatScreen() {
     }
 
     const nextQuestion = questionRef.current.trim();
-    if (!nextQuestion || chatStatus === 'loading') {
+    if (!nextQuestion || chatStatus === 'loading' || !chatHistoryReady) {
       return;
     }
 
@@ -204,35 +287,53 @@ export default function ChatScreen() {
     setQuestion('');
     inputRef.current?.clear();
     resetComposer();
-    setMessages((prev) => [...prev, { role: 'user', content: userQuestion }]);
+    setMessages((prev) =>
+      limitChatMessages([...prev, createChatMessage({ role: 'user', content: userQuestion })]),
+    );
     setChatStatus('loading');
 
     try {
       const payload = await sendChat(userQuestion);
       if (payload.onlineError && payload.offlineAnswer) {
-        setMessages((prev) => [
-          ...prev,
-          { role: 'assistant', content: payload.onlineError || 'Chat request failed.', variant: 'error' },
-          {
-            role: 'assistant',
-            content: payload.offlineAnswer || 'Offline answer unavailable.',
-            variant: 'offline',
-            meta: payload.offlineMeta,
-            note:
-              payload.offlineNote ||
-              "This response was done offline so it can't handle complex questions and may be wrong.",
-          },
-        ]);
+        setMessages((prev) =>
+          limitChatMessages([
+            ...prev,
+            createChatMessage({
+              role: 'assistant',
+              content: payload.onlineError || 'Chat request failed.',
+              variant: 'error',
+            }),
+            createChatMessage({
+              role: 'assistant',
+              content: payload.offlineAnswer || 'Offline answer unavailable.',
+              variant: 'offline',
+              meta: payload.offlineMeta,
+              note:
+                payload.offlineNote ||
+                "This response was done offline so it can't handle complex questions and may be wrong.",
+            }),
+          ]),
+        );
       } else if (payload.answer) {
-        setMessages((prev) => [
-          ...prev,
-          { role: 'assistant', content: payload.answer || 'No response returned.', meta: payload.meta },
-        ]);
+        setMessages((prev) =>
+          limitChatMessages([
+            ...prev,
+            createChatMessage({
+              role: 'assistant',
+              content: payload.answer || 'No response returned.',
+              meta: payload.meta,
+            }),
+          ]),
+        );
       } else {
-        setMessages((prev) => [...prev, { role: 'assistant', content: 'No response returned.' }]);
+        setMessages((prev) =>
+          limitChatMessages([
+            ...prev,
+            createChatMessage({ role: 'assistant', content: 'No response returned.' }),
+          ]),
+        );
       }
       setChatStatus('idle');
-      setHasCompletedResponse(true);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Chat request failed.';
       const isNetworkError =
@@ -243,32 +344,52 @@ export default function ChatScreen() {
           queryKeys.games,
         );
         const offlineResult = await buildOfflineChatResult(userQuestion, gamesPayload?.games);
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: offlineResult.answer,
-            variant: 'offline',
-            meta: offlineResult.meta,
-            note: offlineResult.note,
-          },
-        ]);
+        setMessages((prev) =>
+          limitChatMessages([
+            ...prev,
+            createChatMessage({
+              role: 'assistant',
+              content: offlineResult.answer,
+              variant: 'offline',
+              meta: offlineResult.meta,
+              note: offlineResult.note,
+            }),
+          ]),
+        );
         setChatStatus('idle');
-        setHasCompletedResponse(true);
         return;
       }
 
       setChatStatus('error');
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: errorMessage,
-          variant: 'error',
-        },
-      ]);
-      setHasCompletedResponse(true);
+      setMessages((prev) =>
+        limitChatMessages([
+          ...prev,
+          createChatMessage({
+            role: 'assistant',
+            content: errorMessage,
+            variant: 'error',
+          }),
+        ]),
+      );
     }
+  };
+
+  const handleClearChat = () => {
+    if (!activeUserId || chatStatus === 'loading') {
+      return;
+    }
+
+    confirmAction({
+      title: 'Clear chat',
+      message: 'This removes the saved chat history from this device or browser.',
+      confirmLabel: 'Clear',
+      destructive: true,
+      onConfirm: () => {
+        void clearChatHistory(activeUserId);
+        setChatStatus('idle');
+        setMessages([createDefaultAssistantMessage()]);
+      },
+    });
   };
 
   const pinSource = useMemo(() => {
@@ -350,6 +471,16 @@ export default function ChatScreen() {
                 ) : null}
               </View>
             </View>
+            {hasClearableTranscript ? (
+              <View style={styles.headerActions}>
+                <IconAction
+                  accessibilityLabel="Clear chat"
+                  onPress={chatStatus === 'loading' ? undefined : handleClearChat}
+                  style={chatStatus === 'loading' && styles.headerActionDisabled}
+                  icon={<Ionicons name="trash-outline" size={22} color={palette.text} />}
+                />
+              </View>
+            ) : null}
           </View>
 
           <ScrollView
@@ -360,7 +491,7 @@ export default function ChatScreen() {
             showsVerticalScrollIndicator={false}>
             {messages.map((message, index) => (
               <View
-                key={`${message.role}-${index}`}
+                key={message.id || `${message.role}-${index}`}
                 style={[
                   styles.messageWrap,
                   message.role === 'user' ? styles.messageWrapUser : styles.messageWrapAssistant,
@@ -454,10 +585,11 @@ export default function ChatScreen() {
               </View>
               <Pressable
                 onPress={handleAsk}
-                disabled={chatStatus === 'loading' || !question.trim()}
+                disabled={chatStatus === 'loading' || !question.trim() || !chatHistoryReady}
                 style={({ pressed }) => [
                   styles.sendButton,
-                  (chatStatus === 'loading' || !question.trim()) && styles.sendButtonDisabled,
+                  (chatStatus === 'loading' || !question.trim() || !chatHistoryReady) &&
+                    styles.sendButtonDisabled,
                   pressed && styles.pressed,
                 ]}>
                 <Ionicons name="arrow-up" size={22} color={palette.text} />
@@ -521,6 +653,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     paddingBottom: spacing.md,
     paddingHorizontal: spacing.lg,
+    position: 'relative',
   },
   pinRow: {
     alignItems: 'center',
@@ -543,6 +676,14 @@ const styles = StyleSheet.create({
     height: HEADER_SPINNER_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerActions: {
+    position: 'absolute',
+    right: spacing.lg,
+    top: spacing.sm,
+  },
+  headerActionDisabled: {
+    opacity: 0.45,
   },
   pinImage: {
     width: 74,

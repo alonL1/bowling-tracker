@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -805,10 +804,7 @@ export default function SessionDetailScreen() {
 
       {editing ? (
         <Modal transparent animationType="fade" visible={editing} onRequestClose={() => setEditing(false)}>
-          <KeyboardAvoidingView
-            behavior="padding"
-            enabled={Platform.OS === 'ios'}
-            style={styles.modalBackdrop}>
+          <View style={styles.modalBackdrop}>
             <SurfaceCard style={styles.modalCard} tone="raised">
               <Text style={styles.modalTitle}>Edit session</Text>
               <KeyboardAwareScrollView
@@ -885,7 +881,7 @@ export default function SessionDetailScreen() {
                 variant="secondary"
               />
             </SurfaceCard>
-          </KeyboardAvoidingView>
+          </View>
         </Modal>
       ) : null}
 

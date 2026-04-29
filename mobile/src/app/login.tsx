@@ -1,10 +1,12 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  KeyboardAvoidingView,
+  Keyboard,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -19,7 +21,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import ActionButton from '@/components/action-button';
 import CenteredState from '@/components/centered-state';
 import InfoBanner from '@/components/info-banner';
-import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import SafeRedirect from '@/components/safe-redirect';
 import SurfaceCard from '@/components/surface-card';
 import { checkUsernameAvailability } from '@/lib/backend';
@@ -70,8 +71,20 @@ export default function LoginScreen() {
   const [transferPrompt, setTransferPrompt] = useState<TransferPrompt | null>(null);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferError, setTransferError] = useState('');
+  const authScrollRef = useRef<ScrollView | null>(null);
   const pagerRef = useRef<ScrollView | null>(null);
-  const { width: windowWidth } = useWindowDimensions();
+  const signInEmailRef = useRef<TextInput | null>(null);
+  const signInPasswordRef = useRef<TextInput | null>(null);
+  const signUpFirstNameRef = useRef<TextInput | null>(null);
+  const signUpLastNameRef = useRef<TextInput | null>(null);
+  const signUpUsernameRef = useRef<TextInput | null>(null);
+  const signUpEmailRef = useRef<TextInput | null>(null);
+  const signUpPasswordRef = useRef<TextInput | null>(null);
+  const focusedInputRef = useRef<TextInput | null>(null);
+  const currentScrollYRef = useRef(0);
+  const keyboardScreenYRef = useRef<number | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const pagerWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
 
@@ -83,6 +96,51 @@ export default function LoginScreen() {
     mode === 'signIn'
       ? 'Sign in to access your sessions, uploads, chat, and friends.'
       : 'Create an account to save your logs and access them on every device.';
+
+  const contentContainerStyle = useMemo(
+    () =>
+      keyboardHeight > 0
+        ? [styles.content, { paddingBottom: keyboardHeight + 24 }]
+        : styles.content,
+    [keyboardHeight],
+  );
+
+  const ensureInputVisible = useCallback(
+    (inputRef: TextInput | null) => {
+      if (!inputRef || !authScrollRef.current) {
+        return;
+      }
+      inputRef.measureInWindow((_x, y, _w, h) => {
+        const inputBottom = y + h;
+        const breathingRoom = Platform.OS === 'android' ? 64 : 24;
+        const keyboardTop = keyboardScreenYRef.current ?? windowHeight;
+        const safeBottom = keyboardTop - breathingRoom;
+        if (inputBottom > safeBottom) {
+          const delta = inputBottom - safeBottom;
+          authScrollRef.current?.scrollTo({
+            y: currentScrollYRef.current + delta,
+            animated: true,
+          });
+        }
+      });
+    },
+    [windowHeight],
+  );
+
+  const handleInputFocus = useCallback(
+    (inputRef: TextInput | null) => {
+      focusedInputRef.current = inputRef;
+      requestAnimationFrame(() => ensureInputVisible(inputRef));
+    },
+    [ensureInputVisible],
+  );
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      currentScrollYRef.current = event.nativeEvent.contentOffset.y;
+    },
+    [],
+  );
 
   const scrollToMode = (nextMode: AuthMode, animated: boolean) => {
     if (!pagerWidth) {
@@ -108,6 +166,30 @@ export default function LoginScreen() {
   useEffect(() => {
     setMode(requestedMode);
   }, [requestedMode]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      keyboardScreenYRef.current = event.endCoordinates.screenY;
+      setKeyboardHeight(event.endCoordinates.height);
+      ensureInputVisible(focusedInputRef.current);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      keyboardScreenYRef.current = null;
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [ensureInputVisible]);
 
   useEffect(() => {
     let active = true;
@@ -397,10 +479,12 @@ export default function LoginScreen() {
             <View style={[styles.formGroup, styles.nameField]}>
               <Text style={styles.label}>First Name</Text>
               <TextInput
+                ref={signUpFirstNameRef}
                 placeholder="First name"
                 placeholderTextColor={palette.muted}
                 style={styles.input}
                 value={firstName}
+                onFocus={() => handleInputFocus(signUpFirstNameRef.current)}
                 onChangeText={setFirstName}
               />
             </View>
@@ -408,10 +492,12 @@ export default function LoginScreen() {
             <View style={[styles.formGroup, styles.nameField]}>
               <Text style={styles.label}>Last Name</Text>
               <TextInput
+                ref={signUpLastNameRef}
                 placeholder="Optional"
                 placeholderTextColor={palette.muted}
                 style={styles.input}
                 value={lastName}
+                onFocus={() => handleInputFocus(signUpLastNameRef.current)}
                 onChangeText={setLastName}
               />
             </View>
@@ -420,12 +506,14 @@ export default function LoginScreen() {
           <View style={styles.formGroup}>
             <Text style={styles.label}>Username</Text>
             <TextInput
+              ref={signUpUsernameRef}
               autoCapitalize="none"
               autoCorrect={false}
               placeholder="username"
               placeholderTextColor={palette.muted}
               style={styles.input}
               value={username}
+              onFocus={() => handleInputFocus(signUpUsernameRef.current)}
               onChangeText={setUsername}
             />
             <Text style={styles.helperText}>
@@ -438,6 +526,7 @@ export default function LoginScreen() {
       <View style={styles.formGroup}>
         <Text style={styles.label}>Email</Text>
         <TextInput
+          ref={pageMode === 'signUp' ? signUpEmailRef : signInEmailRef}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
@@ -445,6 +534,11 @@ export default function LoginScreen() {
           placeholderTextColor={palette.muted}
           style={styles.input}
           value={email}
+          onFocus={() =>
+            handleInputFocus(
+              pageMode === 'signUp' ? signUpEmailRef.current : signInEmailRef.current,
+            )
+          }
           onChangeText={setEmail}
         />
       </View>
@@ -452,11 +546,17 @@ export default function LoginScreen() {
       <View style={styles.formGroup}>
         <Text style={styles.label}>Password</Text>
         <TextInput
+          ref={pageMode === 'signUp' ? signUpPasswordRef : signInPasswordRef}
           secureTextEntry
           placeholder="Password"
           placeholderTextColor={palette.muted}
           style={styles.input}
           value={password}
+          onFocus={() =>
+            handleInputFocus(
+              pageMode === 'signUp' ? signUpPasswordRef.current : signInPasswordRef.current,
+            )
+          }
           onChangeText={setPassword}
         />
       </View>
@@ -482,15 +582,15 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
-      <KeyboardAvoidingView
-        behavior="padding"
-        enabled={Platform.OS === 'ios'}
-        style={styles.keyboardWrap}>
-        <KeyboardAwareScrollView
+      <View style={styles.keyboardWrap}>
+        <ScrollView
+          ref={authScrollRef}
           style={styles.scroll}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={contentContainerStyle}
           keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}>
           <View style={styles.header}>
             <Pressable
               onPress={() => router.replace(`/welcome?next=${encodeURIComponent(nextPath)}` as never)}
@@ -610,8 +710,8 @@ export default function LoginScreen() {
               </View>
             </ScrollView>
           </View>
-        </KeyboardAwareScrollView>
-      </KeyboardAvoidingView>
+        </ScrollView>
+      </View>
 
       <Modal transparent animationType="fade" visible={Boolean(transferPrompt)}>
         <View style={styles.modalBackdrop}>

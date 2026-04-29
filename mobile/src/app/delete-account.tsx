@@ -8,6 +8,7 @@ import PageBackButton from '@/components/page-back-button';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { deleteOwnAccount } from '@/lib/backend';
+import { clearChatHistory } from '@/lib/chat-history-store';
 import { clearLocalLogsForUser } from '@/lib/local-logs-db';
 import { PUBLIC_WEBSITE_URL } from '@/lib/urls';
 import { useAuth } from '@/providers/auth-provider';
@@ -70,6 +71,7 @@ export default function DeleteAccountScreen() {
       await deleteOwnAccount();
       if (user) {
         await clearLocalLogsForUser(user.id);
+        await clearChatHistory(user.id);
       }
       await signOutToGuestSession();
       router.replace('/welcome');

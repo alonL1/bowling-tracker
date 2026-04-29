@@ -30,7 +30,7 @@ export type KeyboardAwareScrollHandle = {
 };
 
 const DEFAULT_EXTRA_SCROLL_HEIGHT = Platform.select({
-  ios: 48,
+  ios: 96,
   android: 180,
   default: 0,
 }) as number;
@@ -52,10 +52,10 @@ const KeyboardAwareScrollView = forwardRef<
   const nativeKeyboardAwareRef = useRef<any>(null);
   const flattenedContentContainerStyle =
     StyleSheet.flatten(contentContainerStyle) ?? undefined;
-  const usePlainScrollView = Platform.OS !== 'android';
+  const useNativeKeyboardAwareScrollView = Platform.OS !== 'web';
 
   useImperativeHandle(ref, () => {
-    if (usePlainScrollView) {
+    if (!useNativeKeyboardAwareScrollView) {
       return (webScrollRef.current as KeyboardAwareScrollHandle | null) ?? {};
     }
 
@@ -75,9 +75,9 @@ const KeyboardAwareScrollView = forwardRef<
       getScrollResponder: () =>
         nativeKeyboardAwareRef.current?.getScrollResponder?.() ?? null,
     };
-  }, []);
+  }, [useNativeKeyboardAwareScrollView]);
 
-  if (usePlainScrollView) {
+  if (!useNativeKeyboardAwareScrollView) {
     return (
       <ScrollView
         {...props}
@@ -95,9 +95,10 @@ const KeyboardAwareScrollView = forwardRef<
       ref={nativeKeyboardAwareRef}
       contentContainerStyle={flattenedContentContainerStyle}
       enableOnAndroid
+      enableAutomaticScroll
       extraHeight={extraScrollHeight}
       extraScrollHeight={0}
-      keyboardOpeningTime={0}
+      keyboardOpeningTime={Platform.OS === 'ios' ? 250 : 0}
       keyboardShouldPersistTaps={keyboardShouldPersistTaps}>
       {children}
     </NativeKeyboardAwareScrollView>

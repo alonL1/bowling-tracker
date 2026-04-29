@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { StackActions, useNavigation } from '@react-navigation/native';
 import {
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -25,6 +24,7 @@ import EmptyStateCard from '@/components/empty-state-card';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
 import InlineLoadingCard from '@/components/inline-loading-card';
+import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import LiveGameEditSheet from '@/components/live-game-edit-sheet';
 import LiveSessionGameCard from '@/components/live-session-game-card';
 import StackBadge from '@/components/stack-badge';
@@ -1176,10 +1176,12 @@ export default function LiveSessionScreen() {
         animationType="fade"
         visible={endSessionOpen}
         onRequestClose={() => setEndSessionOpen(false)}>
-        <KeyboardAvoidingView
-          behavior="padding"
-          enabled={Platform.OS === 'ios'}
-          style={styles.modalBackdrop}>
+        <KeyboardAwareScrollView
+          style={styles.modalKeyboardScroll}
+          contentContainerStyle={styles.modalScrollContent}
+          extraScrollHeight={112}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}>
           <SurfaceCard style={styles.modalCard} tone="raised">
             <Text style={styles.modalTitle}>End Session</Text>
             <Text style={styles.modalBody}>
@@ -1220,7 +1222,7 @@ export default function LiveSessionScreen() {
             />
             <ActionButton label="Cancel" onPress={() => setEndSessionOpen(false)} variant="secondary" />
           </SurfaceCard>
-        </KeyboardAvoidingView>
+        </KeyboardAwareScrollView>
       </Modal>
 
       <LiveGameEditSheet
@@ -1578,6 +1580,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: spacing.lg,
     backgroundColor: palette.overlay,
+  },
+  modalKeyboardScroll: {
+    flex: 1,
+    backgroundColor: palette.overlay,
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xl,
   },
   modalCard: {
     borderRadius: radii.xl,
