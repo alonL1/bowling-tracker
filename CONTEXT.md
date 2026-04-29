@@ -1,0 +1,542 @@
+# PinPoint Bowling - Project Context
+
+## Project Overview
+
+- App name: PinPoint / PinPoint Bowling.
+- App type: bowling tracker and bowling stats app.
+- Platforms: iOS, Android, and web.
+- Current status from project owner: released on the iOS App Store as PinPoint Bowling, released in closed testing on Google Play as PinPoint, and live on the web through Vercel at `https://pinpointbowling.vercel.app/`.
+- Older active Vercel URL: `https://bowling-tracker-six.vercel.app/`. This is still valid and appears in code/env usage; do not treat it as broken just because the newer public web URL also exists.
+- Main purpose: let bowlers record games and sessions, usually by taking or uploading scoreboard photos, then review scores, history, stats, AI chat answers, and friend leaderboards.
+- Target user: bowlers who want a cleaner log than notes/spreadsheets and want automatic scoreboard import plus trend/stat analysis.
+- Future work goals: bug fixes, new features, monetization, UI polish, analytics, release hardening, and continued storage/offline testing.
+- Recent focus: local app storage / offline mode. Native mobile now has a SQLite-backed saved logs store; upload/processing flows also have a local retry queue. This should be tested carefully.
+
+## Tech Stack
+
+- Languages:
+  - TypeScript for app and backend source.
+  - JavaScript/CommonJS for the worker in `worker/index.js`.
+  - SQL for Supabase schema and migrations in `db/`.
+- App framework:
+  - Expo / React Native in `mobile/`.
+  - Expo Router route tree in `mobile/src/app/`.
+  - React Native Web for browser builds.
+- Backend/API:
+  - Next.js 14 API routes in `app/api/`.
+  - Root Next app also hosts the exported Expo web app through rewrites in `next.config.js`.
+- Package manager:
+  - npm. Root and `mobile/` both have `package-lock.json`.
+- Important frontend libraries:
+  - React 19 / React Native 0.83 / Expo 55 in `mobile/package.json`.
+  - `expo-router`, `@react-navigation/*`.
+  - `@tanstack/react-query`, `@tanstack/react-query-persist-client`, `@tanstack/query-async-storage-persister`.
+  - `@react-native-async-storage/async-storage`.
+  - `expo-sqlite`.
+  - `expo-file-system`.
+  - `expo-image-picker`.
+  - `expo-apple-authentication`, `expo-auth-session`, `expo-web-browser`.
+  - `@supabase/supabase-js`.
+- Backend/database/storage:
+  - Supabase Auth.
+  - Supabase Postgres tables defined in `db/schema.sql`.
+  - Supabase Storage buckets including `scoreboards-temp` and `profile-avatars`.
+- Authentication:
+  - Supabase email/password, Google OAuth, Apple sign-in, and anonymous guest sessions.
+  - Frontend auth client is in `mobile/src/lib/supabase.ts`.
+  - Backend auth helpers are in `app/api/utils/auth.ts`.
+- AI/OCR:
+  - Google Gemini through `@google/generative-ai`.
+  - Chat route: `app/api/chat/route.ts`.
+  - Scoreboard image worker: `worker/index.js`.
+- Analytics/crash reporting:
+  - Unknown. I did not find a dedicated analytics or crash reporting package/config.
+- Deployment/build tools:
+  - Vercel/Next for web/API hosting.
+  - `scripts/sync-expo-web.mjs` exports Expo web into `public/expo-web`.
+  - Expo EAS for iOS builds.
+  - Local Android Gradle project for Play Store app bundles.
+  - Cloud Run-style Express worker in `worker/`.
+- Platform-specific tooling:
+  - iOS config is generated from `mobile/app.config.ts` and EAS; no committed `mobile/ios/` directory was found.
+  - Android native project is committed under `mobile/android/`.
+  - Web-specific Next rewrites are in `next.config.js`; CORS for API routes is in `middleware.ts`.
+
+## Project Structure
+
+- `README.md`
+  - Main project README. It explains the current architecture: Expo frontend in `mobile/`, Next API backend at the root, Supabase, and Cloud Run worker.
+  - Includes root env vars, local dev, production build, main API routes, Supabase setup, and worker deployment notes.
+- `mobile/README.md`
+  - Mobile/web frontend README. It explains that `mobile/` is the single source of truth for Android, iPhone, and browser UI.
+  - Includes native dev-client workflow, Android Play Store build steps, iPhone App Store/EAS workflow, and web workflow.
+- `SESSION_PLAN.md`
+  - Historical plan for adding bowling session grouping.
+  - Useful for understanding why `bowling_sessions` exists and how games are grouped.
+- `SESSION_CHAT_PLAN.md`
+  - Historical plan for session-aware chat.
+  - Useful for understanding session labels, session filtering, and chat expectations.
+- `mobile/`
+  - Canonical product frontend for iOS, Android, and web.
+  - Main routes, UI components, hooks, data clients, local storage, and auth providers live here.
+- `mobile/src/app/`
+  - Expo Router screens and route layouts.
+  - Root entry: `mobile/src/app/_layout.tsx`.
+  - Main tabs: `mobile/src/app/(tabs)/`.
+- `mobile/src/components/`
+  - Shared UI: cards, shells, frame grids, game/session cards, edit sheets, banners, nav, profile avatar, upload forms.
+- `mobile/src/lib/`
+  - Frontend data, auth, scoring/stat utilities, local logs DB, upload queue storage, offline chat, API wrappers, profile helpers, URLs.
+- `mobile/src/hooks/`
+  - Important hook: `mobile/src/hooks/use-logged-data.ts`, which chooses native SQLite logs vs web/API fetching.
+- `mobile/src/providers/`
+  - `auth-provider.tsx` for auth/profile/tutorial state.
+  - `uploads-processing-provider.tsx` for local upload queue and background sync.
+- `app/api/`
+  - Next API routes for games, sessions, live sessions, recording drafts, mobile logs sync, account/profile, auth, chat, friends.
+- `app/api/utils/`
+  - Shared backend helpers for auth, profiles, mobile sync idempotency, and logged scoreboard insertion.
+- `db/`
+  - `schema.sql` plus migration files. This is the source of truth for Supabase tables, triggers, indexes, policies, storage bucket setup, and sync tombstones.
+- `worker/`
+  - Express worker that claims `analysis_jobs`, downloads scoreboard images from Supabase Storage, sends them to Gemini, writes extracted scoreboard data back to Postgres, and deletes processed images.
+- `scripts/`
+  - `dev.mjs` exports/syncs Expo web and starts Next dev.
+  - `sync-expo-web.mjs` runs Expo export and copies output into `public/expo-web`.
+- `public/`
+  - Generated/static web assets, including `public/expo-web/index.html` and pin images.
+- `next.config.js`
+  - Rewrites browser routes like `/sessions`, `/record`, `/games/:path*`, `/chat`, etc. to the exported Expo web app.
+- `middleware.ts`
+  - CORS handling for `/api/**`.
+- `mobile/app.config.ts`
+  - Expo app identity, icons, plugins, iOS bundle ID, Android package, permissions strings, version, and scheme.
+- `mobile/eas.json`
+  - EAS development/production profiles.
+- `mobile/android/`
+  - Native Android project used for local Gradle builds and Play Store `.aab`.
+
+## App Architecture
+
+- Main frontend entry:
+  - `mobile/src/app/_layout.tsx`.
+  - Wraps the app with `PersistQueryClientProvider`, `AuthProvider`, `UploadsProcessingProvider`, `SafeAreaProvider`, and Expo Router `Stack`.
+- Navigation:
+  - Expo Router.
+  - Root auth guards in `mobile/src/app/_layout.tsx`.
+  - Main tabs in `mobile/src/app/(tabs)/_layout.tsx`: Sessions, Chat, Record, Friends, Account.
+  - Public/signed-out routes include `/welcome`, `/login`, `/privacy`, `/terms`, `/delete-account`, `/delete-data`, and `/invite/[token]`.
+- Main screens:
+  - Sessions list: `mobile/src/app/(tabs)/sessions/index.tsx`.
+  - Session detail: `mobile/src/app/(tabs)/sessions/[sessionId].tsx`.
+  - Game detail/edit: `mobile/src/app/games/[gameId].tsx`.
+  - Record hub: `mobile/src/app/(tabs)/record/index.tsx`.
+  - Live session recording: `mobile/src/app/(tabs)/record/live.tsx`.
+  - Upload/add flows: `mobile/src/app/(tabs)/record/upload-session.tsx`, `add-multiple-sessions.tsx`, `add-existing-session.tsx`.
+  - Chat: `mobile/src/app/(tabs)/chat.tsx`.
+  - Friends/leaderboards: `mobile/src/app/(tabs)/friends.tsx`.
+  - Account/settings/legal/data deletion: `mobile/src/app/(tabs)/account.tsx`, `mobile/src/app/delete-account.tsx`, `mobile/src/app/delete-data.tsx`.
+- State management:
+  - React Query for server state and cache invalidation.
+  - Context providers for auth and upload-processing queue state.
+  - Local persistent stores:
+    - AsyncStorage for Supabase session, query cache, tutorial state, upload-processing queue metadata.
+    - Expo SQLite for native saved logs.
+    - Expo FileSystem document storage for local scoreboard image copies in the upload queue.
+- Data flow:
+  - Frontend calls `mobile/src/lib/backend.ts`.
+  - `backend.ts` calls `mobile/src/lib/api.ts`.
+  - `api.ts` derives API base URL and attaches Supabase bearer token from `mobile/src/lib/supabase.ts`.
+  - Next API routes in `app/api/` use Supabase service role key to read/write Postgres and Storage.
+  - Worker processes queued scoreboard images from `analysis_jobs`.
+- Fetching/caching approach:
+  - Query keys are in `mobile/src/lib/backend.ts`.
+  - Query defaults and persisted query cache are in `mobile/src/lib/query-client.ts`.
+  - Web persists `games`, `game`, `sessions`, and `leaderboard` query roots for up to 24 hours.
+  - Native persists only `leaderboard` in React Query because logged game data is intended to come from SQLite.
+  - `AuthProvider` clears the query cache when the signed-in user changes and stores the cache owner under `pinpoint-query-cache-owner`.
+- Local storage / offline mode approach:
+  - Native saved logs are loaded from SQLite through `mobile/src/lib/local-logs-db.native.ts`.
+  - Web has a stub in `mobile/src/lib/local-logs-db.ts`, so SQLite logs are mobile-only.
+  - `mobile/src/hooks/use-logged-data.ts` uses SQLite on native and API/React Query on web.
+  - `mobile/src/lib/local-logs-sync.ts` syncs local logs from `/api/mobile-sync/logs`.
+  - Upload/processing queue is separate from saved logs and lives in `mobile/src/lib/uploads-processing-store.ts` plus `mobile/src/providers/uploads-processing-provider.tsx`.
+- How games/scores/stats are stored and updated:
+  - Server data is in Supabase tables: `bowling_sessions`, `games`, `frames`, `shots`, plus draft/live tables.
+  - Scoreboard OCR extracts a `players` payload with frames and shots.
+  - Finalization inserts logged games and selected player frames through `app/api/utils/logged-scoreboard.ts`.
+  - Manual game edits call `PATCH /api/game` and update `games`, `frames`, and `shots`.
+  - Stats and grouping are computed on the frontend in `mobile/src/lib/bowling.ts` and `mobile/src/lib/live-session.ts`, and in backend chat/leaderboard logic.
+
+## Core Features
+
+- Authentication and account onboarding
+  - Files: `mobile/src/lib/supabase.ts`, `mobile/src/providers/auth-provider.tsx`, `mobile/src/app/welcome.tsx`, `mobile/src/app/login.tsx`, `mobile/src/app/complete-profile.tsx`, `mobile/src/app/choose-avatar.tsx`.
+  - Supports guest mode, email/password, Google OAuth, and Apple sign-in.
+  - Non-guest users must complete profile/avatar/tutorial guards before normal app flow.
+- Recording bowling games from scoreboard photos
+  - Files: `mobile/src/app/(tabs)/record/index.tsx`, `mobile/src/app/(tabs)/record/live.tsx`, `mobile/src/components/upload-session-form.tsx`, upload/add screens.
+  - Users can start a live session, upload a completed session, add multiple sessions, or add to an existing session.
+- Local uploads and processing queue
+  - Files: `mobile/src/lib/uploads-processing-store.ts`, `mobile/src/providers/uploads-processing-provider.tsx`, `mobile/src/app/uploads-processing.tsx`, `mobile/src/components/uploads-processing-banner.tsx`.
+  - Stores selected images locally, uploads them later, polls/refreshes server state, retries failed steps, and merges optimistic sessions/games into the UI.
+- Scoreboard OCR and processing
+  - Files: `worker/index.js`, `app/api/live-session/capture/route.ts`, `app/api/recording-draft/upload/route.ts`, `db/schema.sql`.
+  - Worker uses Gemini to extract all visible player rows and writes normalized extraction data to live/draft game rows.
+- Reviewing and finalizing live sessions/drafts
+  - Files: `mobile/src/app/(tabs)/record/live.tsx`, upload/add screens, `app/api/live-session/end/route.ts`, `app/api/recording-draft/finalize/route.ts`.
+  - User selects which player is themselves before logging games.
+  - Finalization creates real `games`, `frames`, `shots`, and `bowling_sessions`.
+- Viewing game history and sessions
+  - Files: `mobile/src/app/(tabs)/sessions/index.tsx`, `mobile/src/app/(tabs)/sessions/[sessionId].tsx`, `mobile/src/components/session-card.tsx`, `mobile/src/components/session-game-card.tsx`, `mobile/src/lib/bowling.ts`, `mobile/src/hooks/use-logged-data.ts`.
+  - Sessions are grouped by `session_id`; unnamed sessions are labeled by order.
+- Viewing and editing a game
+  - Files: `mobile/src/app/games/[gameId].tsx`, `mobile/src/components/frame-grid.tsx`, `mobile/src/components/game-edit-sheet.tsx`, `app/api/game/route.ts`.
+  - Frame/shot edits recompute total score and update backend records.
+  - Native offline saved game view is read-only when sync failed/offline.
+- Stats and averages
+  - Files: `mobile/src/lib/bowling.ts`, `mobile/src/lib/live-session.ts`, `mobile/src/app/(tabs)/sessions/index.tsx`, `mobile/src/app/(tabs)/record/live.tsx`.
+  - Includes session averages, live session stats, strike rate, spare conversion, best scores, series, frame stats.
+- AI chat
+  - Files: `mobile/src/app/(tabs)/chat.tsx`, `app/api/chat/route.ts`, `mobile/src/lib/offline-chat.ts`.
+  - Online chat uses backend route and Gemini.
+  - Backend chat includes session-aware indexing/filtering.
+  - Mobile offline chat handles simple local questions from cached/native local games.
+- Friends and leaderboards
+  - Files: `mobile/src/app/(tabs)/friends.tsx`, `app/api/friends/leaderboard/route.ts`, invite routes under `app/api/friends/invite/`.
+  - Supports persistent invite links and metric-based leaderboards.
+- Profile, avatars, legal, and data deletion
+  - Files: profile routes under `app/api/account/profile/`, `mobile/src/lib/profile.ts`, `mobile/src/app/edit-profile.tsx`, `mobile/src/app/privacy.tsx`, `mobile/src/app/terms.tsx`, `mobile/src/app/delete-account.tsx`, `mobile/src/app/delete-data.tsx`.
+  - Avatar presets and uploads are supported.
+  - Account/data deletion also clears local native logs for the current user.
+
+## Local Storage / Offline Mode
+
+- Local storage systems in use:
+  - Supabase auth persistence:
+    - `mobile/src/lib/supabase.ts`.
+    - Uses AsyncStorage on native and `window.localStorage` on web.
+  - React Query persistence:
+    - `mobile/src/lib/query-client.ts`.
+    - Uses AsyncStorage key `pinpoint-query-cache`.
+  - Query cache owner:
+    - `pinpoint-query-cache-owner` in `mobile/src/lib/query-client.ts`.
+  - Tutorial state:
+    - `mobile/src/lib/onboarding.ts`.
+    - Uses AsyncStorage keys starting with `pinpoint-getting-started-v1`.
+  - Native local logs:
+    - `mobile/src/lib/local-logs-db.native.ts`.
+    - SQLite database name: `pinpoint-local-logs.db`.
+  - Web local logs stub:
+    - `mobile/src/lib/local-logs-db.ts`.
+    - Returns no SQLite data and marks `localLogsSupported = false`.
+  - Upload-processing queue:
+    - `mobile/src/lib/uploads-processing-store.ts`.
+    - AsyncStorage key: `pinpoint-uploads-processing-v1`.
+    - Local image files under app document directory folder `uploads-processing`.
+- Files responsible for local/offline logged data:
+  - `mobile/src/lib/local-logs-db.native.ts`
+  - `mobile/src/lib/local-logs-db.ts`
+  - `mobile/src/lib/local-logs-sync.ts`
+  - `mobile/src/hooks/use-logged-data.ts`
+  - `app/api/mobile-sync/logs/route.ts`
+  - `db/schema.sql` tables/triggers for `mobile_sync_tombstones`
+- What data is persisted locally in SQLite on native:
+  - Sync metadata: `sync_meta`.
+  - User profile cache: `profiles`.
+  - Sessions: `sessions`.
+  - Games: `games`.
+  - Frames: `frames`.
+  - Shots: `shots`.
+  - `scoreboard_extraction` is stored as JSON text in local `games`.
+- How local logs sync works:
+  - `syncLocalLogsForUser(userId, accessToken)` reads the current cursor from SQLite.
+  - It calls `/api/mobile-sync/logs?since=<cursor>`.
+  - The API returns server time, profile, changed sessions, changed games with frames/shots, deleted session IDs, deleted game IDs, and `nextCursor`.
+  - SQLite applies deletes and upserts in a transaction, then stores the cursor in `sync_meta`.
+  - Server deletes are tracked by `mobile_sync_tombstones` triggers in `db/schema.sql`.
+- How the app behaves offline:
+  - Native sessions/game views use local SQLite data after it has synced at least once.
+  - If sync fails but local data exists, `useLoggedGames()` returns local data with status label `Offline - showing saved logs`.
+  - If there is no local data and no previous sync, the UI can show `Open PinPoint online once to save your logs on this device.`
+  - Game detail is read-only when `gameQuery.syncError` is present.
+  - Offline mobile chat can answer simple questions like average, count, total, best, and worst from local games.
+  - Web does not use SQLite local logs; it relies on React Query/browser cache for persisted query data.
+- How local data interacts with fetching/caching:
+  - On native, `useLoggedGames()` and `useLoggedGame()` disable the normal API query and use local SQLite query keys under `local-logs`.
+  - On web, those hooks use normal API queries (`queryKeys.games`, `queryKeys.game`).
+  - Upload-processing optimistic sessions/games are merged into both API data and local SQLite data through functions in `mobile/src/lib/uploads-processing-store.ts`.
+  - `UploadsProcessingProvider` invalidates both normal query keys and local log query keys after queue changes.
+- Upload/processing local queue:
+  - Stores metadata in AsyncStorage and image files in the app document directory.
+  - Tracks capture states such as `captured_local`, `upload_pending`, `uploaded`, `server_row_pending`, `processing_pending`, `ready_pending_finalize`, `finalize_pending`, `failed`, `synced`, and `discarded`.
+  - Runs sync on app active, on web `online` event, immediately after enqueue, and every 15 seconds.
+  - Uses retry backoff via `getNextRetryAt`.
+  - Finalization uses client operation IDs for idempotency on the server.
+- Sync/conflict handling:
+  - Local logs sync is server-to-device; conflict resolution for local edits is not a full bidirectional merge.
+  - Edits/deletes call server APIs, then trigger local log resync/invalidation.
+  - Upload finalization idempotency uses `mobile_sync_operations` and client operation IDs.
+  - Unknown: there is no explicit general-purpose conflict resolution for simultaneous edits from multiple devices beyond server timestamps and overwrite/upsert behavior.
+- Files/flows to test carefully:
+  - First launch online on native, then open Sessions offline.
+  - Native sign-out/sign-in user switch and query cache owner clearing.
+  - Native delete account/data and verify SQLite is cleared for the user.
+  - Native upload queue while offline, app restart, then reconnect.
+  - Live session finalization while network drops before/after server operation completes.
+  - Recording draft finalization with retries and duplicate client operation IDs.
+  - Web behavior after refresh/offline, because it does not use SQLite local logs.
+  - Offline Chat simple stat questions after local logs have synced.
+
+## Data Model
+
+- Bowling session:
+  - Server table: `bowling_sessions` in `db/schema.sql`.
+  - Represents a group of games.
+  - Fields include `id`, `user_id`, `client_finalize_operation_id`, `name`, `description`, `started_at`, `created_at`, `updated_at`.
+  - Frontend type: `SessionItem` in `mobile/src/lib/types.ts`.
+- Bowling game:
+  - Server table: `games`.
+  - Represents one logged game for a selected player.
+  - Fields include `id`, `user_id`, `session_id`, `client_finalize_operation_id`, `game_name`, `player_name`, `total_score`, `captured_at`, `played_at`, `status`, `raw_extraction`, `scoreboard_extraction`, selected-player fields, timestamps.
+  - Frontend types: `GameListItem` and `GameDetail` in `mobile/src/lib/types.ts`.
+  - Local SQLite game row mirrors many server fields and stores `scoreboard_extraction` as JSON text.
+- Frame:
+  - Server table: `frames`.
+  - Belongs to a game.
+  - Fields include `id`, `game_id`, `frame_number`, `is_strike`, `is_spare`, `frame_score`, `updated_at`.
+  - Frontend type: `FrameDetail`.
+- Shot:
+  - Server table: `shots`.
+  - Belongs to a frame.
+  - Fields include `id`, `frame_id`, `shot_number`, `pins`, `updated_at`.
+  - Frontend type: `ShotDetail`.
+- Scoreboard extraction:
+  - Types: `LiveExtraction`, `LivePlayer`, `LiveFrame` in `mobile/src/lib/types.ts`.
+  - Shape: players, each with `playerName`, `totalScore`, and 10 frames of shots.
+  - Normalization/scoring helpers exist in `app/api/live-session/shared.ts`, `worker/index.js`, and frontend stats helpers.
+- Live session:
+  - Server tables: `live_sessions`, `live_session_games`.
+  - Frontend types: `LiveSession`, `LiveSessionGame`.
+  - Used while recording a session in progress.
+  - Finalization converts ready live games into logged `games`/`frames`/`shots`.
+- Recording draft:
+  - Server tables: `recording_drafts`, `recording_draft_groups`, `recording_draft_games`.
+  - Frontend types: `RecordingDraft`, `RecordingDraftGroup`, `RecordingDraftGame`.
+  - Modes: `upload_session`, `add_multiple_sessions`, `add_existing_session`.
+- Local sync metadata:
+  - Frontend type: `LocalSyncMetadata` in `mobile/src/lib/types.ts`.
+  - Used for local/optimistic UI states such as `syncing` and `failed`.
+  - Stored on merged frontend objects, not as a server table field.
+- Local/offline representation:
+  - Native SQLite tables in `mobile/src/lib/local-logs-db.native.ts` store server-synced profile, sessions, games, frames, shots, and cursor metadata.
+  - Upload-processing queue uses separate AsyncStorage/FileSystem data and can create optimistic local-only session/game IDs until server finalization resolves them.
+
+## Build and Run Instructions
+
+- Required tools:
+  - Node.js and npm.
+  - Expo/EAS CLI for native dev and iOS builds.
+  - Android Studio/JDK/Android SDK for local Android Gradle builds.
+  - Supabase project with schema/migrations applied.
+  - Google Gemini API key for chat/scoreboard processing.
+- Install root dependencies:
+  - `npm install`
+- Install mobile dependencies:
+  - Usually handled by root sync script if needed, but direct command is `cd mobile && npm install`.
+- Root environment:
+  - Copy/fill `.env.local` from `.env.example`.
+  - Important vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`, `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_BASE_URL`, `GEMINI_API_KEY`, `WORKER_AUTH_TOKEN`, `GEMINI_MODEL`, `WORKER_URL`, chat env vars, `API_CORS_ALLOWED_ORIGINS`.
+- Mobile environment:
+  - `mobile/.env.local` can be pulled from EAS with `npm run env:pull:preview` or `npm run env:pull:production`.
+  - Required frontend vars: `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_BASE_URL`.
+- Run production-like web/API locally from repo root:
+  - `npm run dev`
+  - Opens at `http://localhost:3000`.
+  - This exports Expo web into `public/expo-web` and starts Next dev.
+- Run faster Expo web frontend only:
+  - From root: `npm run dev:expo-web`
+  - Or from `mobile/`: `npm run web`
+- Run iOS locally:
+  - From `mobile/`: `npm run ios`
+  - For dev-client workflow: `npm run build:ios:development`, then `npm run start:dev-client`.
+  - Production iOS build: `npm run build:ios:production`.
+- Run Android locally:
+  - From `mobile/`: `npm run android`
+  - Dev-client build: `npm run build:android:development`, then `npm run start:dev-client`.
+  - Production EAS Android build: `npm run build:android:production`.
+  - Local Play Store AAB per README: `cd mobile/android && ./gradlew bundleRelease` on Unix-like shells, or `gradlew.bat bundleRelease` on Windows.
+- Tests:
+  - Unknown. I did not find a test script, Jest/Vitest/Playwright config, or test files.
+- Lint:
+  - Root: `npm run lint`.
+  - Mobile: `cd mobile && npm run lint`.
+- Build web/API production:
+  - Root: `npm run build`.
+- Worker:
+  - Install from `worker/`: `npm install`.
+  - Run locally with required env: `npm start`.
+  - Worker endpoint is `/run` and requires `X-Worker-Token`.
+
+## Deployment / Release Notes
+
+- iOS:
+  - Production iOS build is through EAS: `cd mobile && npm run build:ios:production`.
+  - Submit latest build: `npx eas submit --platform ios --latest`.
+  - App Store release name from user: PinPoint Bowling.
+  - iOS bundle ID in `mobile/app.config.ts`: production `com.alonl.pinpoint`, development `com.alonl.pinpoint.dev`.
+  - App version in `mobile/app.config.ts`: `1.0.7`.
+  - iOS build number currently `20260415.1`.
+  - Uses Apple Sign In.
+- Android:
+  - Google Play closed testing release name from user: PinPoint.
+  - Production package in `mobile/app.config.ts` and `mobile/android/app/build.gradle`: `com.alonl.pinpoint`.
+  - Development package suffix/config: `com.alonl.pinpoint.dev`.
+  - Android version code currently `20260415`; version name `1.0.7`.
+  - Local release signing reads `mobile/credentials.json` / credential paths; be careful with signing files.
+  - Android manifest includes Internet, external storage, record audio, system alert window, and vibration permissions. Some may be Expo/default generated; review before release if Play policy asks.
+- Web/Vercel:
+  - Root Next deployment serves both API routes and exported Expo web frontend.
+  - User says live URL is `https://pinpointbowling.vercel.app/`.
+  - Older active Vercel URL is `https://bowling-tracker-six.vercel.app/`.
+  - `mobile/src/lib/urls.ts` currently sets `PUBLIC_WEBSITE_URL` to `https://bowling-tracker-six.vercel.app` and normalizes `https://pinpointbowling.vercel.app` to that origin. This appears intentional/valid, but review deliberately before changing invite links, legal links, App Store metadata, or public branding.
+- Supabase:
+  - Run `db/schema.sql` and needed migrations in `db/`.
+  - Storage bucket for scoreboards defaults to `scoreboards-temp`.
+  - Profile avatar bucket is `profile-avatars`.
+  - RLS policies are defined in `db/schema.sql`.
+- Worker:
+  - Worker uses `WORKER_URL` and `WORKER_AUTH_TOKEN` for API-triggered processing.
+  - Before redeploying worker, ensure DB schema/migrations match worker expectations.
+- Handle carefully before release:
+  - Bundle IDs/package names.
+  - App version/build numbers/version code.
+  - Signing credentials and EAS project ID.
+  - Supabase envs and storage bucket names.
+  - Public URL canonicalization.
+  - Privacy/delete account/data screens and links.
+
+## Known Issues / Risky Areas
+
+- Priority 1 - Local storage/offline mode is split across multiple systems:
+  - SQLite local logs for native.
+  - React Query persistence for web and leaderboard.
+  - AsyncStorage/FileSystem upload-processing queue.
+  - Supabase auth persistence.
+  - This is powerful but easy to invalidate incorrectly.
+- Priority 2 - Upload queue/finalization is complex:
+  - `uploads-processing-provider.tsx` is large and handles local files, Supabase Storage upload, API row creation, polling, retries, optimistic UI, and finalization.
+  - Be cautious with cleanup paths that delete local files or server rows.
+  - Live session and recording draft finalization use client operation IDs and should be tested under retries/network drops.
+- Priority 3 - Native vs web offline behavior differs:
+  - Native uses SQLite local logs.
+  - Web does not; `mobile/src/lib/local-logs-db.ts` is a no-op stub.
+  - Test both platforms separately.
+- Priority 4 - No automated tests found:
+  - There are no obvious unit/integration/e2e tests in the repo.
+  - Local storage, upload retry/finalization, and scoring changes are high-risk without tests.
+- Priority 5 - Scoring logic is duplicated:
+  - Frontend display: `mobile/src/lib/bowling.ts`.
+  - Backend game edit: `app/api/game/route.ts`.
+  - Live/draft normalization: `app/api/live-session/shared.ts`.
+  - Worker normalization: `worker/index.js`.
+  - Changes to bowling rules or score calculation need coordinated updates.
+- Priority 6 - Sync cursors rely on timestamps:
+  - `/api/mobile-sync/logs` returns changes after `updated_at > since`.
+  - Deletes rely on tombstones.
+  - Clock/timestamp edge cases should be tested.
+- Priority 7 - Server-to-local sync is not a full conflict-resolution system:
+  - Local edits are not generally queued as edits; edits call online APIs and then resync.
+- Priority 8 - Guest account migration is sensitive:
+  - `app/api/auth/claim-guest/route.ts` and `mobile/src/app/login.tsx` should be reviewed before changing auth/data ownership.
+- Priority 9 - Release config drift:
+  - Android native config and Expo config both contain package/version identity.
+  - Keep `mobile/app.config.ts`, `mobile/android/app/build.gradle`, EAS, and store metadata aligned.
+- Priority 10 - Public URL/canonical origin behavior should be changed only deliberately:
+  - Both `https://pinpointbowling.vercel.app/` and `https://bowling-tracker-six.vercel.app/` are active/valid in project context.
+  - Code currently uses `https://bowling-tracker-six.vercel.app` as canonical in `mobile/src/lib/urls.ts`.
+  - This is not automatically a bug, but it affects invite URLs, legal links, API base assumptions, and public branding.
+- Priority 11 - Permissions:
+  - Android manifest includes `RECORD_AUDIO` and `SYSTEM_ALERT_WINDOW`. Unknown whether app needs them.
+- Priority 12 - Database migrations:
+  - There are multiple migration files. Make sure deployed Supabase schema matches `db/schema.sql` before testing mobile sync.
+
+## Important Design / Product Notes
+
+- Naming:
+  - Product is PinPoint; iOS App Store name is PinPoint Bowling.
+  - Android production app name in config is PinPoint.
+- Main value proposition:
+  - "Bowling logs that start with a photo."
+  - Capture scoreboards, review extracted results, select yourself, and build a stats/history log.
+- Main UX flow:
+  - Welcome/login/guest.
+  - Optional profile/avatar/tutorial.
+  - Record via live session or upload flow.
+  - Review extracted scoreboards.
+  - Finalize into sessions/games.
+  - Explore Sessions, Chat, Friends, Account.
+- Guest behavior:
+  - Guest mode lets users log data.
+  - Account screen says signing in later can move guest logs into the account.
+- Privacy/data:
+  - Privacy, Terms, Delete Account, and Delete Data screens are built into the app.
+  - Account/data deletion routes remove Supabase app data and clear local SQLite logs for the current user on the device.
+  - Scoreboard images are temporarily stored in Supabase Storage and local app files during processing.
+- App Store / Google Play behavior:
+  - Camera/photo library usage is explained in `mobile/app.config.ts`.
+  - App is portrait, dark UI, custom icon/splash.
+- Web behavior:
+  - Browser users run the same Expo route tree hosted by root Next/Vercel.
+  - `EXPO_PUBLIC_API_BASE_URL` can be omitted on deployed web to use same-origin API.
+
+## Suggested Future Improvements
+
+- Add focused automated tests for:
+  - Scoring normalization and total calculation.
+  - `buildFrameGrid`.
+  - `local-logs-db.native.ts` sync apply/delete behavior.
+  - `/api/mobile-sync/logs` cursor/tombstone behavior.
+  - Upload-processing state transitions and idempotent finalization.
+- Create a manual QA checklist for local storage/offline:
+  - First sync, airplane mode, app restart, edit/delete while offline, reconnect, user switch, account deletion.
+- Keep the active Vercel URL story intentional: `pinpointbowling.vercel.app` is the public link from the project owner, while `bowling-tracker-six.vercel.app` remains valid and is currently canonicalized in code.
+- Add analytics/crash reporting if desired:
+  - Track critical funnels: auth, upload started, OCR success/failure, finalization, sync failures, offline usage.
+  - Avoid logging raw scoreboard/user-sensitive data.
+- Improve release readiness:
+  - Review Android permissions.
+  - Confirm EAS/Gradle version numbers before each release.
+  - Confirm Supabase migrations are applied before deploying app versions that depend on them.
+- Monetization:
+  - Candidate areas include AI chat limits, advanced analytics, friend leaderboards, bulk imports, or premium sync/history features.
+  - Add paywall only after storage/sync reliability is proven.
+- UI polish:
+  - Continue refining local sync states, failed upload recovery, and offline labels so users understand what is saved locally vs synced.
+- Backend hardening:
+  - Add structured logs around worker/job failures and mobile sync failures.
+  - Add admin scripts/checks for stuck `analysis_jobs`, draft rows, and local sync operation rows.
+
+## AI Coding Assistant Instructions for Future Sessions
+
+- Always read this `CONTEXT.md` first.
+- Also read `README.md` and `mobile/README.md`; they contain important run/release instructions.
+- Prefer small, focused changes.
+- Preserve existing app behavior unless specifically asked to change it.
+- Do not rewrite the whole app.
+- When making changes, explain which files changed and why.
+- When making code/config/product changes that affect project context, also update `CONTEXT.md` in the same turn.
+- Be careful with App Store config, Google Play config, Vercel config, bundle identifiers, package names, signing, entitlements, app version/build numbers, and data persistence.
+- Be especially careful with local storage / offline mode because that is the current feature being tested.
+- Before changing scoring logic, inspect the existing scoring/data model carefully across frontend, backend, and worker files.
+- Before changing storage/sync behavior, inspect:
+  - `mobile/src/hooks/use-logged-data.ts`
+  - `mobile/src/lib/local-logs-db.native.ts`
+  - `mobile/src/lib/local-logs-sync.ts`
+  - `app/api/mobile-sync/logs/route.ts`
+  - `mobile/src/lib/uploads-processing-store.ts`
+  - `mobile/src/providers/uploads-processing-provider.tsx`
+  - `db/schema.sql`
+- Do not delete, rename, or refactor unrelated files.
+- Treat dirty git worktrees as user work. Do not revert unrelated changes.
+- If testing is requested, note that no automated test setup was found and use lint/manual verification unless tests are added.

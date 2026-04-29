@@ -51,18 +51,14 @@ export function useLoggedDataSync() {
     staleTime: 60_000,
   });
 
+  const refetchSyncQuery = syncQuery.refetch;
   const syncNow = useCallback(async () => {
     if (!mobile || !userId) {
       return;
     }
 
-    await syncLocalLogsForUser(userId, session?.access_token ?? null);
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: localLogQueryKeys.games(userId) }),
-      queryClient.invalidateQueries({ queryKey: localLogQueryKeys.gameRoot(userId) }),
-      queryClient.invalidateQueries({ queryKey: localLogQueryKeys.meta(userId) }),
-    ]);
-  }, [mobile, queryClient, session?.access_token, userId]);
+    await refetchSyncQuery({ throwOnError: false });
+  }, [mobile, refetchSyncQuery, userId]);
 
   return {
     ...syncQuery,
@@ -108,12 +104,26 @@ export function useLoggedGames() {
     ]);
   }, [mobile, queryClient, sync.isSuccess, userId]);
 
-  const localGames = localQuery.data ?? [];
+  const localGames = useMemo(() => localQuery.data ?? [], [localQuery.data]);
   const mergedLocalGames = useMemo(
     () => mergeGamesWithUploadsProcessing(localGames, store),
     [localGames, store],
   );
   const hasLocalData = mergedLocalGames.length > 0;
+  const syncNow = sync.syncNow;
+  const syncError = sync.error;
+  const isInitialSyncing = sync.isFetching && !hasLocalData;
+  const data = useMemo(
+    () => ({
+      games: mergedLocalGames,
+      count: mergedLocalGames.length,
+    }),
+    [mergedLocalGames],
+  );
+  const refetchLocal = useCallback(async () => {
+    await syncNow();
+    return { data } as const;
+  }, [data, syncNow]);
 
   if (!mobile) {
     return {
@@ -129,20 +139,6 @@ export function useLoggedGames() {
     };
   }
 
-  const syncError = sync.error;
-  const isInitialSyncing = sync.isFetching && !hasLocalData;
-  const data = useMemo(
-    () => ({
-      games: mergedLocalGames,
-      count: mergedLocalGames.length,
-    }),
-    [mergedLocalGames],
-  );
-  const refetch = useCallback(async () => {
-    await sync.syncNow();
-    return { data } as const;
-  }, [data, sync.syncNow]);
-
   return {
     data,
     games: mergedLocalGames,
@@ -157,7 +153,7 @@ export function useLoggedGames() {
         !sync.isFetching &&
         !metaQuery.data?.last_success_at,
     ),
-    refetch,
+    refetch: refetchLocal,
   };
 }
 
@@ -188,6 +184,15 @@ export function useLoggedGame(gameId?: string | null) {
     void queryClient.invalidateQueries({ queryKey: localLogQueryKeys.game(userId, gameId) });
   }, [gameId, mobile, queryClient, sync.isSuccess, userId]);
 
+  const game = localQuery.data ?? null;
+  const syncNow = sync.syncNow;
+  const syncError = sync.error;
+  const data = useMemo(() => (game ? { game } : undefined), [game]);
+  const refetchLocal = useCallback(async () => {
+    await syncNow();
+    return { data } as const;
+  }, [data, syncNow]);
+
   if (!mobile) {
     return {
       data: apiQuery.data,
@@ -201,21 +206,14 @@ export function useLoggedGame(gameId?: string | null) {
     };
   }
 
-  const game = localQuery.data ?? null;
-  const syncError = sync.error;
-  const refetch = useCallback(async () => {
-    await sync.syncNow();
-    return { data: game ? { game } : undefined } as const;
-  }, [game, sync.syncNow]);
-
   return {
-    data: game ? { game } : undefined,
+    data,
     game,
     isPending: localQuery.isPending || (sync.isFetching && !game),
     isFetching: localQuery.isFetching || sync.isFetching,
     error: localQuery.error ?? syncError,
     syncError,
     needsOnlineFirst: Boolean(syncError && !game && !sync.isFetching),
-    refetch,
+    refetch: refetchLocal,
   };
 }
