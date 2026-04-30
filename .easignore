@@ -1,0 +1,33 @@
+# EAS archives this monorepo from the repository root for mobile builds.
+# Keep local generated/cached files out of the upload, especially Gradle lock files.
+
+node_modules/
+mobile/node_modules/
+
+.next/
+.vercel/
+dist/
+coverage/
+public/expo-web/
+public/favicon.ico
+
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/expo-env.d.ts
+
+mobile/android/
+mobile/ios/
+
+*.log
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+.env
+.env.*
+!.env.example
+mobile/.env*.local
+
+.DS_Store
