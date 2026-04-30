@@ -99,11 +99,20 @@ export default function FriendsScreen() {
   const [tabLabelWidths, setTabLabelWidths] = useState<MetricTabWidths>({});
   const tabScrollRef = useRef<ScrollView | null>(null);
   const pagerRef = useRef<ScrollView | null>(null);
+  const pagerViewportRef = useRef<View | null>(null);
   const tabLayoutsRef = useRef<Partial<Record<LeaderboardMetric, MetricTabLayout>>>({});
   const tabViewportWidthRef = useRef(0);
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const pagerWidth = Math.max(0, Math.round(windowWidth - insets.left - insets.right));
+  const [pagerTopOnScreen, setPagerTopOnScreen] = useState<number | null>(null);
+  const pageMinHeight =
+    pagerTopOnScreen != null
+      ? Math.max(
+          0,
+          windowHeight - pagerTopOnScreen - BOTTOM_DOTS_DOCK_HEIGHT - insets.bottom,
+        )
+      : 0;
 
   const leaderboardQuery = useQuery({
     queryKey: queryKeys.leaderboard,
@@ -399,7 +408,14 @@ export default function FriendsScreen() {
         />
       ) : null}
 
-      <View style={[styles.pagerViewport, pagerWidth ? { width: pagerWidth } : null]}>
+      <View
+        ref={pagerViewportRef}
+        onLayout={() => {
+          pagerViewportRef.current?.measureInWindow((_x, y) => {
+            setPagerTopOnScreen(y);
+          });
+        }}
+        style={[styles.pagerViewport, pagerWidth ? { width: pagerWidth } : null]}>
         <ScrollView
           ref={pagerRef}
           horizontal
@@ -428,7 +444,13 @@ export default function FriendsScreen() {
             scrollMetricChipIntoView(nextMetric, true);
           }}>
           {metricPages.map((page) => (
-            <View key={page.metric} style={[styles.pagerPage, pagerWidth ? { width: pagerWidth } : null]}>
+            <View
+              key={page.metric}
+              style={[
+                styles.pagerPage,
+                pagerWidth ? { width: pagerWidth } : null,
+                pageMinHeight ? { minHeight: pageMinHeight } : null,
+              ]}>
               <View style={styles.metricSummary}>
                 <Text style={styles.metricDescription}>{page.description}</Text>
                 <Text style={styles.metricRank}>{page.yourRank ? `#${page.yourRank}` : '—'}</Text>
