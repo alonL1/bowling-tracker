@@ -101,6 +101,10 @@ function getGamesSelect(metric: LeaderboardMetric | null): string {
     return "id,user_id,total_score,session_id,played_at,created_at";
   }
 
+  if (metric && metric !== "MostNines") {
+    return "id,user_id,total_score,session_id,played_at,created_at,frames:frames(is_strike,is_spare)";
+  }
+
   return "id,user_id,total_score,session_id,played_at,created_at,frames:frames(is_strike,is_spare,shots:shots(shot_number,pins))";
 }
 

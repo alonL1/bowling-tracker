@@ -98,6 +98,7 @@
   - Shared backend helpers for auth, profiles, mobile sync idempotency, and logged scoreboard insertion.
 - `db/`
   - `schema.sql` plus migration files. This is the source of truth for Supabase tables, triggers, indexes, policies, storage bucket setup, and sync tombstones.
+  - `db/add_leaderboard_metric_indexes.sql` adds indexes used by leaderboard metric queries; run it in production Supabase if those indexes are not already present.
 - `worker/`
   - Express worker that claims `analysis_jobs`, downloads scoreboard images from Supabase Storage, sends them to Gemini, writes extracted scoreboard data back to Postgres, and deletes processed images.
 - `scripts/`
@@ -154,7 +155,7 @@
   - Query defaults and persisted query cache are in `mobile/src/lib/query-client.ts`.
   - Web persists `games`, `game`, `sessions`, and `leaderboard` query roots for up to 24 hours.
   - Native persists only `leaderboard` in React Query because logged game data is intended to come from SQLite.
-  - Friends leaderboards use metric-scoped lazy React Query entries under the `leaderboard` root key. The Friends screen loads the active metric first, then warms the remaining metric tabs sequentially in the background.
+  - Friends leaderboards use metric-scoped lazy React Query entries under the `leaderboard` root key. Signed-in app startup begins a sequential background warmup anchored on the default Score tab, and the Friends screen reprioritizes the warmup around the current tab when the user taps or swipes.
   - `AuthProvider` clears the query cache when the signed-in user changes and stores the cache owner under `pinpoint-query-cache-owner`.
 - Local storage / offline mode approach:
   - Native saved logs are loaded from SQLite through `mobile/src/lib/local-logs-db.native.ts`.
@@ -210,6 +211,8 @@
   - Supports persistent invite links and metric-based leaderboards.
   - `GET /api/friends/leaderboard` remains the legacy all-metrics response. `GET /api/friends/leaderboard?metric=<LeaderboardMetric>` returns a ranked single-metric response for lazy tab loading.
   - The frontend validates the per-metric leaderboard response shape so frontend/backend deploy mismatches fail clearly instead of rendering empty leaderboard rows.
+  - Leaderboard metric warmup order is centralized in `mobile/src/lib/leaderboard.ts`; sequential background prefetch is in `mobile/src/lib/leaderboard-warmup.ts`.
+  - The leaderboard API avoids loading shot rows for strike/spare/total strike/total spare metric requests; `MostNines` still needs shots.
 - Profile, avatars, legal, and data deletion
   - Files: profile routes under `app/api/account/profile/`, `mobile/src/lib/profile.ts`, `mobile/src/app/edit-profile.tsx`, `mobile/src/app/privacy.tsx`, `mobile/src/app/terms.tsx`, `mobile/src/app/delete-account.tsx`, `mobile/src/app/delete-data.tsx`.
   - Avatar presets and uploads are supported.
@@ -418,6 +421,7 @@
   - `mobile/src/lib/urls.ts` currently sets `PUBLIC_WEBSITE_URL` to `https://bowling-tracker-six.vercel.app` and normalizes `https://pinpointbowling.vercel.app` to that origin. This appears intentional/valid, but review deliberately before changing invite links, legal links, App Store metadata, or public branding.
 - Supabase:
   - Run `db/schema.sql` and needed migrations in `db/`.
+  - For existing databases, run `db/add_leaderboard_metric_indexes.sql` so Friends leaderboard metric queries can use the game/frame/shot indexes expected by the current code.
   - Storage bucket for scoreboards defaults to `scoreboards-temp`.
   - Profile avatar bucket is `profile-avatars`.
   - RLS policies are defined in `db/schema.sql`.
@@ -441,41 +445,45 @@
   - AsyncStorage local chat history per signed-in user.
   - Supabase auth persistence.
   - This is powerful but easy to invalidate incorrectly.
-- Priority 2 - Upload queue/finalization is complex:
+- Priority 2 - Leaderboard performance depends on deployed database indexes:
+  - Current code expects `db/add_leaderboard_metric_indexes.sql` / matching `db/schema.sql` indexes for `games`, `frames`, and `shots`.
+  - Until the migration is applied in production Supabase, frame-heavy leaderboard tabs may still hit statement timeouts.
+  - Frame-heavy tabs still need frame rows for all participants; monitor this if friend graphs or history size grow substantially.
+- Priority 3 - Upload queue/finalization is complex:
   - `uploads-processing-provider.tsx` is large and handles local files, Supabase Storage upload, API row creation, polling, retries, optimistic UI, and finalization.
   - Be cautious with cleanup paths that delete local files or server rows.
   - Live session and recording draft finalization use client operation IDs and should be tested under retries/network drops.
-- Priority 3 - Native vs web offline behavior differs:
+- Priority 4 - Native vs web offline behavior differs:
   - Native uses SQLite local logs.
   - Web does not; `mobile/src/lib/local-logs-db.ts` is a no-op stub.
   - Test both platforms separately.
-- Priority 4 - No automated tests found:
+- Priority 5 - No automated tests found:
   - There are no obvious unit/integration/e2e tests in the repo.
   - Local storage, upload retry/finalization, and scoring changes are high-risk without tests.
-- Priority 5 - Scoring logic is duplicated:
+- Priority 6 - Scoring logic is duplicated:
   - Frontend display: `mobile/src/lib/bowling.ts`.
   - Backend game edit: `app/api/game/route.ts`.
   - Live/draft normalization: `app/api/live-session/shared.ts`.
   - Worker normalization: `worker/index.js`.
   - Changes to bowling rules or score calculation need coordinated updates.
-- Priority 6 - Sync cursors rely on timestamps:
+- Priority 7 - Sync cursors rely on timestamps:
   - `/api/mobile-sync/logs` returns changes after `updated_at > since`.
   - Deletes rely on tombstones.
   - Clock/timestamp edge cases should be tested.
-- Priority 7 - Server-to-local sync is not a full conflict-resolution system:
+- Priority 8 - Server-to-local sync is not a full conflict-resolution system:
   - Local edits are not generally queued as edits; edits call online APIs and then resync.
-- Priority 8 - Guest account migration is sensitive:
+- Priority 9 - Guest account migration is sensitive:
   - `app/api/auth/claim-guest/route.ts` and `mobile/src/app/login.tsx` should be reviewed before changing auth/data ownership.
-- Priority 9 - Release config drift:
+- Priority 10 - Release config drift:
   - Android native config and Expo config both contain package/version identity.
   - Keep `mobile/app.config.ts`, `mobile/android/app/build.gradle`, EAS, and store metadata aligned.
-- Priority 10 - Public URL/canonical origin behavior should be changed only deliberately:
+- Priority 11 - Public URL/canonical origin behavior should be changed only deliberately:
   - Both `https://pinpointbowling.vercel.app/` and `https://bowling-tracker-six.vercel.app/` are active/valid in project context.
   - Code currently uses `https://bowling-tracker-six.vercel.app` as canonical in `mobile/src/lib/urls.ts`.
   - This is not automatically a bug, but it affects invite URLs, legal links, API base assumptions, and public branding.
-- Priority 11 - Permissions:
+- Priority 12 - Permissions:
   - Android manifest includes `RECORD_AUDIO` and `SYSTEM_ALERT_WINDOW`. Unknown whether app needs them.
-- Priority 12 - Database migrations:
+- Priority 13 - Database migrations:
   - There are multiple migration files. Make sure deployed Supabase schema matches `db/schema.sql` before testing mobile sync.
 
 ## Important Design / Product Notes
@@ -525,6 +533,7 @@
   - Review Android permissions.
   - Confirm EAS/Gradle version numbers before each release.
   - Confirm Supabase migrations are applied before deploying app versions that depend on them.
+  - After applying leaderboard indexes, retest every Friends leaderboard tab with production-scale data and watch for remaining statement timeouts.
 - Monetization:
   - Candidate areas include AI chat limits, advanced analytics, friend leaderboards, bulk imports, or premium sync/history features.
   - Add paywall only after storage/sync reliability is proven.

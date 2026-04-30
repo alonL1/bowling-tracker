@@ -48,6 +48,18 @@ create table if not exists shots (
   updated_at timestamptz not null default now()
 );
 
+create index if not exists idx_games_user_id
+  on games(user_id);
+
+create index if not exists idx_games_user_session_order
+  on games(user_id, session_id, played_at, created_at, id);
+
+create index if not exists idx_frames_game_id
+  on frames(game_id);
+
+create index if not exists idx_shots_frame_id_shot_number
+  on shots(frame_id, shot_number);
+
 create table if not exists mobile_sync_tombstones (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null,

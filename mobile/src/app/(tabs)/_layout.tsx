@@ -10,13 +10,19 @@ import MobileTabBar from '@/components/mobile-tab-bar';
 import SafeRedirect from '@/components/safe-redirect';
 import { palette } from '@/constants/palette';
 import { fetchGames, fetchRecordEntryStatus, queryKeys } from '@/lib/backend';
+import {
+  cancelLeaderboardMetricWarmup,
+  startLeaderboardMetricWarmup,
+} from '@/lib/leaderboard-warmup';
 import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { useAuth } from '@/providers/auth-provider';
 
 export default function TabsLayout() {
-  const { user, session, loading } = useAuth();
+  const { user, session, loading, isGuest } = useAuth();
   const queryClient = useQueryClient();
   const warmedUserIdRef = useRef<string | null>(null);
+  const leaderboardWarmupUserIdRef = useRef<string | null>(null);
+  const userId = user?.id ?? null;
 
   useEffect(() => {
     if (!user) {
@@ -51,6 +57,21 @@ export default function TabsLayout() {
       ]),
     ]);
   }, [queryClient, session?.access_token, user]);
+
+  useEffect(() => {
+    if (!userId || isGuest) {
+      leaderboardWarmupUserIdRef.current = null;
+      cancelLeaderboardMetricWarmup();
+      return;
+    }
+
+    if (leaderboardWarmupUserIdRef.current === userId) {
+      return;
+    }
+
+    leaderboardWarmupUserIdRef.current = userId;
+    return startLeaderboardMetricWarmup(queryClient);
+  }, [isGuest, queryClient, userId]);
 
   if (loading) {
     return <AccountLoadingState />;

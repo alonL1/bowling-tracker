@@ -29,6 +29,8 @@ import { createInvite, fetchLeaderboardMetric, queryKeys } from '@/lib/backend';
 import { formatTenths } from '@/lib/number-format';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
+import { DEFAULT_LEADERBOARD_METRIC, LEADERBOARD_METRIC_ORDER } from '@/lib/leaderboard';
+import { startLeaderboardMetricWarmup } from '@/lib/leaderboard-warmup';
 import { formatHandle } from '@/lib/profile';
 import type { InviteLinkResponse, LeaderboardMetric, LeaderboardMetricRow } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
@@ -39,26 +41,33 @@ const BOTTOM_DOTS_DOCK_HEIGHT = 34;
 type MetricTabWidths = Partial<Record<LeaderboardMetric, number>>;
 type MetricTabLayout = { x: number; width: number };
 
-const METRIC_TABS: Array<{
-  metric: LeaderboardMetric;
-  label: string;
-  description: string;
-}> = [
-  { metric: 'bestGame', label: 'Score', description: 'Highest Scoring Game' },
-  { metric: 'bestAverage', label: 'Average', description: 'Average Score Across All Games' },
-  { metric: 'bestSeries', label: 'Series', description: 'Best 3 Games Series' },
-  { metric: 'bestSession', label: 'Best Session', description: 'Best Single Session Average Score' },
-  { metric: 'StrikeRate', label: 'Strike Rate', description: 'Strike Rate' },
-  { metric: 'SpareRate', label: 'Spare Rate', description: 'Spare Conversion Rate' },
-  { metric: 'TotalStrikes', label: 'Strikes', description: 'Total Number of Strikes' },
-  { metric: 'TotalSpares', label: 'Spares', description: 'Total Number of Spares' },
-  { metric: 'mostGames', label: 'Games', description: 'Total Games Logged' },
-  { metric: 'mostSessions', label: 'Sessions', description: 'Total Sessions Logged' },
-  { metric: 'SessionScore', label: 'Session Score', description: 'Most Points Scored in a Session' },
-  { metric: 'TotalPoints', label: 'Points', description: 'Total Points Across All Games' },
-  { metric: 'SessionLength', label: 'Session Length', description: 'Most Games Played in a Session' },
-  { metric: 'MostNines', label: '9 King', description: 'Total Frames with Score of 9' },
-];
+const METRIC_TAB_DETAILS: Record<
+  LeaderboardMetric,
+  {
+    label: string;
+    description: string;
+  }
+> = {
+  bestGame: { label: 'Score', description: 'Highest Scoring Game' },
+  bestAverage: { label: 'Average', description: 'Average Score Across All Games' },
+  bestSeries: { label: 'Series', description: 'Best 3 Games Series' },
+  bestSession: { label: 'Best Session', description: 'Best Single Session Average Score' },
+  StrikeRate: { label: 'Strike Rate', description: 'Strike Rate' },
+  SpareRate: { label: 'Spare Rate', description: 'Spare Conversion Rate' },
+  TotalStrikes: { label: 'Strikes', description: 'Total Number of Strikes' },
+  TotalSpares: { label: 'Spares', description: 'Total Number of Spares' },
+  mostGames: { label: 'Games', description: 'Total Games Logged' },
+  mostSessions: { label: 'Sessions', description: 'Total Sessions Logged' },
+  SessionScore: { label: 'Session Score', description: 'Most Points Scored in a Session' },
+  TotalPoints: { label: 'Points', description: 'Total Points Across All Games' },
+  SessionLength: { label: 'Session Length', description: 'Most Games Played in a Session' },
+  MostNines: { label: '9 King', description: 'Total Frames with Score of 9' },
+};
+
+const METRIC_TABS = LEADERBOARD_METRIC_ORDER.map((metric) => ({
+  metric,
+  ...METRIC_TAB_DETAILS[metric],
+}));
 
 function formatMetricValue(metric: LeaderboardMetric, value: number) {
   if (!Number.isFinite(value)) {
@@ -81,9 +90,12 @@ export default function FriendsScreen() {
   const queryClient = useQueryClient();
   const { isGuest, loading: authLoading } = useAuth();
   const isAndroid = Platform.OS === 'android';
-  const [selectedMetric, setSelectedMetric] = useState<LeaderboardMetric>('bestGame');
-  const [backgroundWarmupStarted, setBackgroundWarmupStarted] = useState(false);
-  const [enabledMetrics, setEnabledMetrics] = useState<LeaderboardMetric[]>(['bestGame']);
+  const [selectedMetric, setSelectedMetric] = useState<LeaderboardMetric>(
+    DEFAULT_LEADERBOARD_METRIC,
+  );
+  const [enabledMetrics, setEnabledMetrics] = useState<LeaderboardMetric[]>([
+    DEFAULT_LEADERBOARD_METRIC,
+  ]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [inviteStatus, setInviteStatus] = useState('');
@@ -116,19 +128,14 @@ export default function FriendsScreen() {
       queryKey: queryKeys.leaderboardMetric(entry.metric),
       queryFn: () => fetchLeaderboardMetric(entry.metric),
       enabled: !authLoading && !isGuest && enabledMetrics.includes(entry.metric),
+      retry: false,
     })),
   });
   const selectedMetricQuery = leaderboardMetricQueries[selectedMetricIndex];
   const selectedMetricData = selectedMetricQuery?.data ?? null;
-  const enabledQueriesSettled = enabledMetrics.every((metric) => {
-    const index = METRIC_TABS.findIndex((entry) => entry.metric === metric);
-    const query = leaderboardMetricQueries[index];
-    return Boolean(query && !query.isPending && !query.isFetching);
-  });
 
   useEffect(() => {
     if (isGuest || authLoading) {
-      setBackgroundWarmupStarted(false);
       setEnabledMetrics([selectedMetric]);
       return;
     }
@@ -141,41 +148,12 @@ export default function FriendsScreen() {
   }, [authLoading, isGuest, selectedMetric]);
 
   useEffect(() => {
-    if (!isGuest && !authLoading && selectedMetricData && !backgroundWarmupStarted) {
-      setBackgroundWarmupStarted(true);
-    }
-  }, [authLoading, backgroundWarmupStarted, isGuest, selectedMetricData]);
-
-  useEffect(() => {
-    if (!backgroundWarmupStarted || isGuest || authLoading) {
+    if (isGuest || authLoading) {
       return;
     }
 
-    if (!enabledQueriesSettled) {
-      return;
-    }
-
-    const nextMetric = METRIC_TABS.find((entry) => !enabledMetrics.includes(entry.metric))?.metric;
-    if (!nextMetric) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setEnabledMetrics((currentMetrics) =>
-        currentMetrics.includes(nextMetric) ? currentMetrics : [...currentMetrics, nextMetric],
-      );
-    }, 150);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [
-    authLoading,
-    backgroundWarmupStarted,
-    enabledMetrics,
-    enabledQueriesSettled,
-    isGuest,
-  ]);
+    return startLeaderboardMetricWarmup(queryClient, selectedMetric);
+  }, [authLoading, isGuest, queryClient, selectedMetric]);
 
   const inviteMutation = useMutation({
     mutationFn: createInvite,
@@ -247,6 +225,12 @@ export default function FriendsScreen() {
     tabLayoutsRef.current[metric] = { x, width };
   };
 
+  const enableMetric = useCallback((metric: LeaderboardMetric) => {
+    setEnabledMetrics((currentMetrics) =>
+      currentMetrics.includes(metric) ? currentMetrics : [...currentMetrics, metric],
+    );
+  }, []);
+
   const scrollMetricChipIntoView = useCallback((metric: LeaderboardMetric, animated: boolean) => {
     const layout = tabLayoutsRef.current[metric];
     if (!layout || !tabViewportWidthRef.current) {
@@ -275,10 +259,11 @@ export default function FriendsScreen() {
   }, [pagerWidth]);
 
   const handleSelectMetric = useCallback((metric: LeaderboardMetric, animated: boolean) => {
+    enableMetric(metric);
     setSelectedMetric(metric);
     scrollMetricChipIntoView(metric, animated);
     scrollToMetricPage(metric, animated);
-  }, [scrollMetricChipIntoView, scrollToMetricPage]);
+  }, [enableMetric, scrollMetricChipIntoView, scrollToMetricPage]);
 
   useEffect(() => {
     if (!pagerWidth) {
@@ -336,6 +321,7 @@ export default function FriendsScreen() {
         refetchType: 'none',
       });
       await leaderboardMetricQueries[selectedMetricIndex]?.refetch();
+      startLeaderboardMetricWarmup(queryClient, selectedMetric);
     } finally {
       setIsRefreshing(false);
     }
@@ -477,6 +463,7 @@ export default function FriendsScreen() {
             }
 
             setSelectedMetric(nextMetric);
+            enableMetric(nextMetric);
             scrollMetricChipIntoView(nextMetric, true);
           }}>
           {metricPages.map((page) => (
