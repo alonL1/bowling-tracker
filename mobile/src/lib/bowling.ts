@@ -360,7 +360,9 @@ export function buildFrameGrid(game: GameDetail): FrameGridCell[] {
       const third =
         shot3 === null || shot3 === undefined
           ? ''
-          : shot3 === 10
+          : shot1 === 10 && shot2 !== null && shot2 !== 10 && shot2 + shot3 === 10
+            ? '/'
+            : shot3 === 10
             ? 'X'
             : toSymbol(shot3);
       shots = [first, second, third];

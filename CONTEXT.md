@@ -213,7 +213,7 @@
   - `GET /api/friends/leaderboard` remains the legacy all-metrics response. `GET /api/friends/leaderboard?metric=<LeaderboardMetric>` returns a ranked single-metric response for lazy tab loading.
   - The frontend validates the per-metric leaderboard response shape so frontend/backend deploy mismatches fail clearly instead of rendering empty leaderboard rows.
   - Leaderboard metric warmup order is centralized in `mobile/src/lib/leaderboard.ts`; sequential background prefetch is in `mobile/src/lib/leaderboard-warmup.ts`.
-  - The leaderboard API avoids loading shot rows for strike/spare/total strike/total spare metric requests; `MostNines` still needs shots.
+  - The leaderboard API avoids loading shot rows for strike-rate/total-strike metric requests; spare-rate/total-spare and `MostNines` need shots so 10th-frame bonus spares such as `X 9 /` are counted correctly.
 - Profile, avatars, legal, and data deletion
   - Files: profile routes under `app/api/account/profile/`, `mobile/src/lib/profile.ts`, `mobile/src/app/edit-profile.tsx`, `mobile/src/app/privacy.tsx`, `mobile/src/app/terms.tsx`, `mobile/src/app/delete-account.tsx`, `mobile/src/app/delete-data.tsx`.
   - Avatar presets and uploads are supported.
@@ -321,6 +321,7 @@
   - Server table: `frames`.
   - Belongs to a game.
   - Fields include `id`, `game_id`, `frame_number`, `is_strike`, `is_spare`, `frame_score`, `updated_at`.
+  - In the 10th frame, `X 9 /` is displayed as a slash on the third shot and is counted as a spare conversion from shot data. Stored `is_spare` may be true on a 10th frame that also has `is_strike` when the bonus shots make a spare.
   - Frontend type: `FrameDetail`.
 - Shot:
   - Server table: `shots`.

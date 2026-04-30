@@ -17,8 +17,24 @@ export function computeStrike(shot1: number | null) {
   return shot1 === 10;
 }
 
-export function computeSpare(shot1: number | null, shot2: number | null) {
-  return shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10;
+export function computeSpare(
+  frameNumber: number,
+  shot1: number | null,
+  shot2: number | null,
+  shot3: number | null
+) {
+  if (shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10) {
+    return true;
+  }
+
+  return (
+    frameNumber === 10 &&
+    shot1 === 10 &&
+    shot2 !== null &&
+    shot2 !== 10 &&
+    shot3 !== null &&
+    shot2 + shot3 === 10
+  );
 }
 
 export function computePlayedAt(source: ScoreboardSource) {
@@ -102,7 +118,7 @@ export async function insertLoggedGameFromSelectedPlayer({
     game_id: createdGame.id,
     frame_number: frame.frame,
     is_strike: computeStrike(frame.shots[0]),
-    is_spare: computeSpare(frame.shots[0], frame.shots[1]),
+    is_spare: computeSpare(frame.frame, frame.shots[0], frame.shots[1], frame.shots[2]),
     frame_score: null,
   }));
 
@@ -205,7 +221,7 @@ export async function syncLoggedGameSelection({
     game_id: gameId,
     frame_number: frame.frame,
     is_strike: computeStrike(frame.shots[0]),
-    is_spare: computeSpare(frame.shots[0], frame.shots[1]),
+    is_spare: computeSpare(frame.frame, frame.shots[0], frame.shots[1], frame.shots[2]),
     frame_score: null,
   }));
 

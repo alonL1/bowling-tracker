@@ -75,11 +75,19 @@ function buildPreviewGame(game: GameDetail, frames: EditableFrame[]): GameDetail
   const previewFrames: FrameDetail[] = frames.map((frame) => {
     const shot1 = parsePinsInput(frame.shots[0]?.pinsText ?? '');
     const shot2 = parsePinsInput(frame.shots[1]?.pinsText ?? '');
+    const shot3 = parsePinsInput(frame.shots[2]?.pinsText ?? '');
     return {
       id: frame.frameId ?? null,
       frame_number: frame.frameNumber,
       is_strike: shot1 === 10,
-      is_spare: shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10,
+      is_spare:
+        (shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10) ||
+        (frame.frameNumber === 10 &&
+          shot1 === 10 &&
+          shot2 !== null &&
+          shot2 !== 10 &&
+          shot3 !== null &&
+          shot2 + shot3 === 10),
       shots: frame.shots.map((shot) => ({
         id: shot.id ?? null,
         shot_number: shot.shotNumber,

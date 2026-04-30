@@ -104,8 +104,24 @@ function computeStrike(shot1: number | null) {
   return shot1 === 10;
 }
 
-function computeSpare(shot1: number | null, shot2: number | null) {
-  return shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10;
+function computeSpare(
+  frameNumber: number,
+  shot1: number | null,
+  shot2: number | null,
+  shot3: number | null
+) {
+  if (shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10) {
+    return true;
+  }
+
+  return (
+    frameNumber === 10 &&
+    shot1 === 10 &&
+    shot2 !== null &&
+    shot2 !== 10 &&
+    shot3 !== null &&
+    shot2 + shot3 === 10
+  );
 }
 
 function getShotPins(frame: FrameUpdate, shotNumber: number) {
@@ -421,9 +437,10 @@ export async function PATCH(request: Request) {
 
     const shot1 = shotMap.get(1)?.pins ?? null;
     const shot2 = shotMap.get(2)?.pins ?? null;
+    const shot3 = shotMap.get(3)?.pins ?? null;
 
     const isStrike = computeStrike(shot1);
-    const isSpare = computeSpare(shot1, shot2);
+    const isSpare = computeSpare(frame.frameNumber, shot1, shot2, shot3);
 
     let frameId = frame.frameId ?? null;
     if (!frameId) {

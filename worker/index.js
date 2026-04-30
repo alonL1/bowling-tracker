@@ -205,8 +205,19 @@ function computeStrike(shot1) {
   return shot1 === 10;
 }
 
-function computeSpare(shot1, shot2) {
-  return shot1 !== 10 && shot1 + shot2 === 10;
+function computeSpare(frameNumber, shot1, shot2, shot3) {
+  if (shot1 !== null && shot2 !== null && shot1 !== 10 && shot1 + shot2 === 10) {
+    return true;
+  }
+
+  return (
+    frameNumber === 10 &&
+    shot1 === 10 &&
+    shot2 !== null &&
+    shot2 !== 10 &&
+    shot3 !== null &&
+    shot2 + shot3 === 10
+  );
 }
 
 function parsePlayerNames(value) {
@@ -884,13 +895,18 @@ async function processJob() {
   }
 
   const frameRows = frames.map((frame) => {
+    const frameNumber = toNullableNumber(frame.frame);
     const shot1 = toNullableNumber(frame?.shots?.[0]);
     const shot2 = toNullableNumber(frame?.shots?.[1]);
+    const shot3 = toNullableNumber(frame?.shots?.[2]);
     return {
       game_id: gameId,
-      frame_number: toNullableNumber(frame.frame),
+      frame_number: frameNumber,
       is_strike: computeStrike(shot1),
-      is_spare: shot1 !== null && shot2 !== null ? computeSpare(shot1, shot2) : false,
+      is_spare:
+        frameNumber !== null && shot1 !== null && shot2 !== null
+          ? computeSpare(frameNumber, shot1, shot2, shot3)
+          : false,
       frame_score: null
     };
   });

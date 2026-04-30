@@ -250,17 +250,26 @@ function isStrikeFrame(frame: LiveFrame) {
   return frame.shots[0] === 10;
 }
 
-function isSpareFrame(frame: LiveFrame) {
-  return (
-    frame.shots[0] !== null &&
-    frame.shots[1] !== null &&
-    frame.shots[0] !== 10 &&
-    frame.shots[0] + frame.shots[1] === 10
-  );
-}
+function getSpareStatsForFrame(frame: LiveFrame) {
+  const [shot1, shot2, shot3] = frame.shots;
+  let opportunities = 0;
+  let conversions = 0;
 
-function isSpareOpportunity(frame: LiveFrame) {
-  return frame.shots[0] !== null && frame.shots[0] < 10 && frame.shots[1] !== null;
+  if (shot1 !== null && shot1 < 10 && shot2 !== null) {
+    opportunities += 1;
+    if (shot1 + shot2 === 10) {
+      conversions += 1;
+    }
+  }
+
+  if (frame.frame === 10 && shot1 === 10 && shot2 !== null && shot2 < 10 && shot3 !== null) {
+    opportunities += 1;
+    if (shot2 + shot3 === 10) {
+      conversions += 1;
+    }
+  }
+
+  return { conversions, opportunities };
 }
 
 function formatPercentLabel(numerator: number, denominator: number) {
@@ -408,12 +417,9 @@ export function buildLiveSessionStats(
           if (isStrikeFrame(frame)) {
             strikes += 1;
           }
-          if (isSpareOpportunity(frame)) {
-            spareOpportunities += 1;
-            if (isSpareFrame(frame)) {
-              spareConversions += 1;
-            }
-          }
+          const spareStats = getSpareStatsForFrame(frame);
+          spareOpportunities += spareStats.opportunities;
+          spareConversions += spareStats.conversions;
 
           const current = frameBuckets.get(frame.frame);
           if (current) {
@@ -522,7 +528,11 @@ export function formatFrameCell(frame: LiveFrame) {
       : shot1 !== null && shot2 !== null && shot1 < 10 && shot1 + shot2 === 10
         ? '/'
         : formatShotSymbol(shot2),
-    shot3 === 10 ? 'X' : formatShotSymbol(shot3),
+    shot1 === 10 && shot2 !== null && shot2 !== 10 && shot3 !== null && shot2 + shot3 === 10
+      ? '/'
+      : shot3 === 10
+        ? 'X'
+        : formatShotSymbol(shot3),
   ].filter(Boolean);
 
   return parts.join(' ') || '—';
@@ -588,12 +598,9 @@ export function buildLivePlayerComparisons(games: ScoreboardGameLike[]): LivePla
         if (isStrikeFrame(frame)) {
           existing.strikes += 1;
         }
-        if (isSpareOpportunity(frame)) {
-          existing.spareOpportunities += 1;
-          if (isSpareFrame(frame)) {
-            existing.spareConversions += 1;
-          }
-        }
+        const spareStats = getSpareStatsForFrame(frame);
+        existing.spareOpportunities += spareStats.opportunities;
+        existing.spareConversions += spareStats.conversions;
       });
 
       playerBuckets.set(player.playerKey, existing);
@@ -705,12 +712,9 @@ export function buildLoggedSessionStats(games: LoggedGameLike[]): LiveSessionSta
       if (isStrikeFrame(frame)) {
         strikes += 1;
       }
-      if (isSpareOpportunity(frame)) {
-        spareOpportunities += 1;
-        if (isSpareFrame(frame)) {
-          spareConversions += 1;
-        }
-      }
+      const spareStats = getSpareStatsForFrame(frame);
+      spareOpportunities += spareStats.opportunities;
+      spareConversions += spareStats.conversions;
 
       const current = frameBuckets.get(frame.frame);
       if (current) {

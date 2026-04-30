@@ -29,6 +29,7 @@ type MutableMetrics = LeaderboardMetrics & {
   totalScoreCount: number;
   sessionIds: Set<string>;
   totalFrames: number;
+  spareOpportunityCount: number;
 };
 
 type SessionAggregate = {
@@ -101,7 +102,7 @@ function getGamesSelect(metric: LeaderboardMetric | null): string {
     return "id,user_id,total_score,session_id,played_at,created_at";
   }
 
-  if (metric && metric !== "MostNines") {
+  if (metric && !["SpareRate", "TotalSpares", "MostNines"].includes(metric)) {
     return "id,user_id,total_score,session_id,played_at,created_at,frames:frames(is_strike,is_spare)";
   }
 
@@ -131,8 +132,48 @@ function createBlankMetrics(): MutableMetrics {
     totalScoreSum: 0,
     totalScoreCount: 0,
     sessionIds: new Set<string>(),
-    totalFrames: 0
+    totalFrames: 0,
+    spareOpportunityCount: 0
   };
+}
+
+function getShotPins(frame: FrameRow, shotNumber: number) {
+  const shots = Array.isArray(frame.shots) ? frame.shots : [];
+  return shots.find((shot) => shot.shot_number === shotNumber)?.pins ?? null;
+}
+
+function getSpareStatsForFrame(frame: FrameRow) {
+  const shot1 = getShotPins(frame, 1);
+  const shot2 = getShotPins(frame, 2);
+  const shot3 = getShotPins(frame, 3);
+  let opportunities = 0;
+  let conversions = 0;
+
+  if (typeof shot1 === "number" && shot1 < 10 && typeof shot2 === "number") {
+    opportunities += 1;
+    if (shot1 + shot2 === 10) {
+      conversions += 1;
+    }
+  }
+
+  if (
+    typeof shot1 === "number" &&
+    shot1 === 10 &&
+    typeof shot2 === "number" &&
+    shot2 < 10 &&
+    typeof shot3 === "number"
+  ) {
+    opportunities += 1;
+    if (shot2 + shot3 === 10) {
+      conversions += 1;
+    }
+  }
+
+  if (opportunities === 0 && frame.is_spare && !frame.is_strike) {
+    return { conversions: 1, opportunities: 1 };
+  }
+
+  return { conversions, opportunities };
 }
 
 function computeBestSeries(scores: number[]) {
@@ -294,13 +335,12 @@ export async function GET(request: Request) {
       if (frame.is_strike) {
         metrics.TotalStrikes += 1;
       }
-      if (frame.is_spare) {
-        metrics.TotalSpares += 1;
-      }
+      const spareStats = getSpareStatsForFrame(frame);
+      metrics.TotalSpares += spareStats.conversions;
+      metrics.spareOpportunityCount += spareStats.opportunities;
 
-      const shots = Array.isArray(frame.shots) ? frame.shots : [];
-      const shot1 = shots.find((shot) => shot.shot_number === 1)?.pins;
-      const shot2 = shots.find((shot) => shot.shot_number === 2)?.pins;
+      const shot1 = getShotPins(frame, 1);
+      const shot2 = getShotPins(frame, 2);
       if (
         typeof shot1 === "number" &&
         typeof shot2 === "number" &&
@@ -344,8 +384,8 @@ export async function GET(request: Request) {
         ? (metrics.TotalStrikes / metrics.totalFrames) * 100
         : 0;
     metrics.SpareRate =
-      metrics.totalFrames - metrics.TotalStrikes > 0
-        ? (metrics.TotalSpares / (metrics.totalFrames - metrics.TotalStrikes)) * 100
+      metrics.spareOpportunityCount > 0
+        ? (metrics.TotalSpares / metrics.spareOpportunityCount) * 100
         : 0;
   });
 

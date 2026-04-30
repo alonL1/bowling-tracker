@@ -97,6 +97,44 @@ type TimeFilter = {
   utcDateEnd?: string;
 };
 
+function getShotPins(frame: Frame, shotNumber: number) {
+  return frame.shots?.find((shot) => shot.shot_number === shotNumber)?.pins ?? null;
+}
+
+function getSpareStatsForFrame(frame: Frame) {
+  const shot1 = getShotPins(frame, 1);
+  const shot2 = getShotPins(frame, 2);
+  const shot3 = getShotPins(frame, 3);
+  let opportunities = 0;
+  let conversions = 0;
+
+  if (typeof shot1 === "number" && shot1 < 10 && typeof shot2 === "number") {
+    opportunities += 1;
+    if (shot1 + shot2 === 10) {
+      conversions += 1;
+    }
+  }
+
+  if (
+    frame.frame_number === 10 &&
+    shot1 === 10 &&
+    typeof shot2 === "number" &&
+    shot2 < 10 &&
+    typeof shot3 === "number"
+  ) {
+    opportunities += 1;
+    if (shot2 + shot3 === 10) {
+      conversions += 1;
+    }
+  }
+
+  if (opportunities === 0 && frame.is_spare && !frame.is_strike) {
+    return { conversions: 1, opportunities: 1 };
+  }
+
+  return { conversions, opportunities };
+}
+
 function summarizeGames(games: Game[]) {
   const totalGames = games.length;
   const totalScore = games.reduce(
@@ -109,25 +147,34 @@ function summarizeGames(games: Game[]) {
   const frames = games.flatMap((game) => game.frames || []);
   const totalFrames = frames.length;
   const strikeFrames = frames.filter((frame) => frame.is_strike).length;
-  const spareFrames = frames.filter((frame) => frame.is_spare).length;
+  const totalSpareStats = frames.reduce(
+    (totals, frame) => {
+      const spareStats = getSpareStatsForFrame(frame);
+      totals.opportunities += spareStats.opportunities;
+      totals.conversions += spareStats.conversions;
+      return totals;
+    },
+    { conversions: 0, opportunities: 0 }
+  );
 
   const frameStats = new Map<
     number,
-    { frames: number; strikes: number; spares: number }
+    { frames: number; strikes: number; spareOpportunities: number; spareConversions: number }
   >();
   for (const frame of frames) {
     const entry = frameStats.get(frame.frame_number) || {
       frames: 0,
       strikes: 0,
-      spares: 0
+      spareOpportunities: 0,
+      spareConversions: 0
     };
     entry.frames += 1;
     if (frame.is_strike) {
       entry.strikes += 1;
     }
-    if (frame.is_spare) {
-      entry.spares += 1;
-    }
+    const spareStats = getSpareStatsForFrame(frame);
+    entry.spareOpportunities += spareStats.opportunities;
+    entry.spareConversions += spareStats.conversions;
     frameStats.set(frame.frame_number, entry);
   }
 
@@ -137,7 +184,10 @@ function summarizeGames(games: Game[]) {
       frame: frameNumber,
       frames: entry.frames,
       strikeRate: entry.frames > 0 ? entry.strikes / entry.frames : 0,
-      spareRate: entry.frames > 0 ? entry.spares / entry.frames : 0
+      spareRate:
+        entry.spareOpportunities > 0
+          ? entry.spareConversions / entry.spareOpportunities
+          : 0
     }));
 
   return {
@@ -146,7 +196,10 @@ function summarizeGames(games: Game[]) {
     averageScore,
     totalFrames,
     strikeRate: totalFrames > 0 ? strikeFrames / totalFrames : 0,
-    spareRate: totalFrames > 0 ? spareFrames / totalFrames : 0,
+    spareRate:
+      totalSpareStats.opportunities > 0
+        ? totalSpareStats.conversions / totalSpareStats.opportunities
+        : 0,
     perFrame
   };
 }
@@ -154,7 +207,13 @@ function summarizeGames(games: Game[]) {
 function summarizeFrames(games: Game[]): FrameAggregate[] {
   const frameMap = new Map<
     number,
-    { frames: number; pinTotal: number; strikes: number; spares: number }
+    {
+      frames: number;
+      pinTotal: number;
+      strikes: number;
+      spareOpportunities: number;
+      spareConversions: number;
+    }
   >();
 
   for (const game of games) {
@@ -164,7 +223,8 @@ function summarizeFrames(games: Game[]): FrameAggregate[] {
         frames: 0,
         pinTotal: 0,
         strikes: 0,
-        spares: 0
+        spareOpportunities: 0,
+        spareConversions: 0
       };
       const shots = frame.shots || [];
       const shotPins = shots
@@ -179,9 +239,9 @@ function summarizeFrames(games: Game[]): FrameAggregate[] {
       if (frame.is_strike) {
         entry.strikes += 1;
       }
-      if (frame.is_spare) {
-        entry.spares += 1;
-      }
+      const spareStats = getSpareStatsForFrame(frame);
+      entry.spareOpportunities += spareStats.opportunities;
+      entry.spareConversions += spareStats.conversions;
       frameMap.set(frame.frame_number, entry);
     }
   }
@@ -193,7 +253,10 @@ function summarizeFrames(games: Game[]): FrameAggregate[] {
       frames: entry.frames,
       averagePins: entry.frames > 0 ? entry.pinTotal / entry.frames : null,
       strikeRate: entry.frames > 0 ? entry.strikes / entry.frames : 0,
-      spareRate: entry.frames > 0 ? entry.spares / entry.frames : 0
+      spareRate:
+        entry.spareOpportunities > 0
+          ? entry.spareConversions / entry.spareOpportunities
+          : 0
     }));
 }
 
@@ -1607,7 +1670,8 @@ async function runSqlMethod(
   const schema = `bowling_sessions(id uuid, user_id uuid, name text, description text, started_at timestamptz, created_at timestamptz)
 games(id uuid, session_id uuid, game_name text, player_name text, total_score int, played_at timestamptz, created_at timestamptz, user_id uuid)
 frames(id uuid, game_id uuid, frame_number int, is_strike boolean, is_spare boolean)
-shots(id uuid, frame_id uuid, shot_number int, pins int)`;
+shots(id uuid, frame_id uuid, shot_number int, pins int)
+Note: 10th-frame X 9 / uses shots 1=10, 2=9, 3=1; count it as a spare conversion from shots when answering spare-count or spare-rate questions.`;
 
   // prompt for SQL generation
   const sqlPrompt = `${buildSqlPrompt(
