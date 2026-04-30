@@ -154,6 +154,7 @@
   - Query defaults and persisted query cache are in `mobile/src/lib/query-client.ts`.
   - Web persists `games`, `game`, `sessions`, and `leaderboard` query roots for up to 24 hours.
   - Native persists only `leaderboard` in React Query because logged game data is intended to come from SQLite.
+  - Friends leaderboards use metric-scoped lazy React Query entries under the `leaderboard` root key. The Friends screen loads the active metric first, then warms the remaining metric tabs sequentially in the background.
   - `AuthProvider` clears the query cache when the signed-in user changes and stores the cache owner under `pinpoint-query-cache-owner`.
 - Local storage / offline mode approach:
   - Native saved logs are loaded from SQLite through `mobile/src/lib/local-logs-db.native.ts`.
@@ -207,6 +208,8 @@
 - Friends and leaderboards
   - Files: `mobile/src/app/(tabs)/friends.tsx`, `app/api/friends/leaderboard/route.ts`, invite routes under `app/api/friends/invite/`.
   - Supports persistent invite links and metric-based leaderboards.
+  - `GET /api/friends/leaderboard` remains the legacy all-metrics response. `GET /api/friends/leaderboard?metric=<LeaderboardMetric>` returns a ranked single-metric response for lazy tab loading.
+  - The frontend validates the per-metric leaderboard response shape so frontend/backend deploy mismatches fail clearly instead of rendering empty leaderboard rows.
 - Profile, avatars, legal, and data deletion
   - Files: profile routes under `app/api/account/profile/`, `mobile/src/lib/profile.ts`, `mobile/src/app/edit-profile.tsx`, `mobile/src/app/privacy.tsx`, `mobile/src/app/terms.tsx`, `mobile/src/app/delete-account.tsx`, `mobile/src/app/delete-data.tsx`.
   - Avatar presets and uploads are supported.

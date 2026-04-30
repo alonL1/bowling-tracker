@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { RefreshControl, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,25 +25,19 @@ import InlineLoadingCard from '@/components/inline-loading-card';
 import ProfileAvatar from '@/components/profile-avatar';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
-import { createInvite, fetchLeaderboard, queryKeys } from '@/lib/backend';
+import { createInvite, fetchLeaderboardMetric, queryKeys } from '@/lib/backend';
 import { formatTenths } from '@/lib/number-format';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { formatHandle } from '@/lib/profile';
-import type { InviteLinkResponse, LeaderboardMetric, LeaderboardRow } from '@/lib/types';
+import type { InviteLinkResponse, LeaderboardMetric, LeaderboardMetricRow } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
-
-type RankedRow = LeaderboardRow & {
-  rank: number;
-  metricValue: number;
-};
 
 const TAB_HORIZONTAL_PADDING = 14;
 const BOTTOM_DOTS_DOCK_HEIGHT = 34;
 
 type MetricTabWidths = Partial<Record<LeaderboardMetric, number>>;
 type MetricTabLayout = { x: number; width: number };
-type RankedRowsByMetric = Partial<Record<LeaderboardMetric, RankedRow[]>>;
 
 const METRIC_TABS: Array<{
   metric: LeaderboardMetric;
@@ -66,10 +60,6 @@ const METRIC_TABS: Array<{
   { metric: 'MostNines', label: '9 King', description: 'Total Frames with Score of 9' },
 ];
 
-function getMetricValue(row: LeaderboardRow, metric: LeaderboardMetric) {
-  return row.metrics[metric] ?? 0;
-}
-
 function formatMetricValue(metric: LeaderboardMetric, value: number) {
   if (!Number.isFinite(value)) {
     return '—';
@@ -88,9 +78,12 @@ function formatMetricValue(metric: LeaderboardMetric, value: number) {
 
 export default function FriendsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isGuest, loading: authLoading } = useAuth();
   const isAndroid = Platform.OS === 'android';
   const [selectedMetric, setSelectedMetric] = useState<LeaderboardMetric>('bestGame');
+  const [backgroundWarmupStarted, setBackgroundWarmupStarted] = useState(false);
+  const [enabledMetrics, setEnabledMetrics] = useState<LeaderboardMetric[]>(['bestGame']);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [inviteStatus, setInviteStatus] = useState('');
@@ -114,12 +107,75 @@ export default function FriendsScreen() {
         )
       : 0;
 
-  const leaderboardQuery = useQuery({
-    queryKey: queryKeys.leaderboard,
-    queryFn: fetchLeaderboard,
-    enabled: !authLoading && !isGuest,
+  const selectedMetricIndex = Math.max(
+    0,
+    METRIC_TABS.findIndex((entry) => entry.metric === selectedMetric),
+  );
+  const leaderboardMetricQueries = useQueries({
+    queries: METRIC_TABS.map((entry) => ({
+      queryKey: queryKeys.leaderboardMetric(entry.metric),
+      queryFn: () => fetchLeaderboardMetric(entry.metric),
+      enabled: !authLoading && !isGuest && enabledMetrics.includes(entry.metric),
+    })),
   });
-  const isInitialLeaderboardLoading = leaderboardQuery.isPending && !leaderboardQuery.data && !isGuest;
+  const selectedMetricQuery = leaderboardMetricQueries[selectedMetricIndex];
+  const selectedMetricData = selectedMetricQuery?.data ?? null;
+  const enabledQueriesSettled = enabledMetrics.every((metric) => {
+    const index = METRIC_TABS.findIndex((entry) => entry.metric === metric);
+    const query = leaderboardMetricQueries[index];
+    return Boolean(query && !query.isPending && !query.isFetching);
+  });
+
+  useEffect(() => {
+    if (isGuest || authLoading) {
+      setBackgroundWarmupStarted(false);
+      setEnabledMetrics([selectedMetric]);
+      return;
+    }
+
+    setEnabledMetrics((currentMetrics) =>
+      currentMetrics.includes(selectedMetric)
+        ? currentMetrics
+        : [...currentMetrics, selectedMetric],
+    );
+  }, [authLoading, isGuest, selectedMetric]);
+
+  useEffect(() => {
+    if (!isGuest && !authLoading && selectedMetricData && !backgroundWarmupStarted) {
+      setBackgroundWarmupStarted(true);
+    }
+  }, [authLoading, backgroundWarmupStarted, isGuest, selectedMetricData]);
+
+  useEffect(() => {
+    if (!backgroundWarmupStarted || isGuest || authLoading) {
+      return;
+    }
+
+    if (!enabledQueriesSettled) {
+      return;
+    }
+
+    const nextMetric = METRIC_TABS.find((entry) => !enabledMetrics.includes(entry.metric))?.metric;
+    if (!nextMetric) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setEnabledMetrics((currentMetrics) =>
+        currentMetrics.includes(nextMetric) ? currentMetrics : [...currentMetrics, nextMetric],
+      );
+    }, 150);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [
+    authLoading,
+    backgroundWarmupStarted,
+    enabledMetrics,
+    enabledQueriesSettled,
+    isGuest,
+  ]);
 
   const inviteMutation = useMutation({
     mutationFn: createInvite,
@@ -144,61 +200,33 @@ export default function FriendsScreen() {
     setInviteStatus('');
   }, [isGuest]);
 
-  const participants = isGuest ? [] : leaderboardQuery.data?.participants ?? [];
-  const selfUserId = isGuest ? '' : leaderboardQuery.data?.selfUserId ?? '';
-  const onlyShowingSelf =
-    !isGuest &&
-    participants.length > 0 &&
-    participants.every((participant) => participant.userId === selfUserId);
+  const fallbackSelfUserId =
+    selectedMetricData?.selfUserId ??
+    leaderboardMetricQueries.find((query) => query.data)?.data?.selfUserId ??
+    '';
+  const selectedMetricError = selectedMetricQuery?.error ?? null;
+  const metricPages = METRIC_TABS.map((entry, index) => {
+    const query = leaderboardMetricQueries[index];
+    const data = query.data;
+    const selfUserId = data?.selfUserId ?? fallbackSelfUserId;
+    const rankedRows: LeaderboardMetricRow[] = data?.rows ?? [];
+    const queryEnabled = !authLoading && !isGuest && enabledMetrics.includes(entry.metric);
+    const errorMessage =
+      query.error instanceof Error
+        ? query.error.message
+        : query.error
+          ? 'Failed to load leaderboard.'
+          : '';
 
-  const rankedRowsByMetric = useMemo<RankedRowsByMetric>(() => {
-    return METRIC_TABS.reduce<RankedRowsByMetric>((accumulator, entry) => {
-      const sorted = [...participants].sort((left, right) => {
-        const delta = getMetricValue(right, entry.metric) - getMetricValue(left, entry.metric);
-        if (delta !== 0) {
-          return delta;
-        }
-        const nameDelta = left.username.localeCompare(right.username, undefined, {
-          sensitivity: 'base',
-        });
-        if (nameDelta !== 0) {
-          return nameDelta;
-        }
-        return left.userId.localeCompare(right.userId);
-      });
-
-      let previousValue: number | null = null;
-      let previousRank = 0;
-
-      accumulator[entry.metric] = sorted.map((row, index) => {
-        const metricValue = getMetricValue(row, entry.metric);
-        const rank =
-          index === 0
-            ? 1
-            : previousValue !== null && metricValue === previousValue
-              ? previousRank
-              : index + 1;
-        previousValue = metricValue;
-        previousRank = rank;
-        return { ...row, rank, metricValue };
-      });
-
-      return accumulator;
-    }, {});
-  }, [participants]);
-
-  const metricPages = useMemo(
-    () =>
-      METRIC_TABS.map((entry) => {
-        const rankedRows = rankedRowsByMetric[entry.metric] ?? [];
-        return {
-          ...entry,
-          rankedRows,
-          yourRank: rankedRows.find((row) => row.userId === selfUserId)?.rank ?? null,
-        };
-      }),
-    [rankedRowsByMetric, selfUserId],
-  );
+    return {
+      ...entry,
+      rankedRows,
+      selfUserId,
+      yourRank: rankedRows.find((row) => row.userId === selfUserId)?.rank ?? null,
+      isLoading: !isGuest && !data && queryEnabled && query.isPending,
+      errorMessage,
+    };
+  });
 
   const handleTabLabelLayout = (metric: LeaderboardMetric, event: LayoutChangeEvent) => {
     const nextWidth = Math.ceil(event.nativeEvent.layout.width);
@@ -219,7 +247,7 @@ export default function FriendsScreen() {
     tabLayoutsRef.current[metric] = { x, width };
   };
 
-  const scrollMetricChipIntoView = (metric: LeaderboardMetric, animated: boolean) => {
+  const scrollMetricChipIntoView = useCallback((metric: LeaderboardMetric, animated: boolean) => {
     const layout = tabLayoutsRef.current[metric];
     if (!layout || !tabViewportWidthRef.current) {
       return;
@@ -227,9 +255,9 @@ export default function FriendsScreen() {
 
     const targetX = Math.max(0, layout.x - (tabViewportWidthRef.current - layout.width) / 2);
     tabScrollRef.current?.scrollTo({ x: targetX, y: 0, animated });
-  };
+  }, []);
 
-  const scrollToMetricPage = (metric: LeaderboardMetric, animated: boolean) => {
+  const scrollToMetricPage = useCallback((metric: LeaderboardMetric, animated: boolean) => {
     if (!pagerWidth) {
       return;
     }
@@ -244,13 +272,13 @@ export default function FriendsScreen() {
       y: 0,
       animated,
     });
-  };
+  }, [pagerWidth]);
 
-  const handleSelectMetric = (metric: LeaderboardMetric, animated: boolean) => {
+  const handleSelectMetric = useCallback((metric: LeaderboardMetric, animated: boolean) => {
     setSelectedMetric(metric);
     scrollMetricChipIntoView(metric, animated);
     scrollToMetricPage(metric, animated);
-  };
+  }, [scrollMetricChipIntoView, scrollToMetricPage]);
 
   useEffect(() => {
     if (!pagerWidth) {
@@ -261,7 +289,7 @@ export default function FriendsScreen() {
       scrollToMetricPage(selectedMetric, false);
       scrollMetricChipIntoView(selectedMetric, false);
     });
-  }, [pagerWidth, selectedMetric]);
+  }, [pagerWidth, scrollMetricChipIntoView, scrollToMetricPage, selectedMetric]);
 
   const handleInvite = async () => {
     if (isGuest) {
@@ -297,9 +325,17 @@ export default function FriendsScreen() {
   };
 
   const handleRefresh = async () => {
+    if (isGuest) {
+      return;
+    }
+
     setIsRefreshing(true);
     try {
-      await leaderboardQuery.refetch();
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.leaderboard,
+        refetchType: 'none',
+      });
+      await leaderboardMetricQueries[selectedMetricIndex]?.refetch();
     } finally {
       setIsRefreshing(false);
     }
@@ -397,12 +433,12 @@ export default function FriendsScreen() {
 
       {inviteStatus ? <InfoBanner text={inviteStatus} /> : null}
 
-      {!isGuest && leaderboardQuery.error ? (
+      {!isGuest && selectedMetricError ? (
         <InfoBanner
           tone="error"
           text={
-            leaderboardQuery.error instanceof Error
-              ? leaderboardQuery.error.message
+            selectedMetricError instanceof Error
+              ? selectedMetricError.message
               : 'Failed to load leaderboard.'
           }
         />
@@ -457,7 +493,9 @@ export default function FriendsScreen() {
               </View>
 
               <View style={styles.leaderboardList}>
-                {isInitialLeaderboardLoading ? (
+                {page.errorMessage ? (
+                  <InfoBanner tone="error" text={page.errorMessage} />
+                ) : page.isLoading ? (
                   <InlineLoadingCard label="Loading leaderboard..." />
                 ) : page.rankedRows.length === 0 ? (
                   <EmptyStateCard
@@ -479,7 +517,8 @@ export default function FriendsScreen() {
                   />
                 ) : (
                   <>
-                    {onlyShowingSelf ? (
+                    {!isGuest &&
+                    page.rankedRows.every((row) => row.userId === page.selfUserId) ? (
                       <EmptyStateCard
                         title="No friends yet"
                         body="Invite a friend to start comparing stats."
@@ -502,7 +541,10 @@ export default function FriendsScreen() {
                           username={row.username}
                         />
                         <Text
-                          style={[styles.rowName, row.userId === selfUserId && styles.rowNameSelf]}
+                          style={[
+                            styles.rowName,
+                            row.userId === page.selfUserId && styles.rowNameSelf,
+                          ]}
                           numberOfLines={1}>
                           {formatHandle(row.username)}
                         </Text>

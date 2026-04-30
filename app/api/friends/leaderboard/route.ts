@@ -22,6 +22,8 @@ type LeaderboardMetrics = {
   MostNines: number;
 };
 
+type LeaderboardMetric = keyof LeaderboardMetrics;
+
 type MutableMetrics = LeaderboardMetrics & {
   totalScoreSum: number;
   totalScoreCount: number;
@@ -51,9 +53,56 @@ type FrameRow = {
 type GameRow = {
   user_id: string | null;
   total_score: number | null;
+  played_at?: string | null;
+  created_at?: string | null;
+  id?: string | null;
   session_id: string | null;
   frames?: FrameRow[] | null;
 };
+
+const LEADERBOARD_METRICS: LeaderboardMetric[] = [
+  "bestGame",
+  "bestAverage",
+  "bestSeries",
+  "bestSession",
+  "mostGames",
+  "mostSessions",
+  "SessionScore",
+  "TotalPoints",
+  "SessionLength",
+  "StrikeRate",
+  "SpareRate",
+  "TotalStrikes",
+  "TotalSpares",
+  "MostNines"
+];
+
+const FRAME_STAT_METRICS = new Set<LeaderboardMetric>([
+  "StrikeRate",
+  "SpareRate",
+  "TotalStrikes",
+  "TotalSpares",
+  "MostNines"
+]);
+
+function parseLeaderboardMetric(request: Request) {
+  const rawMetric = new URL(request.url).searchParams.get("metric");
+  if (!rawMetric) {
+    return null;
+  }
+
+  return LEADERBOARD_METRICS.includes(rawMetric as LeaderboardMetric)
+    ? (rawMetric as LeaderboardMetric)
+    : "invalid";
+}
+
+function getGamesSelect(metric: LeaderboardMetric | null): string {
+  if (metric && !FRAME_STAT_METRICS.has(metric)) {
+    return "id,user_id,total_score,session_id,played_at,created_at";
+  }
+
+  return "id,user_id,total_score,session_id,played_at,created_at,frames:frames(is_strike,is_spare,shots:shots(shot_number,pins))";
+}
 
 function roundToTenths(value: number) {
   return Math.round(value * 10) / 10;
@@ -98,6 +147,29 @@ function computeBestSeries(scores: number[]) {
   return bestSeries;
 }
 
+function normalizeMetrics(metrics: MutableMetrics): LeaderboardMetrics {
+  return {
+    bestGame: metrics.bestGame,
+    bestAverage: roundToTenths(metrics.bestAverage),
+    bestSeries: metrics.bestSeries,
+    bestSession: roundToTenths(metrics.bestSession),
+    mostGames: metrics.mostGames,
+    mostSessions: metrics.mostSessions,
+    SessionScore: metrics.SessionScore,
+    TotalPoints: metrics.TotalPoints,
+    SessionLength: metrics.SessionLength,
+    StrikeRate: roundToTenths(metrics.StrikeRate),
+    SpareRate: roundToTenths(metrics.SpareRate),
+    TotalStrikes: metrics.TotalStrikes,
+    TotalSpares: metrics.TotalSpares,
+    MostNines: metrics.MostNines
+  };
+}
+
+function getMetricValue(metrics: LeaderboardMetrics, metric: LeaderboardMetric) {
+  return metrics[metric] ?? 0;
+}
+
 export async function GET(request: Request) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -107,6 +179,11 @@ export async function GET(request: Request) {
       { error: "Missing Supabase configuration." },
       { status: 500 }
     );
+  }
+
+  const requestedMetric = parseLeaderboardMetric(request);
+  if (requestedMetric === "invalid") {
+    return NextResponse.json({ error: "Invalid leaderboard metric." }, { status: 400 });
   }
 
   const user = await getUserFromRequest(request);
@@ -147,10 +224,11 @@ export async function GET(request: Request) {
 
   const { data: games, error: gamesError } = await supabase
     .from("games")
-    .select(
-      "user_id,total_score,session_id,frames:frames(is_strike,is_spare,shots:shots(shot_number,pins))"
-    )
-    .in("user_id", participantIds);
+    .select(getGamesSelect(requestedMetric))
+    .in("user_id", participantIds)
+    .order("played_at", { ascending: true })
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
 
   if (gamesError) {
     return NextResponse.json(
@@ -167,7 +245,7 @@ export async function GET(request: Request) {
   const sessionAggregates = new Map<string, SessionAggregate>();
   const scoresByUserSession = new Map<string, number[]>();
 
-  ((games as GameRow[] | null) || []).forEach((game) => {
+  ((games as unknown as GameRow[] | null) || []).forEach((game) => {
     const userId = game.user_id;
     if (!userId) {
       return;
@@ -285,22 +363,7 @@ export async function GET(request: Request) {
   const participants = participantIds.map((participantId) => {
       const metrics = metricsByUser.get(participantId) ?? createBlankMetrics();
       const publicProfile = publicProfiles.get(participantId);
-      const normalizedMetrics: LeaderboardMetrics = {
-        bestGame: metrics.bestGame,
-        bestAverage: roundToTenths(metrics.bestAverage),
-        bestSeries: metrics.bestSeries,
-        bestSession: roundToTenths(metrics.bestSession),
-        mostGames: metrics.mostGames,
-        mostSessions: metrics.mostSessions,
-        SessionScore: metrics.SessionScore,
-        TotalPoints: metrics.TotalPoints,
-        SessionLength: metrics.SessionLength,
-        StrikeRate: roundToTenths(metrics.StrikeRate),
-        SpareRate: roundToTenths(metrics.SpareRate),
-        TotalStrikes: metrics.TotalStrikes,
-        TotalSpares: metrics.TotalSpares,
-        MostNines: metrics.MostNines
-      };
+      const normalizedMetrics = normalizeMetrics(metrics);
 
       return {
         userId: participantId,
@@ -313,6 +376,53 @@ export async function GET(request: Request) {
         metrics: normalizedMetrics
       };
     });
+
+  if (requestedMetric) {
+    const sortedParticipants = [...participants].sort((left, right) => {
+      const delta =
+        getMetricValue(right.metrics, requestedMetric) -
+        getMetricValue(left.metrics, requestedMetric);
+      if (delta !== 0) {
+        return delta;
+      }
+
+      const nameDelta = left.username.localeCompare(right.username, undefined, {
+        sensitivity: "base"
+      });
+      if (nameDelta !== 0) {
+        return nameDelta;
+      }
+
+      return left.userId.localeCompare(right.userId);
+    });
+
+    let previousValue: number | null = null;
+    let previousRank = 0;
+    const rows = sortedParticipants.map((participant, index) => {
+      const metricValue = getMetricValue(participant.metrics, requestedMetric);
+      const rank =
+        index === 0
+          ? 1
+          : previousValue !== null && metricValue === previousValue
+            ? previousRank
+            : index + 1;
+      previousValue = metricValue;
+      previousRank = rank;
+
+      const { metrics: _metrics, ...row } = participant;
+      return {
+        ...row,
+        rank,
+        metricValue
+      };
+    });
+
+    return NextResponse.json({
+      selfUserId: user.userId,
+      metric: requestedMetric,
+      rows
+    });
+  }
 
   return NextResponse.json({
     selfUserId: user.userId,

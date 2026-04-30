@@ -118,6 +118,17 @@ export type LeaderboardRow = {
   metrics: Record<LeaderboardMetric, number>;
 };
 
+export type LeaderboardMetricRow = Omit<LeaderboardRow, 'metrics'> & {
+  rank: number;
+  metricValue: number;
+};
+
+export type LeaderboardMetricResponse = {
+  selfUserId: string;
+  metric: LeaderboardMetric;
+  rows: LeaderboardMetricRow[];
+};
+
 export type PublicProfile = {
   userId: string;
   username: string;

@@ -17,6 +17,9 @@ import type {
   GameListItem,
   InviteLinkResponse,
   InviteLookupResponse,
+  LeaderboardMetric,
+  LeaderboardMetricResponse,
+  LeaderboardMetricRow,
   LeaderboardRow,
   LivePlayer,
   LiveSessionCaptureResponse,
@@ -30,13 +33,12 @@ import type {
   UserProfile,
 } from '@/lib/types';
 
-function normalizeLeaderboardParticipant(
+function normalizeLeaderboardIdentity(
   row: Partial<LeaderboardRow> & {
     userId: string;
     displayName?: string;
-    metrics: LeaderboardRow['metrics'];
   },
-): LeaderboardRow {
+): Omit<LeaderboardRow, 'metrics'> {
   const username = buildLegacyUsernameFallback({
     username: row.username,
     displayName: row.displayName,
@@ -56,8 +58,97 @@ function normalizeLeaderboardParticipant(
         username,
         initials: row.displayName || null,
       }),
+  };
+}
+
+function normalizeLeaderboardParticipant(
+  row: Partial<LeaderboardRow> & {
+    userId: string;
+    displayName?: string;
+    metrics: LeaderboardRow['metrics'];
+  },
+): LeaderboardRow {
+  return {
+    ...normalizeLeaderboardIdentity(row),
     metrics: row.metrics,
   };
+}
+
+function normalizeLeaderboardMetricRow(
+  row: Partial<LeaderboardRow> & {
+    userId: string;
+    displayName?: string;
+    rank: number;
+    metricValue: number;
+  },
+): LeaderboardMetricRow {
+  return {
+    ...normalizeLeaderboardIdentity(row),
+    rank: row.rank,
+    metricValue: row.metricValue,
+  };
+}
+
+function validateLeaderboardMetricPayload(
+  payload: unknown,
+  requestedMetric: LeaderboardMetric,
+): asserts payload is {
+  selfUserId: string;
+  metric: LeaderboardMetric;
+  rows: Array<
+    Partial<LeaderboardRow> & {
+      userId: string;
+      displayName?: string;
+      rank: number;
+      metricValue: number;
+    }
+  >;
+} {
+  const contractError = new Error(
+    'Leaderboard API response did not match the per-metric leaderboard contract. Make sure the backend API is deployed with the latest leaderboard changes.',
+  );
+
+  if (!payload || typeof payload !== 'object') {
+    throw contractError;
+  }
+
+  const candidate = payload as {
+    selfUserId?: unknown;
+    metric?: unknown;
+    rows?: unknown;
+  };
+
+  if (
+    typeof candidate.selfUserId !== 'string' ||
+    candidate.metric !== requestedMetric ||
+    !Array.isArray(candidate.rows)
+  ) {
+    throw contractError;
+  }
+
+  const rowsAreValid = candidate.rows.every((row) => {
+    if (!row || typeof row !== 'object') {
+      return false;
+    }
+
+    const candidateRow = row as {
+      userId?: unknown;
+      rank?: unknown;
+      metricValue?: unknown;
+    };
+
+    return (
+      typeof candidateRow.userId === 'string' &&
+      typeof candidateRow.rank === 'number' &&
+      Number.isFinite(candidateRow.rank) &&
+      typeof candidateRow.metricValue === 'number' &&
+      Number.isFinite(candidateRow.metricValue)
+    );
+  });
+
+  if (!rowsAreValid) {
+    throw contractError;
+  }
 }
 
 function normalizeInviteLookupPayload(payload: InviteLookupResponse): InviteLookupResponse {
@@ -98,6 +189,7 @@ export const queryKeys = {
   recordEntryStatus: ['record-entry-status'] as const,
   recordingDraft: (mode: RecordingDraftMode) => ['recording-draft', mode] as const,
   leaderboard: ['leaderboard'] as const,
+  leaderboardMetric: (metric: LeaderboardMetric) => ['leaderboard', metric] as const,
   inviteLookup: (token: string) => ['invite-lookup', token] as const,
   profile: ['profile'] as const,
 };
@@ -262,6 +354,22 @@ export async function fetchLeaderboard() {
   return {
     ...payload,
     participants: (payload.participants || []).map(normalizeLeaderboardParticipant),
+  };
+}
+
+export async function fetchLeaderboardMetric(
+  metric: LeaderboardMetric,
+): Promise<LeaderboardMetricResponse> {
+  const payload = await apiJson<unknown>(
+    `/api/friends/leaderboard?metric=${encodeURIComponent(metric)}`,
+  );
+
+  validateLeaderboardMetricPayload(payload, metric);
+
+  return {
+    selfUserId: payload.selfUserId,
+    metric: payload.metric,
+    rows: (payload.rows || []).map(normalizeLeaderboardMetricRow),
   };
 }
 

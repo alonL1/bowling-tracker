@@ -9,12 +9,12 @@ import AccountLoadingState from '@/components/account-loading-state';
 import MobileTabBar from '@/components/mobile-tab-bar';
 import SafeRedirect from '@/components/safe-redirect';
 import { palette } from '@/constants/palette';
-import { fetchGames, fetchLeaderboard, fetchRecordEntryStatus, queryKeys } from '@/lib/backend';
+import { fetchGames, fetchRecordEntryStatus, queryKeys } from '@/lib/backend';
 import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { useAuth } from '@/providers/auth-provider';
 
 export default function TabsLayout() {
-  const { user, session, loading, isGuest } = useAuth();
+  const { user, session, loading } = useAuth();
   const queryClient = useQueryClient();
   const warmedUserIdRef = useRef<string | null>(null);
 
@@ -49,16 +49,8 @@ export default function TabsLayout() {
         require('../../../assets/pins/thinking_pin.png'),
         require('../../../assets/pins/idea_pin.png'),
       ]),
-      ...(isGuest
-        ? []
-        : [
-            queryClient.prefetchQuery({
-              queryKey: queryKeys.leaderboard,
-              queryFn: fetchLeaderboard,
-            }),
-          ]),
     ]);
-  }, [isGuest, queryClient, session?.access_token, user]);
+  }, [queryClient, session?.access_token, user]);
 
   if (loading) {
     return <AccountLoadingState />;
