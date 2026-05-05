@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npx eslint *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\alonl\\\\bowling-tracker\" -Recurse -Include \"*.ts\", \"*.tsx\", \"*.js\", \"*.jsx\")",
+      "Bash(Select-Object FullName)",
+      "Bash(xargs grep *)",
+      "PowerShell(head -30)"
     ]
   }
 }

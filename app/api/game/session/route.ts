@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getUserIdFromRequest } from "../../utils/auth";
+import { deleteSessionIfEmpty } from "../../utils/sessions";
 
 export const runtime = "nodejs";
 
@@ -139,8 +140,19 @@ export async function PATCH(request: Request) {
       .eq("user_id", userId);
   };
 
-  await refreshSession(previousSessionId);
+  let previousSessionDeleted = false;
+  if (previousSessionId) {
+    const cleanup = await deleteSessionIfEmpty(
+      supabase,
+      userId,
+      previousSessionId
+    );
+    previousSessionDeleted = cleanup.deleted;
+  }
+  if (!previousSessionDeleted) {
+    await refreshSession(previousSessionId);
+  }
   await refreshSession(targetSessionId);
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, previousSessionDeleted });
 }

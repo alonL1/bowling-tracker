@@ -204,11 +204,23 @@ export default function GameDetailScreen() {
     );
   }
 
+  const isLastGameInSession = (() => {
+    if (!game.session_id) {
+      return false;
+    }
+    const sessionGames = gamesQuery.games.filter(
+      (entry) => entry.session_id === game.session_id,
+    );
+    return sessionGames.length === 1 && sessionGames[0]?.id === game.id;
+  })();
+
   const handleDelete = () => {
     confirmAction({
-      title: 'Delete game',
-      message: 'This will permanently remove the game.',
-      confirmLabel: 'Delete',
+      title: isLastGameInSession ? 'Delete last game' : 'Delete game',
+      message: isLastGameInSession
+        ? 'This is the only game in the session. Deleting it will also delete the session itself.'
+        : 'This will permanently remove the game.',
+      confirmLabel: isLastGameInSession ? 'Delete game and session' : 'Delete',
       destructive: true,
       onConfirm: async () => {
         try {

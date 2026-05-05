@@ -28,6 +28,8 @@ type SessionGameCardProps = {
   onScoreboardGestureStart?: () => void;
   onScoreboardGestureEnd?: () => void;
   actionsLocked?: boolean;
+  isLastGameInSession?: boolean;
+  onSessionDeleted?: () => void;
 };
 
 function getCollapsedBadgeLines(title: string) {
@@ -47,6 +49,8 @@ export default function SessionGameCard({
   onScoreboardGestureStart,
   onScoreboardGestureEnd,
   actionsLocked = false,
+  isLastGameInSession = false,
+  onSessionDeleted,
 }: SessionGameCardProps) {
   const queryClient = useQueryClient();
   const { user, session } = useAuth();
@@ -56,7 +60,7 @@ export default function SessionGameCard({
 
   const deleteMutation = useMutation({
     mutationFn: async () => deleteGame(game.id),
-    onSuccess: async () => {
+    onSuccess: async (response) => {
       setDeleteError('');
       if (user) {
         await syncLocalLogsForUser(user.id, session?.access_token ?? null);
@@ -71,6 +75,9 @@ export default function SessionGameCard({
           ? queryClient.invalidateQueries({ queryKey: localLogQueryKeys.game(user.id, game.id) })
           : Promise.resolve(),
       ]);
+      if (response?.sessionDeleted) {
+        onSessionDeleted?.();
+      }
     },
     onError: (nextError) => {
       setDeleteError(nextError instanceof Error ? nextError.message : 'Failed to delete game.');
@@ -99,9 +106,11 @@ export default function SessionGameCard({
 
   const handleDelete = () => {
     confirmAction({
-      title: 'Delete game',
-      message: 'This will permanently remove the game.',
-      confirmLabel: 'Delete',
+      title: isLastGameInSession ? 'Delete last game' : 'Delete game',
+      message: isLastGameInSession
+        ? 'This is the only game in the session. Deleting it will also delete the session itself.'
+        : 'This will permanently remove the game.',
+      confirmLabel: isLastGameInSession ? 'Delete game and session' : 'Delete',
       destructive: true,
       onConfirm: () => deleteMutation.mutate(),
     });

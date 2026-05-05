@@ -10,6 +10,7 @@ import {
   type RawLivePlayer,
 } from "../live-session/shared";
 import { syncLoggedGameSelection } from "../utils/logged-scoreboard";
+import { deleteSessionIfEmpty } from "../utils/sessions";
 
 export const runtime = "nodejs";
 
@@ -671,22 +672,32 @@ export async function DELETE(request: Request) {
     );
   }
 
+  let sessionDeleted = false;
   if (deletedGame?.session_id) {
-    const { data: earliestGame } = await supabase
-      .from("games")
-      .select("played_at")
-      .eq("session_id", deletedGame.session_id)
-      .eq("user_id", userId)
-      .order("played_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+    const cleanup = await deleteSessionIfEmpty(
+      supabase,
+      userId,
+      deletedGame.session_id
+    );
+    sessionDeleted = cleanup.deleted;
 
-    await supabase
-      .from("bowling_sessions")
-      .update({ started_at: earliestGame?.played_at ?? null })
-      .eq("id", deletedGame.session_id)
-      .eq("user_id", userId);
+    if (!sessionDeleted) {
+      const { data: earliestGame } = await supabase
+        .from("games")
+        .select("played_at")
+        .eq("session_id", deletedGame.session_id)
+        .eq("user_id", userId)
+        .order("played_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      await supabase
+        .from("bowling_sessions")
+        .update({ started_at: earliestGame?.played_at ?? null })
+        .eq("id", deletedGame.session_id)
+        .eq("user_id", userId);
+    }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, sessionDeleted });
 }

@@ -280,7 +280,7 @@ export async function deleteSession(sessionId: string, mode: 'sessionless' | 'de
 }
 
 export async function moveGameToSession(gameId: string, sessionId: string | null) {
-  return apiJson<{ ok: boolean }>('/api/game/session', {
+  return apiJson<{ ok: boolean; previousSessionDeleted?: boolean }>('/api/game/session', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ gameId, sessionId }),
@@ -288,7 +288,7 @@ export async function moveGameToSession(gameId: string, sessionId: string | null
 }
 
 export async function deleteGame(gameId: string) {
-  return apiJson<{ ok: boolean }>('/api/game', {
+  return apiJson<{ ok: boolean; sessionDeleted?: boolean }>('/api/game', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ gameId }),

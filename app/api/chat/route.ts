@@ -273,7 +273,6 @@ function buildPrompt(
   // You are a bowling stats assistant that is familiar with bowling terminology. Answer the question using only the JSON data below.
   // You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
   // If the data does not include the answer, say so briefly.
-  // Ignore any session not present in the Session/Game Index.
   // When listing multiple items, format them as a bulleted or numbered list (one item per line).
   // Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
   // Answer with a direct response. Do not include "Answer:".
@@ -303,7 +302,6 @@ function buildPrompt(
   return `You are a bowling stats assistant that is familiar with bowling terminology. Answer the question using only the JSON data below.
 You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
 If the data does not include the answer, say so briefly.
-Ignore any session not present in the Session/Game Index.
 When listing multiple items, format them as a bulleted or numbered list (one item per line).
 Only use markdown for bold (**). Bold the actual answer values (including multiple items if listed). Do not use any other markdown.
 Answer with a direct response. Do not include "Answer:".
@@ -345,7 +343,6 @@ function buildContextPrompt(
   // You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
   // You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
   // If the answer is not present, say so briefly.
-  // Ignore any session not present in the Session/Game Index.
   // Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is *timezone offset*.
   // If you mention times, convert them to the user's local time.
   // local time + *timezone offset* = UTC.
@@ -374,7 +371,6 @@ function buildContextPrompt(
   return `You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
 You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
 If the answer is not present, say so briefly.
-Ignore any session not present in the Session/Game Index.
 Very important to know that all timestamps you see in the context are UTC. The user's timezone offset (minutes from UTC) is ${timezoneOffsetMinutes ?? "unknown"}.
 If you mention times, convert them to the user's local time.
 local time + ${timezoneOffsetMinutes ?? "unknown"} = UTC.
@@ -420,7 +416,6 @@ function buildSqlPrompt(
   // - If you cannot answer with SQL, set sql to "__USE_CONTEXT__" and explain.
   // - The game index is a full list of games (not filtered). Use it for labels, but follow the question text for filtering.
   // - Session labels and IDs are provided in the Session Index. If the user references Session N or a session name, map it to session_id and filter by games.session_id.
-  // - Empty sessions do not exist for this task. Never include or count any session that is not in the Session Index.
   // - When listing sessions, use the Session Index labels (sessionLabel) and never output raw UUIDs unless the user explicitly asks for IDs.
   // - If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
   // - If the question lists games, include games.id, games.session_id, games.played_at, and games.total_score in the SELECT so labels can be mapped.
@@ -451,7 +446,6 @@ Return JSON only with this schema: {"sql": string|null, "explanation": string}.
 - The game index is a full list of games (not filtered). Use it for labels, but follow the question text for filtering.
 - Labels like "Game 3" come from the Game Index ordering; do not filter by games.game_name for "Game N" labels unless the user explicitly mentions a custom name.
 - Session labels and IDs are provided in the Session Index. If the user references Session N or a session name, map it to session_id and filter by games.session_id.
-- Empty sessions do not exist for this task. Never include or count any session that is not in the Session Index.
 - When listing sessions, use the Session Index labels (sessionLabel) and never output raw UUIDs unless the user explicitly asks for IDs.
 - If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
 - If the question lists games, include games.id, games.session_id, games.played_at, and games.total_score in the SELECT so labels can be mapped.
@@ -2059,13 +2053,7 @@ export async function POST(request: Request) {
 
   const buildIndexStart = Date.now();
   const sessions = (sessionRows as BowlingSession[] | null) ?? [];
-  const sessionIdsWithGames = new Set(
-    games.map((game) => game.session_id).filter(Boolean) as string[]
-  );
-  const sessionsWithGames = sessions.filter((session) =>
-    sessionIdsWithGames.has(session.id)
-  );
-  const orderedSessions = sessionsWithGames.slice().sort((a, b) => {
+  const orderedSessions = sessions.slice().sort((a, b) => {
     const aTime = a.created_at ? Date.parse(a.created_at) : 0;
     const bTime = b.created_at ? Date.parse(b.created_at) : 0;
     if (aTime !== bTime) {

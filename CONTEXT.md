@@ -170,6 +170,7 @@
   - Scoreboard OCR extracts a `players` payload with frames and shots.
   - Finalization inserts logged games and selected player frames through `app/api/utils/logged-scoreboard.ts`.
   - Manual game edits call `PATCH /api/game` and update `games`, `frames`, and `shots`.
+  - `DELETE /api/game` and `PATCH /api/game/session` both call `deleteSessionIfEmpty` after the operation, so the parent session is removed when it ends up empty. Responses include `sessionDeleted` / `previousSessionDeleted` so the UI can navigate away.
   - Stats and grouping are computed on the frontend in `mobile/src/lib/bowling.ts` and `mobile/src/lib/live-session.ts`, and in backend chat/leaderboard logic.
 
 ## Core Features
@@ -194,6 +195,7 @@
 - Viewing game history and sessions
   - Files: `mobile/src/app/(tabs)/sessions/index.tsx`, `mobile/src/app/(tabs)/sessions/[sessionId].tsx`, `mobile/src/components/session-card.tsx`, `mobile/src/components/session-game-card.tsx`, `mobile/src/lib/bowling.ts`, `mobile/src/hooks/use-logged-data.ts`.
   - Sessions are grouped by `session_id`; unnamed sessions are labeled by order.
+  - Empty sessions are not allowed: deleting the last game in a session, or moving the last game out, deletes the session row server-side via `app/api/utils/sessions.ts:deleteSessionIfEmpty`. Mobile delete dialogs warn the user when the action will also remove the session.
 - Viewing and editing a game
   - Files: `mobile/src/app/games/[gameId].tsx`, `mobile/src/components/frame-grid.tsx`, `mobile/src/components/game-edit-sheet.tsx`, `app/api/game/route.ts`.
   - Frame/shot edits recompute total score and update backend records.
@@ -425,6 +427,7 @@
 - Supabase:
   - Run `db/schema.sql` and needed migrations in `db/`.
   - For existing databases, run `db/add_leaderboard_metric_indexes.sql` so Friends leaderboard metric queries can use the game/frame/shot indexes expected by the current code.
+  - For existing databases, also run `db/cleanup_empty_sessions.sql` once to evict pre-existing orphan `bowling_sessions` rows. Apply it after deploying the new game/session routes so concurrent requests cannot recreate orphans.
   - Storage bucket for scoreboards defaults to `scoreboards-temp`.
   - Profile avatar bucket is `profile-avatars`.
   - RLS policies are defined in `db/schema.sql`.

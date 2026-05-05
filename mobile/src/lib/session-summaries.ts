@@ -76,11 +76,7 @@ export function buildSessionSummaries(
     gamesBySessionId.set(game.session_id, [game]);
   }
 
-  const sessionsWithGames = sessions.filter((session) => {
-    return (gamesBySessionId.get(session.id)?.length ?? 0) > 0;
-  });
-
-  const sortAscending = [...sessionsWithGames].sort((a, b) => {
+  const sortAscending = [...sessions].sort((a, b) => {
     const aFirstGameTs = getFirstGameTimestamp(gamesBySessionId.get(a.id) ?? []);
     const bFirstGameTs = getFirstGameTimestamp(gamesBySessionId.get(b.id) ?? []);
     const diff = aFirstGameTs - bFirstGameTs;
@@ -99,7 +95,7 @@ export function buildSessionSummaries(
     sessionNumberById.set(session.id, index + 1);
   });
 
-  const displaySessions = [...sessionsWithGames].sort((a, b) => {
+  const displaySessions = [...sessions].sort((a, b) => {
     const aFirstGameTs = getFirstGameTimestamp(gamesBySessionId.get(a.id) ?? []);
     const bFirstGameTs = getFirstGameTimestamp(gamesBySessionId.get(b.id) ?? []);
     const diff = bFirstGameTs - aFirstGameTs;

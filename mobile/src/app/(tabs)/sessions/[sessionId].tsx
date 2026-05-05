@@ -702,6 +702,10 @@ export default function SessionDetailScreen() {
                     onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
                     onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
                     actionsLocked={sessionActionsLocked}
+                    isLastGameInSession={
+                      group.games.length === 1 && Boolean(group.sessionId)
+                    }
+                    onSessionDeleted={leaveSessionDetail}
                   />
                 ))}
               </View>
