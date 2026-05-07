@@ -50,11 +50,11 @@ const sortOptions: Array<{ key: SessionSortOption; label: string }> = [
   { key: 'firstGameDate', label: 'First Game Date' },
   { key: 'createdAt', label: 'Created At Date' },
   { key: 'average', label: 'Average' },
-  { key: 'averageNoWarmup', label: 'Average (without warmup games)' },
+  { key: 'averageNoWarmup', label: 'Average (excluding warmup)' },
   { key: 'bestGame', label: 'Best Game' },
   { key: 'mostGames', label: 'Most Games' },
   { key: 'strikeRate', label: 'Strike Rate' },
-  { key: 'strikeRateNoWarmup', label: 'Strike Rate (without warmup games)' },
+  { key: 'strikeRateNoWarmup', label: 'Strike Rate (excluding warmup)' },
 ];
 
 function parseDateValue(value?: string | null) {

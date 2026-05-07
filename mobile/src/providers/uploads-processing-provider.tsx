@@ -31,7 +31,7 @@ import {
   uploadToRecordingDraft,
 } from '@/lib/backend';
 import { apiJson } from '@/lib/api';
-import { localLogQueryKeys } from '@/hooks/use-logged-data';
+import { localLogQueryKeys } from '@/hooks/local-log-query-keys';
 import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { supabase } from '@/lib/supabase';
 import {
@@ -132,7 +132,7 @@ type UploadsProcessingContextValue = {
     description?: string;
     selectedPlayerKeys?: string[];
 	  }) => void;
-	  updateLiveGameTagsLocal: (visibleGameId: string, tags: GameTag[]) => void;
+	  updateLiveGameTagsLocal: (visibleGameId: string, tags: GameTag[]) => boolean;
   deleteLiveCapture: (visibleGameId: string) => Promise<{
     removed: boolean;
     remoteDeleteRequired: boolean;
@@ -154,7 +154,7 @@ type UploadsProcessingContextValue = {
 	    mode: RecordingDraftMode;
 	    visibleGameId: string;
 	    tags: GameTag[];
-	  }) => void;
+	  }) => boolean;
   deleteDraftCapture: (payload: {
     mode: RecordingDraftMode;
     visibleGameId: string;
@@ -494,19 +494,24 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
   }, [queryClient, user]);
 
   const persistAndSetStore = useCallback(
-    (nextStore: UploadsProcessingStore) => {
+    (nextStore: UploadsProcessingStore, options?: { invalidate?: boolean }) => {
       storeRef.current = nextStore;
       setStore(nextStore);
       void saveUploadsProcessingStore(nextStore);
-      invalidateSyncQueries();
+      if (options?.invalidate !== false) {
+        invalidateSyncQueries();
+      }
     },
     [invalidateSyncQueries],
   );
 
   const updateStore = useCallback(
-    (updater: (current: UploadsProcessingStore) => UploadsProcessingStore) => {
+    (
+      updater: (current: UploadsProcessingStore) => UploadsProcessingStore,
+      options?: { invalidate?: boolean },
+    ) => {
       const nextStore = updater(cloneStore(storeRef.current));
-      persistAndSetStore(nextStore);
+      persistAndSetStore(nextStore, options);
       return nextStore;
     },
     [persistAndSetStore],
@@ -804,20 +809,23 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 	  );
 
 	  const syncCaptureItemTags = useCallback(async (captureItem: UploadsProcessingCaptureItem) => {
-	    if (!Array.isArray(captureItem.tags)) {
+	    const latestItem =
+	      storeRef.current.captureItems.find((entry) => entry.id === captureItem.id) ??
+	      captureItem;
+	    if (!Array.isArray(latestItem.tags)) {
 	      return;
 	    }
 
-	    if (captureItem.liveSessionId && captureItem.serverLiveGameId) {
-	      await setLiveGameTags(captureItem.serverLiveGameId, captureItem.tags);
+	    if (latestItem.liveSessionId && latestItem.serverLiveGameId) {
+	      await setLiveGameTags(latestItem.serverLiveGameId, latestItem.tags);
 	      return;
 	    }
 
-	    if (captureItem.recordingDraftId && captureItem.serverDraftGameId) {
+	    if (latestItem.recordingDraftId && latestItem.serverDraftGameId) {
 	      await setDraftGameTags(
-	        captureItem.sourceFlow as RecordingDraftMode,
-	        captureItem.serverDraftGameId,
-	        captureItem.tags,
+	        latestItem.sourceFlow as RecordingDraftMode,
+	        latestItem.serverDraftGameId,
+	        latestItem.tags,
 	      );
 	    }
 	  }, []);
@@ -924,9 +932,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
             }
             return current;
 	          });
-	          if (Array.isArray(workingItem.tags)) {
-	            await setLiveGameTags(response.liveGameId, workingItem.tags);
-	          }
+	          await syncCaptureItemTags({ ...workingItem, serverLiveGameId: response.liveGameId });
 	          await refreshLiveSessionServerState(workingItem.liveSessionId);
 	          return;
         }
@@ -1006,12 +1012,11 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 
             return current;
 	          });
-	          if (Array.isArray(workingItem.tags) && createdGame?.draftGameId) {
-	            await setDraftGameTags(
-	              workingItem.sourceFlow as RecordingDraftMode,
-	              createdGame.draftGameId,
-	              workingItem.tags,
-	            );
+	          if (createdGame?.draftGameId) {
+	            await syncCaptureItemTags({
+	              ...workingItem,
+	              serverDraftGameId: createdGame.draftGameId,
+	            });
 	          }
 	          await refreshRecordingDraftServerState(
             workingItem.recordingDraftId,
@@ -1022,17 +1027,12 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 
 	        if (workingItem.liveSessionId && workingItem.serverLiveGameId) {
 	          await syncCaptureItemTags(workingItem);
-	          await refreshLiveSessionServerState(workingItem.liveSessionId);
 	          return;
 	        }
 
 	        if (workingItem.recordingDraftId && workingItem.serverDraftGameId) {
 	          await syncCaptureItemTags(workingItem);
-	          await refreshRecordingDraftServerState(
-            workingItem.recordingDraftId,
-            workingItem.sourceFlow as RecordingDraftMode,
-          );
-        }
+	        }
       } catch (error) {
         markCaptureFailure(
           captureItem.id,
@@ -1439,6 +1439,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 
 	  const updateLiveGameTagsLocal = useCallback(
 	    (visibleGameId: string, tags: GameTag[]) => {
+	      let updated = false;
 	      updateStore((current) => {
 	        const currentTime = nowIso();
 	        const captureItem = current.captureItems.find(
@@ -1450,6 +1451,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 	          return current;
 	        }
 
+	        updated = true;
 	        captureItem.tags = cloneGameTags(tags);
 	        captureItem.updatedAt = currentTime;
 
@@ -1460,8 +1462,11 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 	          liveSession.updatedAt = currentTime;
 	        }
 	        return current;
-	      });
-	      scheduleSyncNow();
+	      }, { invalidate: false });
+	      if (updated) {
+	        scheduleSyncNow();
+	      }
+	      return updated;
 	    },
 	    [scheduleSyncNow, updateStore],
 	  );
@@ -1798,6 +1803,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 
 	  const updateDraftGameTagsLocal = useCallback(
 	    (payload: { mode: RecordingDraftMode; visibleGameId: string; tags: GameTag[] }) => {
+	      let updated = false;
 	      updateStore((current) => {
 	        const currentTime = nowIso();
 	        const captureItem = current.captureItems.find(
@@ -1811,6 +1817,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 	          return current;
 	        }
 
+	        updated = true;
 	        captureItem.tags = cloneGameTags(payload.tags);
 	        captureItem.updatedAt = currentTime;
 
@@ -1819,8 +1826,11 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
 	          draft.updatedAt = currentTime;
 	        }
 	        return current;
-	      });
-	      scheduleSyncNow();
+	      }, { invalidate: false });
+	      if (updated) {
+	        scheduleSyncNow();
+	      }
+	      return updated;
 	    },
 	    [scheduleSyncNow, updateStore],
 	  );

@@ -8,14 +8,9 @@ import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { mergeGamesWithUploadsProcessing } from '@/lib/uploads-processing-store';
 import { useAuth } from '@/providers/auth-provider';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
+import { localLogQueryKeys } from '@/hooks/local-log-query-keys';
 
-export const localLogQueryKeys = {
-  games: (userId: string) => ['local-logs', 'games', userId] as const,
-  gameRoot: (userId: string) => ['local-logs', 'game', userId] as const,
-  game: (userId: string, gameId: string) => ['local-logs', 'game', userId, gameId] as const,
-  meta: (userId: string) => ['local-logs', 'meta', userId] as const,
-  sync: (userId: string) => ['local-logs', 'sync', userId] as const,
-};
+export { localLogQueryKeys };
 
 function isMobileLocalLogs() {
   return Platform.OS !== 'web' && localLogsSupported;

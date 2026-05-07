@@ -507,7 +507,7 @@ export default function ChatScreen() {
                 ) : null}
               </View>
             </View>
-            <View style={styles.headerActions}>
+            <View style={styles.headerWarmupAction}>
               <View
                 style={[
                   styles.warmupToggle,
@@ -523,6 +523,8 @@ export default function ChatScreen() {
                   thumbColor={includeWarmup ? palette.text : palette.muted}
                 />
               </View>
+            </View>
+            <View style={styles.headerActions}>
               {hasClearableTranscript ? (
                 <IconAction
                   accessibilityLabel="Clear chat"
@@ -736,12 +738,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  headerWarmupAction: {
+    position: 'absolute',
+    left: spacing.lg,
+    top: spacing.sm,
+    maxWidth: 112,
+    zIndex: 1,
+  },
   headerActionDisabled: {
     opacity: 0.45,
   },
   warmupToggle: {
     minHeight: 36,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: spacing.xs,
   },
@@ -751,6 +761,7 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     fontWeight: '600',
     fontFamily: fontFamilySans,
+    flexShrink: 1,
   },
   pinImage: {
     width: 74,

@@ -579,15 +579,12 @@ export default function LiveSessionScreen() {
   const tagMutation = useMutation({
     mutationFn: ({ liveGameId, tags }: { liveGameId: string; tags: GameTag[] }) =>
       setLiveGameTags(liveGameId, tags),
-    onSuccess: async () => {
+    onSuccess: () => {
       setError('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
-      ]);
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update game tags.');
+      void queryClient.invalidateQueries({ queryKey: queryKeys.liveSession });
     },
   });
 
@@ -702,14 +699,21 @@ export default function LiveSessionScreen() {
   };
 
   const handleToggleGameTag = async (game: LiveSessionGame, tag: GameTag) => {
-    const currentTags = Array.isArray(game.tags) ? game.tags : [];
+    const cachedGame = queryClient
+      .getQueryData<LiveSessionResponse>(queryKeys.liveSession)
+      ?.liveSession?.games.find((entry) => entry.id === game.id);
+    const currentTags = Array.isArray(cachedGame?.tags)
+      ? cachedGame.tags
+      : Array.isArray(game.tags)
+        ? game.tags
+        : [];
     const addingWarmup = tag === 'warmup' && !currentTags.includes(tag);
     if (addingWarmup) {
       await showWarmupTagTipIfNeeded();
     }
 
     const nextTags = getNextTags(currentTags, tag);
-    updateLiveGameTagsLocal(game.id, nextTags);
+    const queuedLocally = updateLiveGameTagsLocal(game.id, nextTags);
     queryClient.setQueryData<LiveSessionResponse | undefined>(queryKeys.liveSession, (current) =>
       updateLiveSessionCache(current, (session) => ({
         ...session,
@@ -718,7 +722,7 @@ export default function LiveSessionScreen() {
         ),
       })),
     );
-    if (isUuidLike(game.id)) {
+    if (isUuidLike(game.id) && !queuedLocally) {
       tagMutation.mutate({ liveGameId: game.id, tags: nextTags });
     }
   };
@@ -983,7 +987,7 @@ export default function LiveSessionScreen() {
                 ) : liveSession?.games?.length ? (
                   <>
                     <ActionButton
-                      label={tagEditMode ? 'Done' : 'Add Tags'}
+                      label={tagEditMode ? 'Done Adding Tags' : 'Add Tags'}
                       onPress={() => setTagEditMode((current) => !current)}
                       variant="secondary"
                     />

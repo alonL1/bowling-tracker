@@ -27,12 +27,13 @@ import {
   toLocalDateInputValue,
   toLocalTimeInputValue,
 } from '@/lib/date-time';
-import { useLoggedGame, useLoggedGames } from '@/hooks/use-logged-data';
+import { localLogQueryKeys, useLoggedGame, useLoggedGames } from '@/hooks/use-logged-data';
 import { navigateBackOrFallback } from '@/lib/navigation';
 import { showWarmupTagTipIfNeeded } from '@/lib/onboarding';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
-import { GAME_TAGS, type FrameDetail, type GameDetail, type GameTag } from '@/lib/types';
+import { GAME_TAGS, type FrameDetail, type GameDetail, type GameListItem, type GameTag } from '@/lib/types';
+import { useAuth } from '@/providers/auth-provider';
 
 type EditableShot = {
   id?: string | null;
@@ -132,6 +133,7 @@ export default function GameDetailScreen() {
   const navigation = useNavigation();
   const { gameId } = useLocalSearchParams<{ gameId: string }>();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [frames, setFrames] = useState<EditableFrame[]>([]);
   const [playedOnDate, setPlayedOnDate] = useState('');
   const [playedOnTime, setPlayedOnTime] = useState('');
@@ -221,8 +223,47 @@ export default function GameDetailScreen() {
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update game tags.');
+      void Promise.all([
+        gamesQuery.refetch(),
+        gameQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.game(gameId) }),
+      ]);
     },
   });
+
+  const updateLoggedGameTagsCache = (targetGame: GameDetail, tags: GameTag[]) => {
+    queryClient.setQueryData<{ game: GameDetail } | undefined>(
+      queryKeys.game(targetGame.id),
+      (current) => (current?.game ? { ...current, game: { ...current.game, tags } } : current),
+    );
+    queryClient.setQueryData<{ games: GameListItem[]; count: number | null } | undefined>(
+      queryKeys.games,
+      (current) =>
+        current
+          ? {
+              ...current,
+              games: current.games.map((entry) =>
+                entry.id === targetGame.id ? { ...entry, tags } : entry,
+              ),
+            }
+          : current,
+    );
+
+    if (user?.id) {
+      queryClient.setQueryData<GameDetail | null | undefined>(
+        localLogQueryKeys.game(user.id, targetGame.id),
+        (current) => (current ? { ...current, tags } : current),
+      );
+      queryClient.setQueryData<GameListItem[] | undefined>(
+        localLogQueryKeys.games(user.id),
+        (current) =>
+          current?.map((entry) =>
+            entry.id === targetGame.id ? { ...entry, tags } : entry,
+          ),
+      );
+    }
+  };
 
   if (gameQuery.isPending) {
     return <CenteredState title="Loading game..." loading />;
@@ -286,7 +327,9 @@ export default function GameDetailScreen() {
       await showWarmupTagTipIfNeeded();
     }
 
-    tagMutation.mutate({ tags: getNextTags(currentTags, tag) });
+    const nextTags = getNextTags(currentTags, tag);
+    updateLoggedGameTagsCache(game, nextTags);
+    tagMutation.mutate({ tags: nextTags });
   };
 
   return (
@@ -324,7 +367,7 @@ export default function GameDetailScreen() {
               key={tag}
               tag={tag}
               mode={selected ? 'selected' : 'add'}
-              disabled={readOnlyOffline || tagMutation.isPending}
+              disabled={readOnlyOffline}
               onPress={() => void handleToggleTag(tag)}
             />
           );

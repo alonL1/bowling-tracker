@@ -46,13 +46,14 @@ import {
   updateSession,
 } from '@/lib/backend';
 import { buildSessionGroups } from '@/lib/bowling';
-import { useLoggedGames } from '@/hooks/use-logged-data';
+import { localLogQueryKeys, useLoggedGames } from '@/hooks/use-logged-data';
 import { navigateBackOrFallback } from '@/lib/navigation';
 import { showWarmupTagTipIfNeeded } from '@/lib/onboarding';
 import { getResolvedSessionRouteId } from '@/lib/uploads-processing-store';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
+import { useAuth } from '@/providers/auth-provider';
 import type { GameListItem, GameTag } from '@/lib/types';
 
 const NEW_SESSION_TARGET = '__new-session__';
@@ -228,6 +229,7 @@ export default function SessionDetailScreen() {
   const navigation = useNavigation();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { store } = useUploadsProcessing();
 
   const gamesQuery = useLoggedGames();
@@ -372,6 +374,29 @@ export default function SessionDetailScreen() {
     ]);
   };
 
+  const updateLoggedGameTagsCache = (gameId: string, tags: GameTag[]) => {
+    queryClient.setQueryData<{ games: GameListItem[]; count: number | null } | undefined>(
+      queryKeys.games,
+      (current) =>
+        current
+          ? {
+              ...current,
+              games: current.games.map((entry) =>
+                entry.id === gameId ? { ...entry, tags } : entry,
+              ),
+            }
+          : current,
+    );
+
+    if (user?.id) {
+      queryClient.setQueryData<GameListItem[] | undefined>(
+        localLogQueryKeys.games(user.id),
+        (current) =>
+          current?.map((entry) => (entry.id === gameId ? { ...entry, tags } : entry)),
+      );
+    }
+  };
+
   const updateMutation = useMutation({
     mutationFn: async () => {
       if (!group?.sessionId) {
@@ -461,16 +486,21 @@ export default function SessionDetailScreen() {
   const tagMutation = useMutation({
     mutationFn: ({ gameId, tags }: { gameId: string; tags: GameTag[] }) =>
       setGameTags(gameId, tags),
-    onSuccess: async (_response, variables) => {
+    onSuccess: () => {
       setError('');
-      await Promise.all([
-        refreshLoggedData(),
-        queryClient.invalidateQueries({ queryKey: queryKeys.game(variables.gameId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard }),
-      ]);
+      // The optimistic writes to queryKeys.games and localLogQueryKeys.games(user.id)
+      // already reflect the server's authoritative state for this mutation. We
+      // intentionally do NOT call refreshLoggedData() here: it would kick a
+      // syncLocalLogsForUser round-trip whose result can race with a second rapid
+      // tap and briefly replay stale tag state, causing chip flicker. The next
+      // useLoggedDataSync tick will reconcile naturally.
+      // Leaderboard depends on tags (no-warmup metrics), so bust those caches.
+      queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard });
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update game tags.');
+      // Server rejected — drop our optimistic update by re-fetching truth.
+      void refreshLoggedData();
     },
   });
 
@@ -575,20 +605,46 @@ export default function SessionDetailScreen() {
     });
   };
 
+  const readLatestGameTags = (gameId: string, fallback: GameTag[] | null | undefined) => {
+    if (user?.id) {
+      const localCache = queryClient.getQueryData<GameListItem[] | undefined>(
+        localLogQueryKeys.games(user.id),
+      );
+      const localHit = localCache?.find((entry) => entry.id === gameId);
+      if (localHit) {
+        return Array.isArray(localHit.tags) ? localHit.tags : [];
+      }
+    }
+    const apiCache = queryClient.getQueryData<{
+      games: GameListItem[];
+      count: number | null;
+    } | undefined>(queryKeys.games);
+    const apiHit = apiCache?.games.find((entry) => entry.id === gameId);
+    if (apiHit) {
+      return Array.isArray(apiHit.tags) ? apiHit.tags : [];
+    }
+    return Array.isArray(fallback) ? fallback : [];
+  };
+
   const handleToggleGameTag = async (game: GameListItem, tag: GameTag) => {
     if (sessionActionsLocked || game.local_sync?.isReadOnlyUntilSynced) {
       return;
     }
 
-    const currentTags = Array.isArray(game.tags) ? game.tags : [];
+    // Read the freshest cached tags so back-to-back taps don't clobber each
+    // other's optimistic state (the closure-captured `game` prop can be stale
+    // for a frame between renders).
+    const currentTags = readLatestGameTags(game.id, game.tags) as GameTag[];
     const addingWarmup = tag === 'warmup' && !currentTags.includes(tag);
     if (addingWarmup) {
       await showWarmupTagTipIfNeeded();
     }
 
+    const nextTags = getNextTags(currentTags, tag);
+    updateLoggedGameTagsCache(game.id, nextTags);
     tagMutation.mutate({
       gameId: game.id,
-      tags: getNextTags(currentTags, tag),
+      tags: nextTags,
     });
   };
 

@@ -6,7 +6,8 @@
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\alonl\\\\bowling-tracker\" -Recurse -Include \"*.ts\", \"*.tsx\", \"*.js\", \"*.jsx\")",
       "Bash(Select-Object FullName)",
       "Bash(xargs grep *)",
-      "PowerShell(head -30)"
+      "PowerShell(head -30)",
+      "Bash(kill -0 b08tx9u6d)"
     ]
   }
 }

@@ -728,12 +728,12 @@ export default function UploadSessionForm({
       draftGameId: string;
       tags: GameTag[];
     }) => setDraftGameTags(mode, draftGameId, tags),
-    onSuccess: (response) => {
+    onSuccess: () => {
       setError('');
-      setDraftCache(response as { draft: typeof draft });
     },
     onError: (nextError) => {
       setError(nextError instanceof Error ? nextError.message : 'Failed to update game tags.');
+      void queryClient.invalidateQueries({ queryKey: queryKeys.recordingDraft(mode) });
     },
   });
 
@@ -937,14 +937,26 @@ export default function UploadSessionForm({
   };
 
   const handleToggleGameTag = async (game: RecordingDraftGame, tag: GameTag) => {
-    const currentTags = Array.isArray(game.tags) ? game.tags : [];
+    const cachedGame = queryClient
+      .getQueryData<RecordingDraftResponse>(queryKeys.recordingDraft(mode))
+      ?.draft?.groups.flatMap((group) => group.games)
+      .find((entry) => entry.id === game.id);
+    const flatRowGame = flatRows
+      .find((row) => row.kind === 'game' && row.game.id === game.id);
+    const currentTags = Array.isArray(cachedGame?.tags)
+      ? cachedGame.tags
+      : flatRowGame?.kind === 'game' && Array.isArray(flatRowGame.game.tags)
+        ? flatRowGame.game.tags
+        : Array.isArray(game.tags)
+          ? game.tags
+          : [];
     const addingWarmup = tag === 'warmup' && !currentTags.includes(tag);
     if (addingWarmup) {
       await showWarmupTagTipIfNeeded();
     }
 
     const nextTags = getNextTags(currentTags, tag);
-    updateDraftGameTagsLocal({ mode, visibleGameId: game.id, tags: nextTags });
+    const queuedLocally = updateDraftGameTagsLocal({ mode, visibleGameId: game.id, tags: nextTags });
     queryClient.setQueryData<RecordingDraftResponse | undefined>(
       queryKeys.recordingDraft(mode),
       (current) =>
@@ -963,7 +975,14 @@ export default function UploadSessionForm({
             }
           : current,
     );
-    if (isUuidLike(game.id)) {
+    setFlatRows((currentRows) =>
+      currentRows.map((row) =>
+        row.kind === 'game' && row.game.id === game.id
+          ? { ...row, game: { ...row.game, tags: nextTags } }
+          : row,
+      ),
+    );
+    if (isUuidLike(game.id) && !queuedLocally) {
       tagMutation.mutate({ draftGameId: game.id, tags: nextTags });
     }
   };
@@ -1128,7 +1147,7 @@ export default function UploadSessionForm({
 
       {mode === 'add_multiple_sessions' && hasVisibleGames ? (
         <ActionButton
-          label={tagEditMode ? 'Done' : 'Add Tags'}
+          label={tagEditMode ? 'Done Adding Tags' : 'Add Tags'}
           onPress={() => setTagEditMode((current) => !current)}
           variant="secondary"
         />
@@ -1253,7 +1272,7 @@ export default function UploadSessionForm({
             <>
               {hasVisibleGames ? (
                 <ActionButton
-                  label={tagEditMode ? 'Done' : 'Add Tags'}
+                  label={tagEditMode ? 'Done Adding Tags' : 'Add Tags'}
                   onPress={() => setTagEditMode((current) => !current)}
                   variant="secondary"
                 />
