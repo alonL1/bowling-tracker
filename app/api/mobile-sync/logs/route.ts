@@ -106,6 +106,7 @@ export async function GET(request: Request) {
           "scoreboard_extraction",
           "selected_self_player_key",
           "selected_self_player_name",
+          "tags",
           "session:bowling_sessions(id,name,description,started_at,created_at,updated_at)",
           "frames:frames(id,game_id,frame_number,is_strike,is_spare,frame_score,updated_at,shots:shots(id,frame_id,shot_number,pins,updated_at))",
         ].join(",")

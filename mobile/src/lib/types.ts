@@ -54,6 +54,9 @@ export type FrameDetail = {
   shots?: ShotDetail[];
 };
 
+export const GAME_TAGS = ['warmup', 'league', 'tournament'] as const;
+export type GameTag = (typeof GAME_TAGS)[number];
+
 export type GameDetail = {
   id: string;
   game_name?: string | null;
@@ -66,6 +69,7 @@ export type GameDetail = {
   scoreboard_extraction?: LiveExtraction | null;
   selected_self_player_key?: string | null;
   selected_self_player_name?: string | null;
+  tags?: GameTag[] | null;
   frames?: FrameDetail[];
   local_sync?: LocalSyncMetadata | null;
 };
@@ -82,6 +86,7 @@ export type GameListItem = {
   scoreboard_extraction?: LiveExtraction | null;
   selected_self_player_key?: string | null;
   selected_self_player_name?: string | null;
+  tags?: GameTag[] | null;
   session?: SessionItem | null;
   local_sync?: LocalSyncMetadata | null;
 };
@@ -94,6 +99,7 @@ export type QueuedJob = {
 export type LeaderboardMetric =
   | 'bestGame'
   | 'bestAverage'
+  | 'AverageScoreNoWarmup'
   | 'bestSeries'
   | 'bestSession'
   | 'mostGames'
@@ -102,6 +108,7 @@ export type LeaderboardMetric =
   | 'TotalPoints'
   | 'SessionLength'
   | 'StrikeRate'
+  | 'StrikeRateNoWarmup'
   | 'SpareRate'
   | 'TotalStrikes'
   | 'TotalSpares'
@@ -214,6 +221,7 @@ export type LiveSessionGame = {
   created_at?: string | null;
   updated_at?: string | null;
   extraction?: LiveExtraction | null;
+  tags?: GameTag[] | null;
   local_sync?: LocalSyncMetadata | null;
 };
 
@@ -279,6 +287,7 @@ export type RecordingDraftGame = {
   created_at?: string | null;
   updated_at?: string | null;
   extraction?: LiveExtraction | null;
+  tags?: GameTag[] | null;
   local_sync?: LocalSyncMetadata | null;
 };
 

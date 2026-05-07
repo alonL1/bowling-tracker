@@ -5,6 +5,7 @@ import {
   serializeLiveExtraction,
   type NormalizedLivePlayer,
 } from "../live-session/shared";
+import { normalizeGameTags, type GameTag } from "./game-tags";
 
 type ScoreboardSource = {
   captured_at?: string | null;
@@ -79,6 +80,7 @@ export async function insertLoggedGameFromSelectedPlayer({
   selectedPlayer,
   fullExtraction,
   clientFinalizeOperationId,
+  tags,
 }: {
   supabase: SupabaseClient;
   userId: string;
@@ -87,6 +89,7 @@ export async function insertLoggedGameFromSelectedPlayer({
   selectedPlayer: NormalizedLivePlayer;
   fullExtraction: ReturnType<typeof normalizeLiveExtraction>;
   clientFinalizeOperationId?: string | null;
+  tags?: GameTag[] | null;
 }) {
   const playedAt = computePlayedAt(source);
 
@@ -106,6 +109,7 @@ export async function insertLoggedGameFromSelectedPlayer({
       scoreboard_extraction: serializeLiveExtraction(fullExtraction.players),
       selected_self_player_key: selectedPlayer.playerKey,
       selected_self_player_name: selectedPlayer.playerName,
+      tags: normalizeGameTags(tags ?? []),
     })
     .select("id")
     .single();

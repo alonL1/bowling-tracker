@@ -16,6 +16,7 @@ import {
   getSelectedPlayersForExtraction,
   insertLoggedGameFromSelectedPlayer,
 } from "../../utils/logged-scoreboard";
+import { normalizeGameTags } from "../../utils/game-tags";
 
 export const runtime = "nodejs";
 
@@ -150,7 +151,7 @@ export async function POST(request: Request) {
     const { data: liveGames, error: liveGamesError } = await supabase
       .from("live_session_games")
       .select(
-        "id,capture_order,status,captured_at,captured_at_hint,created_at,extraction"
+        "id,capture_order,status,captured_at,captured_at_hint,created_at,extraction,tags"
       )
       .eq("live_session_id", active.id)
       .order("capture_order", { ascending: true });
@@ -219,6 +220,7 @@ export async function POST(request: Request) {
         selectedPlayer: selectedPlayers[0],
         fullExtraction,
         clientFinalizeOperationId: clientOperationId,
+        tags: normalizeGameTags((liveGame as { tags?: unknown }).tags),
       });
       createdGameIds.push(created.gameId);
 

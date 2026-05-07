@@ -265,6 +265,7 @@
   - Frames: `frames`.
   - Shots: `shots`.
   - `scoreboard_extraction` is stored as JSON text in local `games`.
+  - `tags` is stored as JSON text in local `games`.
 - How local logs sync works:
   - `syncLocalLogsForUser(userId, accessToken)` reads the current cursor from SQLite.
   - It calls `/api/mobile-sync/logs?since=<cursor>`.
@@ -294,6 +295,8 @@
   - Local logs sync is server-to-device; conflict resolution for local edits is not a full bidirectional merge.
   - Edits/deletes call server APIs, then trigger local log resync/invalidation.
   - Upload finalization idempotency uses `mobile_sync_operations` and client operation IDs.
+  - Game tags are part of the normal server sync/upsert payload; no special conflict resolver exists beyond the standard server timestamp/upsert behavior.
+  - Cross-device reconciliation for in-progress capture: if the server reports no active live session or recording draft for the user but the local store still has an entry pinned to a server id, the merge functions in `mobile/src/lib/uploads-processing-store.ts` return `null` (no phantom synthesis) and the React Query cache subscription in `UploadsProcessingProvider` sweeps the orphan local entry — marking the live-session entry `discarded` and removing the draft entry, plus deleting any tied capture items, local image files, and finalize operations. This handles the case where the user discards/finalizes from another device.
   - Unknown: there is no explicit general-purpose conflict resolution for simultaneous edits from multiple devices beyond server timestamps and overwrite/upsert behavior.
 - Files/flows to test carefully:
   - First launch online on native, then open Sessions offline.
@@ -301,9 +304,11 @@
   - Native delete account/data and verify SQLite plus saved chat history are cleared for the user.
   - Native upload queue while offline, app restart, then reconnect.
   - Live session finalization while network drops before/after server operation completes.
+  - Cross-device discard/finalize: start a live session or recording draft on device A, then discard/finalize from device B (or web), and confirm device A clears its local upload-processing entry, banner, and Record-tab "Resume" state on next refetch.
   - Recording draft finalization with retries and duplicate client operation IDs.
   - Web behavior after refresh/offline, because it does not use SQLite local logs.
   - Offline Chat simple stat questions after local logs have synced.
+  - Cross-device game-tag round trip: tag a game on one device, let another device sync, and confirm chips plus chat/leaderboard scope update.
   - Chat history persistence after app close/reload, clear chat, sign-out/sign-in, user switch, and delete data/account.
 
 ## Data Model
@@ -316,9 +321,15 @@
 - Bowling game:
   - Server table: `games`.
   - Represents one logged game for a selected player.
-  - Fields include `id`, `user_id`, `session_id`, `client_finalize_operation_id`, `game_name`, `player_name`, `total_score`, `captured_at`, `played_at`, `status`, `raw_extraction`, `scoreboard_extraction`, selected-player fields, timestamps.
+  - Fields include `id`, `user_id`, `session_id`, `client_finalize_operation_id`, `game_name`, `player_name`, `total_score`, `captured_at`, `played_at`, `status`, `raw_extraction`, `scoreboard_extraction`, selected-player fields, `tags`, timestamps.
   - Frontend types: `GameListItem` and `GameDetail` in `mobile/src/lib/types.ts`.
-  - Local SQLite game row mirrors many server fields and stores `scoreboard_extraction` as JSON text.
+  - Local SQLite game row mirrors many server fields and stores `scoreboard_extraction` and `tags` as JSON text.
+- Game tags:
+  - Closed set: `warmup`, `league`, `tournament`.
+  - Stored as `text[]` on `games`, `live_session_games`, and `recording_draft_games`.
+  - Users can tag logged games, active live-session games, and recording-draft games before finalization.
+  - Finalization carries live/draft tags into logged `games`.
+  - Personal stats continue to include warmups; Friends adds no-warmup average and strike-rate metrics, and Chat has an include-warmup toggle that defaults off.
 - Frame:
   - Server table: `frames`.
   - Belongs to a game.
@@ -427,6 +438,7 @@
 - Supabase:
   - Run `db/schema.sql` and needed migrations in `db/`.
   - For existing databases, run `db/add_leaderboard_metric_indexes.sql` so Friends leaderboard metric queries can use the game/frame/shot indexes expected by the current code.
+  - For existing databases, run `db/add_game_tags.sql` before deploying app/API versions that read or write game tags.
   - For existing databases, also run `db/cleanup_empty_sessions.sql` once to evict pre-existing orphan `bowling_sessions` rows. Apply it after deploying the new game/session routes so concurrent requests cannot recreate orphans.
   - Storage bucket for scoreboards defaults to `scoreboards-temp`.
   - Profile avatar bucket is `profile-avatars`.

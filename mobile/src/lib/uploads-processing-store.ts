@@ -10,6 +10,7 @@ import {
 import { sanitizeFilename } from '@/lib/upload';
 import type {
   GameListItem,
+  GameTag,
   LiveSession,
   LiveSessionGame,
   LiveSessionResponse,
@@ -125,6 +126,7 @@ export type UploadsProcessingCaptureItem = {
   storageKey?: string | null;
   jobId?: string | null;
   extraction?: LiveSessionGame['extraction'] | RecordingDraftGame['extraction'] | null;
+  tags?: GameTag[] | null;
   liveSessionId?: string | null;
   liveGameId?: string | null;
   serverSessionId?: string | null;
@@ -165,6 +167,7 @@ export type UploadsProcessingOptimisticGame = {
   isReadOnlyUntilSynced: boolean;
   selectedPlayerKey?: string | null;
   selectedPlayerName?: string | null;
+  tags?: GameTag[] | null;
 };
 
 export type UploadsProcessingFinalizeOperation = {
@@ -577,6 +580,10 @@ function clearGameLocalSync(game: GameListItem): GameListItem {
   };
 }
 
+function normalizeTags(tags?: GameTag[] | null): GameTag[] {
+  return Array.isArray(tags) ? tags : [];
+}
+
 function clearLiveSessionGameLocalSync(game: LiveSessionGame): LiveSessionGame {
   if (!game.local_sync) {
     return game;
@@ -720,6 +727,7 @@ function buildOptimisticGameItem(
     scoreboard_extraction: captureItem?.extraction ?? null,
     selected_self_player_key: playerKey,
     selected_self_player_name: playerName,
+    tags: normalizeTags(optimisticGame.tags ?? captureItem?.tags ?? []),
     session: optimisticSession,
     local_sync: buildUploadsProcessingLocalSync(
       optimisticGame.sourceFlow,
@@ -778,6 +786,7 @@ function buildLocalOnlyLiveGame(item: UploadsProcessingCaptureItem): LiveSession
     created_at: item.createdAt,
     updated_at: item.updatedAt,
     extraction: item.extraction ?? null,
+    tags: normalizeTags(item.tags),
     local_sync: buildUploadsProcessingLocalSync(
       item.sourceFlow,
       [item.id],
@@ -786,6 +795,10 @@ function buildLocalOnlyLiveGame(item: UploadsProcessingCaptureItem): LiveSession
       item.id,
     ),
   };
+}
+
+function getLiveSessionVisibleId(item: UploadsProcessingCaptureItem) {
+  return item.serverLiveGameId || item.liveGameId || `local-live-game-${item.id}`;
 }
 
 function buildLocalOnlyDraftGame(item: UploadsProcessingCaptureItem): RecordingDraftGame {
@@ -813,6 +826,7 @@ function buildLocalOnlyDraftGame(item: UploadsProcessingCaptureItem): RecordingD
     created_at: item.createdAt,
     updated_at: item.updatedAt,
     extraction: item.extraction ?? null,
+    tags: normalizeTags(item.tags),
     local_sync: buildUploadsProcessingLocalSync(
       item.sourceFlow,
       [item.id],
@@ -821,6 +835,10 @@ function buildLocalOnlyDraftGame(item: UploadsProcessingCaptureItem): RecordingD
       item.id,
     ),
   };
+}
+
+function getDraftVisibleId(item: UploadsProcessingCaptureItem) {
+  return item.serverDraftGameId || item.recordingDraftGameId || `local-draft-game-${item.id}`;
 }
 
 export function mergeGamesWithUploadsProcessing(
@@ -907,6 +925,17 @@ export function mergeLiveSessionWithUploadsProcessing(
     };
   }
 
+  // The local entry was previously synced to the server (it has a server id), but
+  // the server now says no active live session exists. Treat that as an external
+  // discard/finalize and trust the server. The provider sweeps the orphan local
+  // entry separately via a query-cache subscription.
+  if (sanitizedLiveSession === null && localLiveSession.serverLiveSessionId) {
+    return {
+      ...payload,
+      liveSession: null,
+    };
+  }
+
   const relevantCaptureItems = store.captureItems
     .filter(
       (item) =>
@@ -922,8 +951,17 @@ export function mergeLiveSessionWithUploadsProcessing(
   }
 
   const baseGames = baseLiveSession?.games ?? [];
+  const localTagsByVisibleId = new Map(
+    relevantCaptureItems
+      .filter((item) => item.tags !== undefined)
+      .map((item) => [getLiveSessionVisibleId(item), normalizeTags(item.tags)] as const),
+  );
+  const taggedBaseGames = baseGames.map((game) => {
+    const localTags = localTagsByVisibleId.get(game.id);
+    return localTags ? { ...game, tags: localTags } : game;
+  });
   const serverGameIdSet = new Set(
-    baseGames.map((game) => game.id),
+    taggedBaseGames.map((game) => game.id),
   );
   const localOnlyGames = relevantCaptureItems
     .filter((item) => !item.serverLiveGameId || !serverGameIdSet.has(item.serverLiveGameId))
@@ -945,7 +983,7 @@ export function mergeLiveSessionWithUploadsProcessing(
         ? localLiveSession.selectedPlayerKeys
         : (baseLiveSession?.selectedPlayerKeys ?? []),
     playerOptions: baseLiveSession?.playerOptions ?? [],
-    games: dedupeById([...baseGames, ...localOnlyGames]).sort(
+    games: dedupeById([...taggedBaseGames, ...localOnlyGames]).sort(
       (left, right) => left.capture_order - right.capture_order,
     ),
     local_sync: buildUploadsProcessingLocalSync(
@@ -1001,6 +1039,15 @@ export function mergeRecordingDraftWithUploadsProcessing(
     };
   }
 
+  // Same external-discard reconciliation as live sessions: the local entry was
+  // synced but the server now reports no active draft for this mode.
+  if (sanitizedDraft === null && localDraft.serverDraftId) {
+    return {
+      ...payload,
+      draft: null,
+    };
+  }
+
   const activeDraft = localDraft;
 
   const relevantCaptureItems = store.captureItems
@@ -1042,6 +1089,18 @@ export function mergeRecordingDraftWithUploadsProcessing(
   const existingDraftGameIds = new Set(
     [...groupsById.values()].flatMap((group) => group.games.map((game) => game.id)),
   );
+  const localTagsByVisibleId = new Map(
+    relevantCaptureItems
+      .filter((item) => item.tags !== undefined)
+      .map((item) => [getDraftVisibleId(item), normalizeTags(item.tags)] as const),
+  );
+
+  groupsById.forEach((group) => {
+    group.games = group.games.map((game) => {
+      const localTags = localTagsByVisibleId.get(game.id);
+      return localTags ? { ...game, tags: localTags } : game;
+    });
+  });
 
   relevantCaptureItems.forEach((item) => {
     const serverDraftGameId = item.serverDraftGameId;
@@ -1137,16 +1196,34 @@ export function mergeRecordEntryStatusWithUploadsProcessing(
     .filter((entry) => entry.mode === 'add_existing_session')
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
 
+  // For each entity, if the local store has an entry that was synced to the server
+  // (has a server id) but the server reports `false`, trust the server: the row was
+  // discarded/finalized externally (e.g., from another device).
+  const liveSessionFlag = latestLiveSession
+    ? latestLiveSession.serverLiveSessionId && !status.liveSession
+      ? false
+      : latestLiveSession.state === 'active'
+    : status.liveSession;
+  const uploadSessionFlag = latestUploadDraft
+    ? latestUploadDraft.serverDraftId && !status.uploadSessionDraft
+      ? false
+      : latestUploadDraft.state === 'active'
+    : status.uploadSessionDraft;
+  const multipleSessionsFlag = latestMultipleDraft
+    ? latestMultipleDraft.serverDraftId && !status.addMultipleSessionsDraft
+      ? false
+      : latestMultipleDraft.state === 'active'
+    : status.addMultipleSessionsDraft;
+  const existingSessionFlag = latestExistingDraft
+    ? latestExistingDraft.serverDraftId && !status.addExistingSessionDraft
+      ? false
+      : latestExistingDraft.state === 'active'
+    : status.addExistingSessionDraft;
+
   return {
-    liveSession: latestLiveSession ? latestLiveSession.state === 'active' : status.liveSession,
-    uploadSessionDraft: latestUploadDraft
-      ? latestUploadDraft.state === 'active'
-      : status.uploadSessionDraft,
-    addMultipleSessionsDraft: latestMultipleDraft
-      ? latestMultipleDraft.state === 'active'
-      : status.addMultipleSessionsDraft,
-    addExistingSessionDraft: latestExistingDraft
-      ? latestExistingDraft.state === 'active'
-      : status.addExistingSessionDraft,
+    liveSession: liveSessionFlag,
+    uploadSessionDraft: uploadSessionFlag,
+    addMultipleSessionsDraft: multipleSessionsFlag,
+    addExistingSessionDraft: existingSessionFlag,
   };
 }

@@ -26,8 +26,11 @@ create table if not exists games (
   scoreboard_extraction jsonb,
   selected_self_player_key text,
   selected_self_player_name text,
+  tags text[] not null default '{}'::text[],
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint games_tags_allowed
+    check (tags <@ array['warmup','league','tournament']::text[])
 );
 
 create table if not exists frames (
@@ -53,6 +56,9 @@ create index if not exists idx_games_user_id
 
 create index if not exists idx_games_user_session_order
   on games(user_id, session_id, played_at, created_at, id);
+
+create index if not exists idx_games_tags_gin
+  on games using gin (tags);
 
 create index if not exists idx_frames_game_id
   on frames(game_id);
@@ -103,10 +109,13 @@ create table if not exists live_session_games (
   status text not null default 'queued',
   extraction jsonb,
   last_error text,
+  tags text[] not null default '{}'::text[],
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint live_session_games_status_check check (status in ('queued', 'processing', 'ready', 'error')),
-  constraint live_session_games_order_unique unique (live_session_id, capture_order)
+  constraint live_session_games_order_unique unique (live_session_id, capture_order),
+  constraint live_session_games_tags_allowed
+    check (tags <@ array['warmup','league','tournament']::text[])
 );
 
 create index if not exists idx_live_session_games_live_session_id
@@ -169,10 +178,13 @@ create table if not exists recording_draft_games (
   status text not null default 'queued',
   extraction jsonb,
   last_error text,
+  tags text[] not null default '{}'::text[],
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint recording_draft_games_status_check check (status in ('queued', 'processing', 'ready', 'error')),
-  constraint recording_draft_games_order_unique unique (draft_id, capture_order)
+  constraint recording_draft_games_order_unique unique (draft_id, capture_order),
+  constraint recording_draft_games_tags_allowed
+    check (tags <@ array['warmup','league','tournament']::text[])
 );
 
 create index if not exists idx_recording_draft_games_draft_id

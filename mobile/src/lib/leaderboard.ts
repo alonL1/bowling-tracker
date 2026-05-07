@@ -5,9 +5,11 @@ export const DEFAULT_LEADERBOARD_METRIC: LeaderboardMetric = 'bestGame';
 export const LEADERBOARD_METRIC_ORDER: readonly LeaderboardMetric[] = [
   'bestGame',
   'bestAverage',
+  'AverageScoreNoWarmup',
   'bestSeries',
   'bestSession',
   'StrikeRate',
+  'StrikeRateNoWarmup',
   'SpareRate',
   'TotalStrikes',
   'TotalSpares',

@@ -4,6 +4,7 @@ import type {
   FrameDetail,
   GameDetail,
   GameListItem,
+  GameTag,
   SessionItem,
   UserProfile,
 } from '@/lib/types';
@@ -49,6 +50,7 @@ type LocalGameRow = {
   scoreboard_extraction: string | null;
   selected_self_player_key: string | null;
   selected_self_player_name: string | null;
+  tags: string | null;
   session_name: string | null;
   session_description: string | null;
   session_started_at: string | null;
@@ -167,7 +169,8 @@ async function migrateLocalLogsDb(db: SQLiteDatabase) {
       updated_at TEXT,
       scoreboard_extraction TEXT,
       selected_self_player_key TEXT,
-      selected_self_player_name TEXT
+      selected_self_player_name TEXT,
+      tags TEXT NOT NULL DEFAULT '[]'
     );
 
     CREATE TABLE IF NOT EXISTS frames (
@@ -209,6 +212,12 @@ async function migrateLocalLogsDb(db: SQLiteDatabase) {
 
     PRAGMA user_version = ${DATABASE_VERSION};
   `);
+
+  try {
+    await db.execAsync("ALTER TABLE games ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';");
+  } catch {
+    // Existing installs already migrated this additive column.
+  }
 }
 
 function mapProfile(row: LocalProfileRow): UserProfile {
@@ -243,6 +252,7 @@ function mapSessionFromGameRow(row: LocalGameRow): SessionItem | null {
 }
 
 function mapGameListRow(row: LocalGameRow): GameListItem {
+  const tags = decodeJson<GameTag[]>(row.tags) ?? [];
   return {
     id: row.id,
     game_name: row.game_name,
@@ -255,12 +265,14 @@ function mapGameListRow(row: LocalGameRow): GameListItem {
     scoreboard_extraction: decodeJson(row.scoreboard_extraction),
     selected_self_player_key: row.selected_self_player_key,
     selected_self_player_name: row.selected_self_player_name,
+    tags,
     session: mapSessionFromGameRow(row),
     local_sync: null,
   };
 }
 
 function mapGameDetail(row: LocalGameRow, frames: LocalFrameRow[], shots: LocalShotRow[]): GameDetail {
+  const tags = decodeJson<GameTag[]>(row.tags) ?? [];
   const shotsByFrameId = new Map<string, LocalShotRow[]>();
   shots.forEach((shot) => {
     const current = shotsByFrameId.get(shot.frame_id) ?? [];
@@ -280,6 +292,7 @@ function mapGameDetail(row: LocalGameRow, frames: LocalFrameRow[], shots: LocalS
     scoreboard_extraction: decodeJson(row.scoreboard_extraction),
     selected_self_player_key: row.selected_self_player_key,
     selected_self_player_name: row.selected_self_player_name,
+    tags,
     frames: frames.map((frame) => ({
       id: frame.id,
       frame_number: frame.frame_number,
@@ -503,9 +516,9 @@ export async function applyLocalLogsSync(userId: string, payload: LocalLogsSyncP
           INSERT OR REPLACE INTO games (
             id, user_id, session_id, game_name, player_name, total_score, status,
             played_at, created_at, updated_at, scoreboard_extraction,
-            selected_self_player_key, selected_self_player_name
+            selected_self_player_key, selected_self_player_name, tags
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         game.id,
         userId,
@@ -520,6 +533,7 @@ export async function applyLocalLogsSync(userId: string, payload: LocalLogsSyncP
         encodeJson(game.scoreboard_extraction),
         game.selected_self_player_key ?? null,
         game.selected_self_player_name ?? null,
+        encodeJson(game.tags ?? []),
       );
 
       await tx.runAsync('DELETE FROM frames WHERE game_id = ?', game.id);

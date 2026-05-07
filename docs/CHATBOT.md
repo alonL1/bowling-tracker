@@ -53,6 +53,7 @@ Two important properties of this design:
 `ChatScreen` in [mobile/src/app/(tabs)/chat.tsx](mobile/src/app/(tabs)/chat.tsx) renders the chat. Highlights:
 
 - Messages are kept in React state and persisted to AsyncStorage at `pinpoint-chat-history-v1:user:{userId}`.
+- The warmup inclusion toggle is persisted per device at `pinpoint-chat-include-warmup-v1`; it defaults off, so warmup-tagged games are excluded unless the user turns it on.
 - A hard cap of 100 messages is enforced (`CHAT_HISTORY_MESSAGE_LIMIT`).
 - Status states: `'idle' | 'loading' | 'error'`.
 - A "what can I ask?" modal contains canned `EXAMPLES` to seed user intent.
@@ -61,13 +62,14 @@ The send call is just:
 
 ```ts
 // mobile/src/lib/backend.ts
-export async function sendChat(question: string, gameId?: string | null) {
+export async function sendChat(question: string, gameId?: string | null, includeWarmup = false) {
   return apiJson<ChatResponse>('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       question,
       gameId,
+      includeWarmup,
       timezoneOffsetMinutes: new Date().getTimezoneOffset(),
     }),
   });
@@ -121,13 +123,14 @@ type ChatResponse = {
 ```
 1.  Read env (api key, model, mode, rate limits, …)
 2.  Parse JSON body { question, gameId?, timezoneOffsetMinutes? }
-3.  Validate question non-empty + ≤ CHAT_MAX_QUESTION_CHARS
+3.  Validate question non-empty + ≤ CHAT_MAX_QUESTION_CHARS; read `includeWarmup`, defaulting to `false`
 4.  Resolve user from auth header (reject guests)
 5.  Look up rate-limit counts in `chat_request_logs` (per user 1m/10m/24h, per IP 1m)
 6.  Insert a new `chat_request_logs` row for this request
 7.  Load games:
        - if gameId given: that single game (with frames + shots)
        - else: 100 most recent games for this user (with frames + shots)
+    If `includeWarmup` is false, in-memory context data filters out games whose `tags` contain `warmup`.
 8.  Load all bowling_sessions for this user
 9.  Build:
        - sessionIndex      (label sessions "Session 1"/"Session 2"… or by name)
@@ -162,6 +165,14 @@ shots(id uuid, frame_id uuid, shot_number int, pins int)
 Note: 10th-frame X 9 / uses shots 1=10, 2=9, 3=1; count it as a spare conversion from shots when answering spare-count or spare-rate questions.
 ```
 
+Current code includes `tags text[]` on `games`:
+
+```txt
+games(id uuid, session_id uuid, game_name text, player_name text, total_score int, played_at timestamptz, created_at timestamptz, user_id uuid, tags text[])
+```
+
+`tags` is a closed set: `warmup`, `league`, and `tournament`. SQL prompts are instructed to use `warmup = any(tags)` to include only warmups or `warmup <> all(tags)` to exclude them. When the mobile toggle is off, SQL prompts instruct generated queries to exclude warmups unless the user explicitly asks to include them.
+
 > The `chat_request_logs` table is used by the server for rate limiting only — it is *not* exposed to the LLM.
 
 ### 5.2 Loading limits
@@ -169,6 +180,7 @@ Note: 10th-frame X 9 / uses shots 1=10, 2=9, 3=1; count it as a spare conversion
 - Up to **100 most-recent games** (by `played_at desc`) per request.
 - All sessions for the user (filtered down to those that contain games).
 - Frames + shots are nested in the same select, so each game payload includes its 10 frames and shots.
+- Chat context and offline fallback honor the same include-warmup toggle before computing summaries.
 
 ### 5.3 Pre-computed structures injected into prompts
 

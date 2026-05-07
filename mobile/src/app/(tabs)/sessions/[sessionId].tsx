@@ -42,15 +42,18 @@ import {
   deleteSession,
   moveGameToSession,
   queryKeys,
+  setGameTags,
   updateSession,
 } from '@/lib/backend';
 import { buildSessionGroups } from '@/lib/bowling';
 import { useLoggedGames } from '@/hooks/use-logged-data';
 import { navigateBackOrFallback } from '@/lib/navigation';
+import { showWarmupTagTipIfNeeded } from '@/lib/onboarding';
 import { getResolvedSessionRouteId } from '@/lib/uploads-processing-store';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
+import type { GameListItem, GameTag } from '@/lib/types';
 
 const NEW_SESSION_TARGET = '__new-session__';
 const comparisonCategories: Array<{ key: LivePlayerComparisonMetric; label: string }> = [
@@ -186,6 +189,13 @@ function getSelectedSelfPlayerKey(game: {
     : normalizePlayerKey(game.player_name);
 }
 
+function getNextTags(currentTags: GameTag[] | null | undefined, tag: GameTag) {
+  const tags = Array.isArray(currentTags) ? currentTags : [];
+  return tags.includes(tag)
+    ? tags.filter((entry) => entry !== tag)
+    : [...tags, tag];
+}
+
 function StatsTile({
   label,
   value,
@@ -248,6 +258,7 @@ export default function SessionDetailScreen() {
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
   const [moveGameId, setMoveGameId] = useState<string | null>(null);
+  const [tagEditMode, setTagEditMode] = useState(false);
   const [moveDeletingSession, setMoveDeletingSession] = useState(false);
   const [pendingMoveTargetId, setPendingMoveTargetId] = useState<string | null>(null);
   const [pendingDeleteMoveTargetId, setPendingDeleteMoveTargetId] = useState<string | null>(null);
@@ -447,6 +458,22 @@ export default function SessionDetailScreen() {
     },
   });
 
+  const tagMutation = useMutation({
+    mutationFn: ({ gameId, tags }: { gameId: string; tags: GameTag[] }) =>
+      setGameTags(gameId, tags),
+    onSuccess: async (_response, variables) => {
+      setError('');
+      await Promise.all([
+        refreshLoggedData(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.game(variables.gameId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard }),
+      ]);
+    },
+    onError: (nextError) => {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to update game tags.');
+    },
+  });
+
   useEffect(() => {
     if (!pagerWidth) {
       return;
@@ -548,6 +575,23 @@ export default function SessionDetailScreen() {
     });
   };
 
+  const handleToggleGameTag = async (game: GameListItem, tag: GameTag) => {
+    if (sessionActionsLocked || game.local_sync?.isReadOnlyUntilSynced) {
+      return;
+    }
+
+    const currentTags = Array.isArray(game.tags) ? game.tags : [];
+    const addingWarmup = tag === 'warmup' && !currentTags.includes(tag);
+    if (addingWarmup) {
+      await showWarmupTagTipIfNeeded();
+    }
+
+    tagMutation.mutate({
+      gameId: game.id,
+      tags: getNextTags(currentTags, tag),
+    });
+  };
+
   const scrollToTab = (tab: 'games' | 'stats', animated: boolean) => {
     if (!pagerWidth) {
       return;
@@ -575,20 +619,36 @@ export default function SessionDetailScreen() {
             <Text style={styles.backText}>Back</Text>
           </Pressable>
 
-          {!group.isSessionless && !sessionActionsLocked ? (
+          {!sessionActionsLocked && group.games.length > 0 ? (
             <View style={styles.topBarActions}>
+              {!group.isSessionless ? (
+                <IconAction
+                  accessibilityLabel="Edit session"
+                  onPress={() => setEditing(true)}
+                  style={styles.topBarActionButton}
+                  icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
+                />
+              ) : null}
               <IconAction
-                accessibilityLabel="Edit session"
-                onPress={() => setEditing(true)}
+                accessibilityLabel={tagEditMode ? 'Done editing tags' : 'Edit game tags'}
+                onPress={() => setTagEditMode((current) => !current)}
                 style={styles.topBarActionButton}
-                icon={<MaterialIcons name="edit" size={22} color={palette.text} />}
+                icon={
+                  <MaterialIcons
+                    name="local-offer"
+                    size={22}
+                    color={tagEditMode ? palette.accent : palette.text}
+                  />
+                }
               />
-              <IconAction
-                accessibilityLabel="Delete session"
-                onPress={handleDeleteSession}
-                style={styles.topBarActionButton}
-                icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
-              />
+              {!group.isSessionless ? (
+                <IconAction
+                  accessibilityLabel="Delete session"
+                  onPress={handleDeleteSession}
+                  style={styles.topBarActionButton}
+                  icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
+                />
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -702,6 +762,8 @@ export default function SessionDetailScreen() {
                     onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
                     onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
                     actionsLocked={sessionActionsLocked}
+                    tagEditMode={tagEditMode}
+                    onToggleTag={(tag) => void handleToggleGameTag(game, tag)}
                     isLastGameInSession={
                       group.games.length === 1 && Boolean(group.sessionId)
                     }

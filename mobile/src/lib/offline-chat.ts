@@ -154,21 +154,27 @@ export async function loadOfflineChatGames() {
 export async function buildOfflineChatResult(
   question: string,
   inMemoryGames?: GameListItem[],
+  includeWarmup = false,
 ): Promise<OfflineChatResult> {
   const sourceGames =
     inMemoryGames && inMemoryGames.length > 0 ? inMemoryGames : await loadOfflineChatGames();
+  const scopedGames = includeWarmup
+    ? sourceGames
+    : sourceGames.filter((game) => !(game.tags ?? []).includes('warmup'));
 
-  if (sourceGames.length === 0) {
+  if (scopedGames.length === 0) {
     return {
       answer:
-        "You're offline and PinPoint doesn't have cached games on this device yet. Open your sessions while online once, then simple chat questions can work offline.",
-      meta: 'Offline · No cached games',
+        sourceGames.length === 0
+          ? "You're offline and PinPoint doesn't have cached games on this device yet. Open your sessions while online once, then simple chat questions can work offline."
+          : "You're offline and PinPoint doesn't have non-warmup cached games in this scope. Turn on warmups to include warmup-tagged games.",
+      meta: sourceGames.length === 0 ? 'Offline · No cached games' : 'Offline · No non-warmup games',
       note:
         "This response was done on-device. Offline chat only works for simple questions using cached games that were already loaded on this device.",
     };
   }
 
-  const handledAnswer = buildHandledOfflineAnswer(question, sourceGames);
+  const handledAnswer = buildHandledOfflineAnswer(question, scopedGames);
 
   return {
     answer:

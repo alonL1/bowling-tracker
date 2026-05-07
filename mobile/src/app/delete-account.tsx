@@ -10,6 +10,7 @@ import { fontFamilySans } from '@/constants/typography';
 import { deleteOwnAccount } from '@/lib/backend';
 import { clearChatHistory } from '@/lib/chat-history-store';
 import { clearLocalLogsForUser } from '@/lib/local-logs-db';
+import { clearWarmupTagTipSeen } from '@/lib/onboarding';
 import { PUBLIC_WEBSITE_URL } from '@/lib/urls';
 import { useAuth } from '@/providers/auth-provider';
 import { useRouter } from 'expo-router';
@@ -73,6 +74,7 @@ export default function DeleteAccountScreen() {
         await clearLocalLogsForUser(user.id);
         await clearChatHistory(user.id);
       }
+      await clearWarmupTagTipSeen();
       await signOutToGuestSession();
       router.replace('/welcome');
     } catch (nextError) {

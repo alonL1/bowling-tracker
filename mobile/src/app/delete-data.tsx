@@ -11,6 +11,7 @@ import { deleteOwnData } from '@/lib/backend';
 import { clearChatHistory } from '@/lib/chat-history-store';
 import { clearLocalLogsForUser } from '@/lib/local-logs-db';
 import { clearOfflineChatGames } from '@/lib/offline-chat';
+import { clearWarmupTagTipSeen } from '@/lib/onboarding';
 import { queryClient } from '@/lib/query-client';
 import { PUBLIC_WEBSITE_URL } from '@/lib/urls';
 import { useAuth } from '@/providers/auth-provider';
@@ -78,6 +79,7 @@ export default function DeleteDataScreen() {
         await clearChatHistory(user.id);
       }
       await clearOfflineChatGames();
+      await clearWarmupTagTipSeen();
       queryClient.clear();
       setConfirming(false);
       setSuccess('All account-linked PinPoint data has been deleted. Your account remains active.');

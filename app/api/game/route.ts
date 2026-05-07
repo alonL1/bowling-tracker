@@ -255,7 +255,7 @@ export async function GET(request: Request) {
   const { data: game, error: gameError } = await supabase
     .from("games")
     .select(
-      "id,game_name,player_name,total_score,status,played_at,created_at,scoreboard_extraction,selected_self_player_key,selected_self_player_name,frames:frames(id,frame_number,is_strike,is_spare,frame_score,shots:shots(id,shot_number,pins))"
+      "id,game_name,player_name,total_score,status,played_at,created_at,session_id,scoreboard_extraction,selected_self_player_key,selected_self_player_name,tags,frames:frames(id,frame_number,is_strike,is_spare,frame_score,shots:shots(id,shot_number,pins))"
     )
     .eq("id", gameId)
     .eq("user_id", userId)

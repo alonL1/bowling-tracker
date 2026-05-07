@@ -37,6 +37,7 @@ import {
   fetchSessions,
   finalizeRecordingDraft,
   queryKeys,
+  setDraftGameTags,
   updateRecordingDraft,
   updateRecordingDraftGame,
   updateRecordingDraftGroup,
@@ -49,13 +50,16 @@ import {
 import { localLogQueryKeys } from '@/hooks/use-logged-data';
 import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { navigateBackOrFallback } from '@/lib/navigation';
+import { showWarmupTagTipIfNeeded } from '@/lib/onboarding';
 import { supabase } from '@/lib/supabase';
 import type {
   RecordingDraftGame,
   RecordingDraftGroup,
   RecordingDraftMode,
+  RecordingDraftResponse,
   SessionItem,
   SessionMode,
+  GameTag,
 } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
@@ -291,6 +295,19 @@ function formatTargetSessionLabel(
   return session?.name?.trim() || 'Untitled Session';
 }
 
+function getNextTags(currentTags: GameTag[] | null | undefined, tag: GameTag) {
+  const tags = Array.isArray(currentTags) ? currentTags : [];
+  return tags.includes(tag)
+    ? tags.filter((entry) => entry !== tag)
+    : [...tags, tag];
+}
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 function PendingDraftGameCard({
   gameNumber,
   game,
@@ -371,6 +388,7 @@ export default function UploadSessionForm({
     enqueueDraftCaptures,
     finalizeDraftLocal,
     updateDraftGroupLocal,
+    updateDraftGameTagsLocal,
     updateDraftLocal,
   } = useUploadsProcessing();
   const mode = useMemo(() => getDraftMode(sessionMode), [sessionMode]);
@@ -389,6 +407,7 @@ export default function UploadSessionForm({
   const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const [sessionPickerChoice, setSessionPickerChoice] = useState<string | null>(null);
   const [flatRows, setFlatRows] = useState<DraftFlatRow[]>([]);
+  const [tagEditMode, setTagEditMode] = useState(false);
   const [bottomDockHeight, setBottomDockHeight] = useState(0);
   const scrollRef = useRef<any>(null);
   const flatListRef = useRef<any>(null);
@@ -701,6 +720,23 @@ export default function UploadSessionForm({
     },
   });
 
+  const tagMutation = useMutation({
+    mutationFn: ({
+      draftGameId,
+      tags,
+    }: {
+      draftGameId: string;
+      tags: GameTag[];
+    }) => setDraftGameTags(mode, draftGameId, tags),
+    onSuccess: (response) => {
+      setError('');
+      setDraftCache(response as { draft: typeof draft });
+    },
+    onError: (nextError) => {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to update game tags.');
+    },
+  });
+
   const discardMutation = useMutation({
     mutationFn: async () => {
       const discardedLocally = await discardDraftLocal({ mode, draft });
@@ -900,6 +936,38 @@ export default function UploadSessionForm({
     });
   };
 
+  const handleToggleGameTag = async (game: RecordingDraftGame, tag: GameTag) => {
+    const currentTags = Array.isArray(game.tags) ? game.tags : [];
+    const addingWarmup = tag === 'warmup' && !currentTags.includes(tag);
+    if (addingWarmup) {
+      await showWarmupTagTipIfNeeded();
+    }
+
+    const nextTags = getNextTags(currentTags, tag);
+    updateDraftGameTagsLocal({ mode, visibleGameId: game.id, tags: nextTags });
+    queryClient.setQueryData<RecordingDraftResponse | undefined>(
+      queryKeys.recordingDraft(mode),
+      (current) =>
+        current?.draft
+          ? {
+              ...current,
+              draft: {
+                ...current.draft,
+                groups: current.draft.groups.map((group) => ({
+                  ...group,
+                  games: group.games.map((entry) =>
+                    entry.id === game.id ? { ...entry, tags: nextTags } : entry,
+                  ),
+                })),
+              },
+            }
+          : current,
+    );
+    if (isUuidLike(game.id)) {
+      tagMutation.mutate({ draftGameId: game.id, tags: nextTags });
+    }
+  };
+
   const handleOpenPrimaryAction = () => {
     if (!canFinalize) {
       return;
@@ -1057,6 +1125,14 @@ export default function UploadSessionForm({
           )}
         </SurfaceCard>
       ) : null}
+
+      {mode === 'add_multiple_sessions' && hasVisibleGames ? (
+        <ActionButton
+          label={tagEditMode ? 'Done' : 'Add Tags'}
+          onPress={() => setTagEditMode((current) => !current)}
+          variant="secondary"
+        />
+      ) : null}
     </View>
   );
 
@@ -1094,6 +1170,8 @@ export default function UploadSessionForm({
               onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
               onStartDrag={drag}
               dragActive={isActive}
+              tagEditMode={tagEditMode}
+              onToggleTag={(tag) => void handleToggleGameTag(item.game, tag)}
             />
           ) : (
             <PendingDraftGameCard
@@ -1172,43 +1250,54 @@ export default function UploadSessionForm({
           {isInitialDraftLoading ? (
             <InlineLoadingCard label="Loading scoreboards..." />
           ) : groups.length > 0 ? (
-            <View
-              style={styles.groupList}
-              onLayout={(event) => {
-                gameListYRef.current = event.nativeEvent.layout.y;
-              }}>
-              {allGames.map((game, index) =>
-                game.status === 'ready' ? (
-                  <View
-                    key={game.id}
-                    onLayout={(event) => {
-                      handleDraftGameLayout(game.id, event.nativeEvent.layout.y, game.status);
-                    }}>
-                    <RecordingDraftGameCard
-                      game={game}
-                      gameNumber={index + 1}
-                      selectedPlayerKeys={selectedPlayerKeys}
-                      deleting={isDeletingGame(game.id)}
-                      onEdit={setEditingGame}
-                      onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
-                    />
-                  </View>
-                ) : (
-                  <View
-                    key={game.id}
-                    onLayout={(event) => {
-                      handleDraftGameLayout(game.id, event.nativeEvent.layout.y, game.status);
-                    }}>
-                    <PendingDraftGameCard
-                      gameNumber={index + 1}
-                      game={game}
-                      deleting={isDeletingGame(game.id)}
-                      onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
-                    />
-                  </View>
-                ),
-              )}
-            </View>
+            <>
+              {hasVisibleGames ? (
+                <ActionButton
+                  label={tagEditMode ? 'Done' : 'Add Tags'}
+                  onPress={() => setTagEditMode((current) => !current)}
+                  variant="secondary"
+                />
+              ) : null}
+              <View
+                style={styles.groupList}
+                onLayout={(event) => {
+                  gameListYRef.current = event.nativeEvent.layout.y;
+                }}>
+                {allGames.map((game, index) =>
+                  game.status === 'ready' ? (
+                    <View
+                      key={game.id}
+                      onLayout={(event) => {
+                        handleDraftGameLayout(game.id, event.nativeEvent.layout.y, game.status);
+                      }}>
+                      <RecordingDraftGameCard
+                        game={game}
+                        gameNumber={index + 1}
+                        selectedPlayerKeys={selectedPlayerKeys}
+                        deleting={isDeletingGame(game.id)}
+                        onEdit={setEditingGame}
+                        onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+                        tagEditMode={tagEditMode}
+                        onToggleTag={(tag) => void handleToggleGameTag(game, tag)}
+                      />
+                    </View>
+                  ) : (
+                    <View
+                      key={game.id}
+                      onLayout={(event) => {
+                        handleDraftGameLayout(game.id, event.nativeEvent.layout.y, game.status);
+                      }}>
+                      <PendingDraftGameCard
+                        gameNumber={index + 1}
+                        game={game}
+                        deleting={isDeletingGame(game.id)}
+                        onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+                      />
+                    </View>
+                  ),
+                )}
+              </View>
+            </>
           ) : (
             <EmptyStateCard title={emptyState.title} body={emptyState.body} />
           )}

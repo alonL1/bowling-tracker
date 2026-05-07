@@ -16,6 +16,7 @@ import {
   isRecordingDraftMode,
   loadRecordingDraftPayload,
 } from "../server";
+import { normalizeGameTags } from "../../utils/game-tags";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,7 @@ type UpdateRecordingDraftGamePayload = {
   draftGameId?: string;
   players?: RawLivePlayer[];
   capturedAt?: string | null;
+  tags?: unknown;
 };
 
 async function loadDraftGameRecord({
@@ -75,15 +77,27 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "draftGameId is required." }, { status: 400 });
   }
 
-  const nextPlayers = normalizeLivePlayers(
-    Array.isArray(payload.players) ? payload.players : []
-  );
-  if (nextPlayers.length === 0) {
+  const hasPlayersUpdate = Array.isArray(payload.players);
+  const hasTagsUpdate = payload.tags !== undefined;
+
+  if (!hasPlayersUpdate && !hasTagsUpdate) {
+    return NextResponse.json(
+      { error: "Provide players or tags to update." },
+      { status: 400 }
+    );
+  }
+
+  const nextPlayers = hasPlayersUpdate
+    ? normalizeLivePlayers(payload.players as RawLivePlayer[])
+    : [];
+  if (hasPlayersUpdate && nextPlayers.length === 0) {
     return NextResponse.json(
       { error: "At least one player is required." },
       { status: 400 }
     );
   }
+
+  const nextTags = hasTagsUpdate ? normalizeGameTags(payload.tags) : null;
 
   try {
     const { draft, game, supabase } = await loadDraftGameRecord({
@@ -92,27 +106,39 @@ export async function PATCH(request: Request) {
       userId,
     });
 
-    const previousPlayers = normalizeLiveExtraction(game.extraction).players;
-    const nextSelectedPlayerKeys = syncSelectedPlayerKeys(
-      previousPlayers,
-      nextPlayers,
-      normalizeSelectedPlayerKeys(draft.selectedPlayerKeys)
-    );
+    const update: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    let nextSelectedPlayerKeys: string[] | null = null;
 
-    const capturedAt =
-      payload.capturedAt === undefined
-        ? undefined
-        : normalizeOptionalTimestamp(payload.capturedAt);
+    if (hasPlayersUpdate) {
+      const previousPlayers = normalizeLiveExtraction(game.extraction).players;
+      nextSelectedPlayerKeys = syncSelectedPlayerKeys(
+        previousPlayers,
+        nextPlayers,
+        normalizeSelectedPlayerKeys(draft.selectedPlayerKeys)
+      );
+
+      const capturedAt =
+        payload.capturedAt === undefined
+          ? undefined
+          : normalizeOptionalTimestamp(payload.capturedAt);
+
+      update.extraction = serializeLiveExtraction(nextPlayers);
+      update.status = "ready";
+      update.last_error = null;
+      if (capturedAt !== undefined) {
+        update.captured_at = capturedAt;
+      }
+    }
+
+    if (hasTagsUpdate && nextTags) {
+      update.tags = nextTags;
+    }
 
     const { error: updateError } = await supabase
       .from("recording_draft_games")
-      .update({
-        extraction: serializeLiveExtraction(nextPlayers),
-        status: "ready",
-        last_error: null,
-        ...(capturedAt !== undefined ? { captured_at: capturedAt } : {}),
-        updated_at: new Date().toISOString(),
-      })
+      .update(update)
       .eq("id", draftGameId)
       .eq("draft_id", draft.id);
 
@@ -123,20 +149,22 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const { error: draftUpdateError } = await supabase
-      .from("recording_drafts")
-      .update({
-        selected_player_keys: nextSelectedPlayerKeys,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", draft.id)
-      .eq("user_id", userId);
+    if (nextSelectedPlayerKeys) {
+      const { error: draftUpdateError } = await supabase
+        .from("recording_drafts")
+        .update({
+          selected_player_keys: nextSelectedPlayerKeys,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", draft.id)
+        .eq("user_id", userId);
 
-    if (draftUpdateError) {
-      return NextResponse.json(
-        { error: draftUpdateError.message || "Failed to update draft players." },
-        { status: 500 }
-      );
+      if (draftUpdateError) {
+        return NextResponse.json(
+          { error: draftUpdateError.message || "Failed to update draft players." },
+          { status: 500 }
+        );
+      }
     }
 
     return NextResponse.json(await loadRecordingDraftPayload(userId, payload.mode));

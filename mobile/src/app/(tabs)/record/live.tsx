@@ -36,6 +36,7 @@ import {
   endLiveSession,
   fetchLiveSession,
   queryKeys,
+  setLiveGameTags,
   updateLiveSession,
   updateLiveSessionGame,
 } from '@/lib/backend';
@@ -49,11 +50,12 @@ import {
   getFirstSelectionValidationError,
 } from '@/lib/live-session';
 import { navigateBackOrFallback } from '@/lib/navigation';
+import { showWarmupTagTipIfNeeded } from '@/lib/onboarding';
 import { formatTenths } from '@/lib/number-format';
 import { confirmAction } from '@/lib/confirm';
 import { localLogQueryKeys } from '@/hooks/use-logged-data';
 import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
-import type { LiveSessionGame, LiveSessionResponse, LiveSessionStats } from '@/lib/types';
+import type { GameTag, LiveSessionGame, LiveSessionResponse, LiveSessionStats } from '@/lib/types';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { useAuth } from '@/providers/auth-provider';
@@ -205,6 +207,19 @@ function StatsTile({ label, value, onPress }: StatsTileProps) {
   );
 }
 
+function getNextTags(currentTags: GameTag[] | null | undefined, tag: GameTag) {
+  const tags = Array.isArray(currentTags) ? currentTags : [];
+  return tags.includes(tag)
+    ? tags.filter((entry) => entry !== tag)
+    : [...tags, tag];
+}
+
+function isUuidLike(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 export default function LiveSessionScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -215,6 +230,7 @@ export default function LiveSessionScreen() {
     discardLiveSessionLocal,
     enqueueLiveCaptures,
     finalizeLiveSessionLocal,
+    updateLiveGameTagsLocal,
     updateLiveSessionLocal,
   } = useUploadsProcessing();
   const scrollRef = useRef<ScrollView | null>(null);
@@ -233,6 +249,7 @@ export default function LiveSessionScreen() {
     useState<LivePlayerComparisonMetric>('average');
   const [comparisonLoading, setComparisonLoading] = useState(false);
   const [pagerScrollEnabled, setPagerScrollEnabled] = useState(true);
+  const [tagEditMode, setTagEditMode] = useState(false);
   const [endDockHeight, setEndDockHeight] = useState(0);
   const selectionRevisionRef = useRef(0);
   const pendingScrollGameIdRef = useRef<string | null>(null);
@@ -559,6 +576,21 @@ export default function LiveSessionScreen() {
     },
   });
 
+  const tagMutation = useMutation({
+    mutationFn: ({ liveGameId, tags }: { liveGameId: string; tags: GameTag[] }) =>
+      setLiveGameTags(liveGameId, tags),
+    onSuccess: async () => {
+      setError('');
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.liveSession }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recordEntryStatus }),
+      ]);
+    },
+    onError: (nextError) => {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to update game tags.');
+    },
+  });
+
   const discardLiveSessionMutation = useMutation({
     mutationFn: async () => {
       const discardedLocally = await discardLiveSessionLocal({ liveSession });
@@ -667,6 +699,28 @@ export default function LiveSessionScreen() {
       nextSelectedPlayerKeys,
       revision: selectionRevisionRef.current,
     });
+  };
+
+  const handleToggleGameTag = async (game: LiveSessionGame, tag: GameTag) => {
+    const currentTags = Array.isArray(game.tags) ? game.tags : [];
+    const addingWarmup = tag === 'warmup' && !currentTags.includes(tag);
+    if (addingWarmup) {
+      await showWarmupTagTipIfNeeded();
+    }
+
+    const nextTags = getNextTags(currentTags, tag);
+    updateLiveGameTagsLocal(game.id, nextTags);
+    queryClient.setQueryData<LiveSessionResponse | undefined>(queryKeys.liveSession, (current) =>
+      updateLiveSessionCache(current, (session) => ({
+        ...session,
+        games: session.games.map((entry) =>
+          entry.id === game.id ? { ...entry, tags: nextTags } : entry,
+        ),
+      })),
+    );
+    if (isUuidLike(game.id)) {
+      tagMutation.mutate({ liveGameId: game.id, tags: nextTags });
+    }
   };
 
   const handleEndSession = () => {
@@ -927,72 +981,81 @@ export default function LiveSessionScreen() {
                 {isInitialLiveSessionLoading ? (
                   <InlineLoadingCard label="Loading live games..." />
                 ) : liveSession?.games?.length ? (
-                  <View style={styles.gameList}>
-                    {liveSession.games.map((game, index) =>
-                      game.status === 'ready' ? (
-                        <View
-                          key={game.id}
-                          onLayout={(event) => {
-                            handleGameLayout(game.id, event.nativeEvent.layout.y, game.status);
-                          }}>
-                          <LiveSessionGameCard
-                            game={game}
-                            gameNumber={index + 1}
-                            selectedPlayerKeys={selectedPlayerKeys}
-                            deleting={isDeletingGame(game.id)}
-                            onEdit={setEditingGame}
-                            onDelete={(liveGameId) => deleteGameMutation.mutate(liveGameId)}
-                            onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
-                            onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
-                          />
-                        </View>
-                      ) : (
-                        <View
-                          key={game.id}
-                          style={styles.pendingCard}
-                          onLayout={(event) => {
-                            handleGameLayout(game.id, event.nativeEvent.layout.y, game.status);
-                          }}>
-                          <View style={styles.pendingCardRow}>
-                            <View style={styles.pendingSummary}>
-                              <StackBadge lines={['Game', String(index + 1)]} />
-                              <View style={styles.pendingTextBlock}>
-                                <Text style={styles.pendingTitle}>
-                                  {game.status === 'error' ? 'Scoreboard needs attention' : 'Processing scoreboard'}
-                                </Text>
-                                {game.last_error ? (
-                                  <Text style={styles.pendingError}>{game.last_error}</Text>
+                  <>
+                    <ActionButton
+                      label={tagEditMode ? 'Done' : 'Add Tags'}
+                      onPress={() => setTagEditMode((current) => !current)}
+                      variant="secondary"
+                    />
+                    <View style={styles.gameList}>
+                      {liveSession.games.map((game, index) =>
+                        game.status === 'ready' ? (
+                          <View
+                            key={game.id}
+                            onLayout={(event) => {
+                              handleGameLayout(game.id, event.nativeEvent.layout.y, game.status);
+                            }}>
+                            <LiveSessionGameCard
+                              game={game}
+                              gameNumber={index + 1}
+                              selectedPlayerKeys={selectedPlayerKeys}
+                              deleting={isDeletingGame(game.id)}
+                              onEdit={setEditingGame}
+                              onDelete={(liveGameId) => deleteGameMutation.mutate(liveGameId)}
+                              onScoreboardGestureStart={() => setPagerScrollEnabled(false)}
+                              onScoreboardGestureEnd={() => setPagerScrollEnabled(true)}
+                              tagEditMode={tagEditMode}
+                              onToggleTag={(tag) => void handleToggleGameTag(game, tag)}
+                            />
+                          </View>
+                        ) : (
+                          <View
+                            key={game.id}
+                            style={styles.pendingCard}
+                            onLayout={(event) => {
+                              handleGameLayout(game.id, event.nativeEvent.layout.y, game.status);
+                            }}>
+                            <View style={styles.pendingCardRow}>
+                              <View style={styles.pendingSummary}>
+                                <StackBadge lines={['Game', String(index + 1)]} />
+                                <View style={styles.pendingTextBlock}>
+                                  <Text style={styles.pendingTitle}>
+                                    {game.status === 'error' ? 'Scoreboard needs attention' : 'Processing scoreboard'}
+                                  </Text>
+                                  {game.last_error ? (
+                                    <Text style={styles.pendingError}>{game.last_error}</Text>
+                                  ) : null}
+                                </View>
+                              </View>
+                              <View style={styles.pendingActions}>
+                                {(game.status === 'queued' || game.status === 'processing') &&
+                                !isDeletingGame(game.id) ? (
+                                  <BowlingBallSpinner size={22} holeColor={palette.field} />
                                 ) : null}
+                                {isDeletingGame(game.id) ? (
+                                  <BowlingBallSpinner size={22} holeColor={palette.field} />
+                                ) : (
+                                  <IconAction
+                                    accessibilityLabel="Delete pending live game"
+                                    onPress={() =>
+                                      confirmAction({
+                                        title: 'Delete game',
+                                        message: 'Remove this scoreboard from the live session?',
+                                        confirmLabel: 'Delete',
+                                        destructive: true,
+                                        onConfirm: () => deleteGameMutation.mutate(game.id),
+                                      })
+                                    }
+                                    icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
+                                  />
+                                )}
                               </View>
                             </View>
-                            <View style={styles.pendingActions}>
-                              {(game.status === 'queued' || game.status === 'processing') &&
-                              !isDeletingGame(game.id) ? (
-                                <BowlingBallSpinner size={22} holeColor={palette.field} />
-                              ) : null}
-                              {isDeletingGame(game.id) ? (
-                                <BowlingBallSpinner size={22} holeColor={palette.field} />
-                              ) : (
-                                <IconAction
-                                  accessibilityLabel="Delete pending live game"
-                                  onPress={() =>
-                                    confirmAction({
-                                      title: 'Delete game',
-                                      message: 'Remove this scoreboard from the live session?',
-                                      confirmLabel: 'Delete',
-                                      destructive: true,
-                                      onConfirm: () => deleteGameMutation.mutate(game.id),
-                                    })
-                                  }
-                                  icon={<MaterialIcons name="delete" size={22} color={palette.text} />}
-                                />
-                              )}
-                            </View>
                           </View>
-                        </View>
-                      ),
-                    )}
-                  </View>
+                        ),
+                      )}
+                    </View>
+                  </>
                 ) : (
                   <EmptyStateCard
                     title="No live games yet"

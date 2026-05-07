@@ -7,11 +7,12 @@ import BowlingBallSpinner from '@/components/bowling-ball-spinner';
 import IconAction from '@/components/icon-action';
 import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
 import StackBadge from '@/components/stack-badge';
+import TagChip from '@/components/tag-chip';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { confirmAction } from '@/lib/confirm';
 import { getLiveGameScoreLabel, getResolvedPlayersForGame } from '@/lib/live-session';
-import type { RecordingDraftGame } from '@/lib/types';
+import { GAME_TAGS, type GameTag, type RecordingDraftGame } from '@/lib/types';
 
 type RecordingDraftGameCardProps = {
   game: RecordingDraftGame;
@@ -22,6 +23,8 @@ type RecordingDraftGameCardProps = {
   deleting?: boolean;
   onStartDrag?: () => void;
   dragActive?: boolean;
+  tagEditMode?: boolean;
+  onToggleTag?: (tag: GameTag) => void;
 };
 
 function formatCapturedAt(value?: string | null) {
@@ -51,6 +54,8 @@ export default function RecordingDraftGameCard({
   deleting = false,
   onStartDrag,
   dragActive = false,
+  tagEditMode = false,
+  onToggleTag,
 }: RecordingDraftGameCardProps) {
   const [expanded, setExpanded] = useState(false);
   const players = useMemo(() => getResolvedPlayersForGame(game), [game]);
@@ -59,6 +64,8 @@ export default function RecordingDraftGameCard({
     () => getLiveGameScoreLabel(game, selectedPlayerKeys),
     [game, selectedPlayerKeys],
   );
+  const tags = Array.isArray(game.tags) ? game.tags : [];
+  const showTagRow = tagEditMode || tags.length > 0;
 
   return (
     <View style={[styles.card, dragActive && styles.cardActive]}>
@@ -70,6 +77,21 @@ export default function RecordingDraftGameCard({
             <StackBadge lines={badgeLines} />
             <View style={styles.scoreBlock}>
               <Text style={styles.scoreValue}>{scoreLabel}</Text>
+              {showTagRow ? (
+                <View style={styles.tagRow}>
+                  {(tagEditMode ? GAME_TAGS : tags).map((tag) => {
+                    const selected = tags.includes(tag);
+                    return (
+                      <TagChip
+                        key={tag}
+                        tag={tag}
+                        mode={tagEditMode ? (selected ? 'selected' : 'add') : 'display'}
+                        onPress={tagEditMode ? () => onToggleTag?.(tag) : undefined}
+                      />
+                    );
+                  })}
+                </View>
+              ) : null}
             </View>
           </View>
         </Pressable>
@@ -162,6 +184,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     minHeight: 52,
     justifyContent: 'center',
+    gap: 6,
   },
   scoreValue: {
     color: palette.text,
@@ -195,5 +218,10 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.92,
+  },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
   },
 });

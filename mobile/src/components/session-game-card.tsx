@@ -10,6 +10,7 @@ import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
 import MultiPlayerFrameGrid from '@/components/multi-player-frame-grid';
 import StackBadge from '@/components/stack-badge';
+import TagChip from '@/components/tag-chip';
 import { deleteGame, queryKeys } from '@/lib/backend';
 import { confirmAction } from '@/lib/confirm';
 import { localLogQueryKeys } from '@/hooks/use-logged-data';
@@ -17,7 +18,7 @@ import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
 import { getResolvedPlayersForGame } from '@/lib/live-session';
-import type { GameListItem } from '@/lib/types';
+import { GAME_TAGS, type GameListItem, type GameTag } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 
 type SessionGameCardProps = {
@@ -30,6 +31,8 @@ type SessionGameCardProps = {
   actionsLocked?: boolean;
   isLastGameInSession?: boolean;
   onSessionDeleted?: () => void;
+  tagEditMode?: boolean;
+  onToggleTag?: (tag: GameTag) => void;
 };
 
 function getCollapsedBadgeLines(title: string) {
@@ -51,6 +54,8 @@ export default function SessionGameCard({
   actionsLocked = false,
   isLastGameInSession = false,
   onSessionDeleted,
+  tagEditMode = false,
+  onToggleTag,
 }: SessionGameCardProps) {
   const queryClient = useQueryClient();
   const { user, session } = useAuth();
@@ -94,6 +99,8 @@ export default function SessionGameCard({
       ? 'Needs attention'
       : 'Syncing'
     : null;
+  const tags = Array.isArray(game.tags) ? game.tags : [];
+  const showTagRow = tagEditMode || tags.length > 0;
   const scoreboardPlayers = useMemo(
     () =>
       game.scoreboard_extraction
@@ -139,6 +146,21 @@ export default function SessionGameCard({
                     ]}>
                     {syncBadgeLabel}
                   </Text>
+                ) : null}
+                {showTagRow ? (
+                  <View style={styles.tagRow}>
+                    {(tagEditMode ? GAME_TAGS : tags).map((tag) => {
+                      const selected = tags.includes(tag);
+                      return (
+                        <TagChip
+                          key={tag}
+                          tag={tag}
+                          mode={tagEditMode ? (selected ? 'selected' : 'add') : 'display'}
+                          onPress={tagEditMode ? () => onToggleTag?.(tag) : undefined}
+                        />
+                      );
+                    })}
+                  </View>
                 ) : null}
               </View>
             </View>
@@ -299,6 +321,11 @@ const styles = StyleSheet.create({
   syncBadgeFailed: {
     backgroundColor: palette.danger,
     color: palette.error,
+  },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
   },
   readOnlyHint: {
     color: palette.muted,

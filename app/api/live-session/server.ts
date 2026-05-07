@@ -159,7 +159,7 @@ export async function buildLiveSessionPayload(
       supabase
         .from("live_session_games")
         .select(
-          "id,capture_order,status,captured_at_hint,captured_at,last_error,created_at,updated_at,extraction"
+          "id,capture_order,status,captured_at_hint,captured_at,last_error,created_at,updated_at,extraction,tags"
         )
         .eq("live_session_id", active.id)
         .order("capture_order", { ascending: true }),

@@ -1,4 +1,5 @@
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
@@ -74,6 +75,7 @@ const MAX_INPUT_HEIGHT = 132;
 const HEADER_SPINNER_SIZE = 34;
 const INPUT_VERTICAL_PADDING = 24;
 const MIN_TEXTAREA_HEIGHT = MIN_INPUT_HEIGHT - INPUT_VERTICAL_PADDING;
+const INCLUDE_WARMUP_STORAGE_KEY = 'pinpoint-chat-include-warmup-v1';
 
 function createChatMessage(input: Omit<Message, 'id' | 'createdAt'>): Message {
   return {
@@ -168,9 +170,24 @@ export default function ChatScreen() {
   const [chatHistoryReady, setChatHistoryReady] = useState(false);
   const [chatStatus, setChatStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [showExamples, setShowExamples] = useState(false);
+  const [includeWarmup, setIncludeWarmup] = useState(false);
   const hasCompletedResponse = useMemo(() => hasCompletedAssistantResponse(messages), [messages]);
   const hasClearableTranscript = chatHistoryReady && !isDefaultTranscript(messages);
   const inputCanScroll = inputShellHeight >= MAX_INPUT_HEIGHT;
+
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(INCLUDE_WARMUP_STORAGE_KEY)
+      .then((value) => {
+        if (!cancelled) {
+          setIncludeWarmup(value === '1');
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const loadId = chatHistoryLoadIdRef.current + 1;
@@ -293,7 +310,7 @@ export default function ChatScreen() {
     setChatStatus('loading');
 
     try {
-      const payload = await sendChat(userQuestion);
+      const payload = await sendChat(userQuestion, null, includeWarmup);
       if (payload.onlineError && payload.offlineAnswer) {
         setMessages((prev) =>
           limitChatMessages([
@@ -343,7 +360,11 @@ export default function ChatScreen() {
         const gamesPayload = queryClient.getQueryData<{ games: GameListItem[]; count: number | null }>(
           queryKeys.games,
         );
-        const offlineResult = await buildOfflineChatResult(userQuestion, gamesPayload?.games);
+        const offlineResult = await buildOfflineChatResult(
+          userQuestion,
+          gamesPayload?.games,
+          includeWarmup,
+        );
         setMessages((prev) =>
           limitChatMessages([
             ...prev,
@@ -389,6 +410,20 @@ export default function ChatScreen() {
         setChatStatus('idle');
         setMessages([createDefaultAssistantMessage()]);
       },
+    });
+  };
+
+  const handleToggleIncludeWarmup = () => {
+    if (chatStatus === 'loading') {
+      return;
+    }
+
+    setIncludeWarmup((current) => {
+      const next = !current;
+      void AsyncStorage.setItem(INCLUDE_WARMUP_STORAGE_KEY, next ? '1' : '0').catch(
+        () => undefined,
+      );
+      return next;
     });
   };
 
@@ -471,16 +506,28 @@ export default function ChatScreen() {
                 ) : null}
               </View>
             </View>
-            {hasClearableTranscript ? (
-              <View style={styles.headerActions}>
+            <View style={styles.headerActions}>
+              <IconAction
+                accessibilityLabel={`Include warmup games (currently ${includeWarmup ? 'on' : 'off'})`}
+                onPress={chatStatus === 'loading' ? undefined : handleToggleIncludeWarmup}
+                style={chatStatus === 'loading' && styles.headerActionDisabled}
+                icon={
+                  <Ionicons
+                    name={includeWarmup ? 'flask' : 'flask-outline'}
+                    size={22}
+                    color={includeWarmup ? palette.accent : palette.text}
+                  />
+                }
+              />
+              {hasClearableTranscript ? (
                 <IconAction
                   accessibilityLabel="Clear chat"
                   onPress={chatStatus === 'loading' ? undefined : handleClearChat}
                   style={chatStatus === 'loading' && styles.headerActionDisabled}
                   icon={<Ionicons name="trash-outline" size={22} color={palette.text} />}
                 />
-              </View>
-            ) : null}
+              ) : null}
+            </View>
           </View>
 
           <ScrollView
@@ -681,6 +728,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: spacing.lg,
     top: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   headerActionDisabled: {
     opacity: 0.45,

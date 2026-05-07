@@ -170,7 +170,7 @@ export async function loadRecordingDraftPayload(
       supabase
         .from("recording_draft_games")
         .select(
-          "id,draft_id,group_id,capture_order,storage_key,status,captured_at_hint,captured_at,sort_at,last_error,created_at,updated_at,extraction"
+          "id,draft_id,group_id,capture_order,storage_key,status,captured_at_hint,captured_at,sort_at,last_error,created_at,updated_at,extraction,tags"
         )
         .eq("draft_id", draft.id)
         .order("capture_order", { ascending: true }),

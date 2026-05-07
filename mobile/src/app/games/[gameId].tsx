@@ -13,9 +13,11 @@ import {
 import CenteredState from '@/components/centered-state';
 import DetailShell from '@/components/detail-shell';
 import FrameGrid from '@/components/frame-grid';
+import TagChip from '@/components/tag-chip';
 import {
   deleteGame,
   queryKeys,
+  setGameTags,
   updateGame,
 } from '@/lib/backend';
 import { buildFrameGrid, buildSessionGroups } from '@/lib/bowling';
@@ -27,9 +29,10 @@ import {
 } from '@/lib/date-time';
 import { useLoggedGame, useLoggedGames } from '@/hooks/use-logged-data';
 import { navigateBackOrFallback } from '@/lib/navigation';
+import { showWarmupTagTipIfNeeded } from '@/lib/onboarding';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
-import type { FrameDetail, GameDetail } from '@/lib/types';
+import { GAME_TAGS, type FrameDetail, type GameDetail, type GameTag } from '@/lib/types';
 
 type EditableShot = {
   id?: string | null;
@@ -117,6 +120,13 @@ function formatGameMeta(game: GameDetail) {
   })}`;
 }
 
+function getNextTags(currentTags: GameTag[] | null | undefined, tag: GameTag) {
+  const tags = Array.isArray(currentTags) ? currentTags : [];
+  return tags.includes(tag)
+    ? tags.filter((entry) => entry !== tag)
+    : [...tags, tag];
+}
+
 export default function GameDetailScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -189,6 +199,31 @@ export default function GameDetailScreen() {
     },
   });
 
+  const tagMutation = useMutation({
+    mutationFn: ({ tags }: { tags: GameTag[] }) => {
+      if (readOnlyOffline) {
+        throw new Error('Connect to edit this log.');
+      }
+      if (!gameQuery.game) {
+        throw new Error('Game was not found.');
+      }
+      return setGameTags(gameQuery.game.id, tags);
+    },
+    onSuccess: async () => {
+      setError('');
+      await Promise.all([
+        gamesQuery.refetch(),
+        gameQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.games }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.game(gameId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.leaderboard }),
+      ]);
+    },
+    onError: (nextError) => {
+      setError(nextError instanceof Error ? nextError.message : 'Failed to update game tags.');
+    },
+  });
+
   if (gameQuery.isPending) {
     return <CenteredState title="Loading game..." loading />;
   }
@@ -240,6 +275,20 @@ export default function GameDetailScreen() {
     });
   };
 
+  const handleToggleTag = async (tag: GameTag) => {
+    if (readOnlyOffline) {
+      return;
+    }
+
+    const currentTags = Array.isArray(game.tags) ? game.tags : [];
+    const addingWarmup = tag === 'warmup' && !currentTags.includes(tag);
+    if (addingWarmup) {
+      await showWarmupTagTipIfNeeded();
+    }
+
+    tagMutation.mutate({ tags: getNextTags(currentTags, tag) });
+  };
+
   return (
     <DetailShell
       title={title}
@@ -266,6 +315,21 @@ export default function GameDetailScreen() {
           <Text style={styles.messageText}>Offline · showing saved game. Connect to edit this log.</Text>
         </View>
       ) : null}
+
+      <View style={styles.tagRow}>
+        {GAME_TAGS.map((tag) => {
+          const selected = (game.tags ?? []).includes(tag);
+          return (
+            <TagChip
+              key={tag}
+              tag={tag}
+              mode={selected ? 'selected' : 'add'}
+              disabled={readOnlyOffline || tagMutation.isPending}
+              onPress={() => void handleToggleTag(tag)}
+            />
+          );
+        })}
+      </View>
 
       {previewGame ? (
         <View style={styles.gridWrap}>
@@ -389,6 +453,11 @@ const styles = StyleSheet.create({
   },
   gridWrap: {
     gap: spacing.sm,
+  },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
   },
   dateTimeRow: {
     flexDirection: 'row',

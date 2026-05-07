@@ -35,6 +35,7 @@ type Game = {
   total_score: number | null;
   played_at?: string | null;
   created_at?: string;
+  tags?: string[] | null;
   frames?: Frame[];
 };
 
@@ -337,7 +338,8 @@ function buildContextPrompt(
   context: unknown,
   selection: unknown,
   sessionGameIndex: unknown,
-  timezoneOffsetMinutes?: number
+  timezoneOffsetMinutes?: number,
+  includeWarmup?: boolean
 ) {
   // prompt for context-based answer
   // You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
@@ -368,6 +370,9 @@ function buildContextPrompt(
   //
   // Question: *question*
   // Answer:
+  const warmupScopeInstruction = includeWarmup
+    ? "Warmup games are included in this answer unless the user explicitly asks to filter them."
+    : "Warmup games are excluded from this answer unless the user explicitly asks to include them.";
   return `You are a bowling stats assistant that is familiar with bowling terminology. Use the JSON context to answer.
 You can recognize and correctly interpret bowling slang (e.g., 'wombat' = a gutter spare, 'hambone' = four strikes in a row, 'brooklyn' = strike that crosses to the opposite pocket, 'foundation frame' = 9th frame, etc.) when it appears. Do not force slang in answers but feel free to use.
 If the answer is not present, say so briefly.
@@ -383,6 +388,7 @@ Do not mention query limits.
 If a session is specified, "Game N" refers to ordering within that session. If no session is specified, "Game N" refers to the overall list.
 If a response is null, instead of using the word "null" use language such as "You have no games x to y"
 Only in the final written answer, round displayed decimal values to the nearest hundredth and omit trailing zeros. Keep full precision while reasoning from the provided data unless the user asked for more precision or it clearly matters.
+${warmupScopeInstruction}
 
 Scope: ${scope}
 Session/Game Index:
@@ -1653,7 +1659,8 @@ async function runSqlMethod(
   sessionIndex: unknown,
   timeFilter: TimeFilter,
   timezoneOffsetMinutes?: number,
-  userAccessToken?: string | null
+  userAccessToken?: string | null,
+  includeWarmup?: boolean
 ): Promise<SqlResult> {
   const debug = process.env.CHAT_DEBUG === "true";
   const sqlTimings = {
@@ -1661,11 +1668,15 @@ async function runSqlMethod(
     sqlQueryMs: 0,
     sqlAnswerMs: 0
   };
+  const warmupScopeInstruction = includeWarmup
+    ? "Warmup games are included in this answer; do not filter on tags unless the user explicitly asks."
+    : "Warmup games are excluded from this answer; add 'warmup' <> all(tags) to games queries unless the user explicitly asks to include warmups.";
   const schema = `bowling_sessions(id uuid, user_id uuid, name text, description text, started_at timestamptz, created_at timestamptz)
-games(id uuid, session_id uuid, game_name text, player_name text, total_score int, played_at timestamptz, created_at timestamptz, user_id uuid)
+games(id uuid, session_id uuid, game_name text, player_name text, total_score int, played_at timestamptz, created_at timestamptz, user_id uuid, tags text[])
 frames(id uuid, game_id uuid, frame_number int, is_strike boolean, is_spare boolean)
 shots(id uuid, frame_id uuid, shot_number int, pins int)
-Note: 10th-frame X 9 / uses shots 1=10, 2=9, 3=1; count it as a spare conversion from shots when answering spare-count or spare-rate questions.`;
+Note: 10th-frame X 9 / uses shots 1=10, 2=9, 3=1; count it as a spare conversion from shots when answering spare-count or spare-rate questions.
+Note: tags is a postgres text[] of zero or more values from {'warmup','league','tournament'}. Use 'warmup' = any(tags) to filter; 'warmup' <> all(tags) to exclude. ${warmupScopeInstruction}`;
 
   // prompt for SQL generation
   const sqlPrompt = `${buildSqlPrompt(
@@ -1835,7 +1846,9 @@ export async function POST(request: Request) {
     question?: string;
     gameId?: string;
     timezoneOffsetMinutes?: number;
+    includeWarmup?: boolean;
   };
+  const includeWarmup = payload.includeWarmup === true;
   timings.parseRequestMs = Date.now() - parseStart;
 
   if (!payload.question) {
@@ -2001,7 +2014,7 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from("games")
       .select(
-        "id,session_id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
+        "id,session_id,game_name,player_name,total_score,played_at,created_at,tags,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
       .eq("id", payload.gameId)
       .eq("user_id", effectiveUserId)
@@ -2022,7 +2035,7 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from("games")
       .select(
-        "id,session_id,game_name,player_name,total_score,played_at,created_at,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
+        "id,session_id,game_name,player_name,total_score,played_at,created_at,tags,frames:frames(frame_number,is_strike,is_spare,shots:shots(shot_number,pins))"
       )
       .eq("user_id", effectiveUserId)
       .order("played_at", { ascending: false })
@@ -2038,6 +2051,12 @@ export async function POST(request: Request) {
 
     games = (data as Game[]) || [];
     scope = "all games for the signed-in user";
+  }
+
+  if (!includeWarmup) {
+    games = games.filter(
+      (game) => !(Array.isArray(game.tags) && game.tags.includes("warmup")),
+    );
   }
 
   const loadSessionsStart = Date.now();
@@ -2299,7 +2318,8 @@ export async function POST(request: Request) {
         sessionIndex,
         timeFilter,
         payload.timezoneOffsetMinutes,
-        userAccessToken
+        userAccessToken,
+        includeWarmup
       );
       if (sqlResult.ok && sqlResult.answer) {
         if (debug && sqlResult.timings) {
@@ -2454,7 +2474,8 @@ export async function POST(request: Request) {
         contextPayload,
         selectionOnline,
         sessionGameIndex,
-        payload.timezoneOffsetMinutes
+        payload.timezoneOffsetMinutes,
+        includeWarmup
       );
       if (debug) {
         console.log("Context prompt:", contextPrompt);

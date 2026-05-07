@@ -19,9 +19,11 @@ import {
   discardRecordingDraft as discardRecordingDraftRemote,
   endLiveSession,
   finalizeRecordingDraft,
-  queryKeys,
-  queueLiveSessionCapture,
-  updateLiveSession,
+	  queryKeys,
+	  queueLiveSessionCapture,
+	  setDraftGameTags,
+	  setLiveGameTags,
+	  updateLiveSession,
   updateLiveSessionGame,
   updateRecordingDraft,
   updateRecordingDraftGroup,
@@ -69,8 +71,9 @@ import {
   normalizePlayerKey,
 } from '@/lib/live-session';
 import type {
-  GameListItem,
-  LiveSession,
+	  GameListItem,
+	  GameTag,
+	  LiveSession,
   LivePlayer,
   LiveSessionResponse,
   RecordingDraft,
@@ -122,13 +125,14 @@ type UploadsProcessingContextValue = {
     name?: string;
     description?: string;
   }) => Promise<void>;
-  updateLiveSessionLocal: (payload: {
+	  updateLiveSessionLocal: (payload: {
     liveSession: LiveSession | null;
     nextSessionNumber?: number | null;
     name?: string;
     description?: string;
     selectedPlayerKeys?: string[];
-  }) => void;
+	  }) => void;
+	  updateLiveGameTagsLocal: (visibleGameId: string, tags: GameTag[]) => void;
   deleteLiveCapture: (visibleGameId: string) => Promise<{
     removed: boolean;
     remoteDeleteRequired: boolean;
@@ -144,8 +148,13 @@ type UploadsProcessingContextValue = {
     draft: RecordingDraft | null;
     assets: ImagePicker.ImagePickerAsset[];
   }) => Promise<void>;
-  updateDraftLocal: (payload: UpdateDraftInput) => void;
-  updateDraftGroupLocal: (payload: UpdateDraftGroupInput) => void;
+	  updateDraftLocal: (payload: UpdateDraftInput) => void;
+	  updateDraftGroupLocal: (payload: UpdateDraftGroupInput) => void;
+	  updateDraftGameTagsLocal: (payload: {
+	    mode: RecordingDraftMode;
+	    visibleGameId: string;
+	    tags: GameTag[];
+	  }) => void;
   deleteDraftCapture: (payload: {
     mode: RecordingDraftMode;
     visibleGameId: string;
@@ -180,7 +189,10 @@ function nowIso() {
 function cloneStore(store: UploadsProcessingStore): UploadsProcessingStore {
   return {
     ...store,
-    captureItems: store.captureItems.map((entry) => ({ ...entry })),
+	    captureItems: store.captureItems.map((entry) => ({
+	      ...entry,
+	      tags: entry.tags ? [...entry.tags] : entry.tags,
+	    })),
     liveSessions: store.liveSessions.map((entry) => ({ ...entry, selectedPlayerKeys: [...entry.selectedPlayerKeys] })),
     drafts: store.drafts.map((entry) => ({
       ...entry,
@@ -194,7 +206,10 @@ function cloneStore(store: UploadsProcessingStore): UploadsProcessingStore {
         ...session,
         linkedCaptureItemIds: [...session.linkedCaptureItemIds],
       })),
-      optimisticGames: entry.optimisticGames.map((game) => ({ ...game })),
+	      optimisticGames: entry.optimisticGames.map((game) => ({
+	        ...game,
+	        tags: game.tags ? [...game.tags] : game.tags,
+	      })),
     })),
     sessionRouteAliases: store.sessionRouteAliases.map((entry) => ({ ...entry })),
   };
@@ -331,6 +346,10 @@ function buildLocalExtraction(players: LivePlayer[]): NonNullable<UploadsProcess
   return {
     players,
   };
+}
+
+function cloneGameTags(tags: GameTag[]) {
+  return [...new Set(tags)];
 }
 
 function buildResolvedSessionRouteAliases(
@@ -520,6 +539,103 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
     };
   }, [invalidateSyncQueries]);
 
+  // Reconcile local state when the server reports a live session or recording
+  // draft has gone away (e.g. user discarded it from another device). The local
+  // store keeps an entry pinned to the server id; without this sweep, the merge
+  // functions used to synthesize a phantom "active" entry forever.
+  useEffect(() => {
+    const cache = queryClient.getQueryCache();
+    const reconcile = (queryKey: readonly unknown[]) => {
+      const [root, mode] = queryKey;
+      if (root === 'live-session') {
+        const data = queryClient.getQueryData<LiveSessionResponse>(queryKeys.liveSession);
+        if (!data || data.liveSession !== null) {
+          return;
+        }
+        const orphan = storeRef.current.liveSessions.some(
+          (entry) => entry.state === 'active' && entry.serverLiveSessionId,
+        );
+        if (!orphan) {
+          return;
+        }
+        updateStore((current) => {
+          const orphanIds = new Set<string>();
+          current.liveSessions = current.liveSessions.map((entry) => {
+            if (entry.state === 'active' && entry.serverLiveSessionId) {
+              orphanIds.add(entry.id);
+              return { ...entry, state: 'discarded', lastError: null, updatedAt: nowIso() };
+            }
+            return entry;
+          });
+          if (orphanIds.size === 0) {
+            return current;
+          }
+          const orphanCaptureItems = current.captureItems.filter(
+            (entry) => entry.liveSessionId && orphanIds.has(entry.liveSessionId),
+          );
+          const orphanCaptureIds = new Set(orphanCaptureItems.map((entry) => entry.id));
+          orphanCaptureItems.forEach((item) => deleteLocalUploadsProcessingFile(item.localFileUri));
+          current.captureItems = current.captureItems.filter(
+            (entry) => !entry.liveSessionId || !orphanIds.has(entry.liveSessionId),
+          );
+          current.finalizeOperations = current.finalizeOperations.filter(
+            (entry) =>
+              !(entry.liveSessionId && orphanIds.has(entry.liveSessionId)) &&
+              !entry.linkedCaptureItemIds.some((captureId) => orphanCaptureIds.has(captureId)),
+          );
+          return current;
+        });
+        return;
+      }
+      if (root === 'recording-draft' && typeof mode === 'string') {
+        const draftMode = mode as RecordingDraftMode;
+        const data = queryClient.getQueryData<RecordingDraftResponse>(
+          queryKeys.recordingDraft(draftMode),
+        );
+        if (!data || data.draft !== null) {
+          return;
+        }
+        const orphan = storeRef.current.drafts.some(
+          (entry) => entry.mode === draftMode && entry.state === 'active' && entry.serverDraftId,
+        );
+        if (!orphan) {
+          return;
+        }
+        updateStore((current) => {
+          const orphanDraftIds = new Set<string>();
+          current.drafts.forEach((entry) => {
+            if (entry.mode === draftMode && entry.state === 'active' && entry.serverDraftId) {
+              orphanDraftIds.add(entry.id);
+            }
+          });
+          if (orphanDraftIds.size === 0) {
+            return current;
+          }
+          const orphanCaptureItems = current.captureItems.filter(
+            (entry) => entry.recordingDraftId && orphanDraftIds.has(entry.recordingDraftId),
+          );
+          orphanCaptureItems.forEach((item) => deleteLocalUploadsProcessingFile(item.localFileUri));
+          current.captureItems = current.captureItems.filter(
+            (entry) => !entry.recordingDraftId || !orphanDraftIds.has(entry.recordingDraftId),
+          );
+          current.finalizeOperations = current.finalizeOperations.filter(
+            (entry) => !(entry.recordingDraftId && orphanDraftIds.has(entry.recordingDraftId)),
+          );
+          current.drafts = current.drafts.filter((entry) => !orphanDraftIds.has(entry.id));
+          return current;
+        });
+      }
+    };
+
+    const unsubscribe = cache.subscribe((event) => {
+      if (event.type !== 'updated') {
+        return;
+      }
+      reconcile(event.query.queryKey);
+    });
+    return unsubscribe;
+  }, [queryClient, updateStore]);
+
   const scheduleSyncNow = useCallback(() => {
     if (!readyRef.current || !user?.id) {
       return;
@@ -615,8 +731,9 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
             return;
           }
 
-          item.extraction = serverGame.extraction ?? item.extraction ?? null;
-          item.lastError = serverGame.last_error ?? item.lastError ?? null;
+	          item.extraction = serverGame.extraction ?? item.extraction ?? null;
+	          item.tags = item.tags !== undefined ? item.tags : serverGame.tags ?? [];
+	          item.lastError = serverGame.last_error ?? item.lastError ?? null;
           item.updatedAt = nowIso();
           if (serverGame.status === 'ready') {
             item.status = current.finalizeOperations.some((operation) => operation.linkedCaptureItemIds.includes(item.id))
@@ -635,7 +752,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
     [updateStore],
   );
 
-  const refreshRecordingDraftServerState = useCallback(
+	  const refreshRecordingDraftServerState = useCallback(
     async (draftId: string, mode: RecordingDraftMode) => {
       const payload = await apiJson<RecordingDraftResponse>(
         `/api/recording-draft?mode=${encodeURIComponent(mode)}`,
@@ -665,8 +782,9 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
             return;
           }
 
-          item.extraction = serverGame.extraction ?? item.extraction ?? null;
-          item.lastError = serverGame.last_error ?? item.lastError ?? null;
+	          item.extraction = serverGame.extraction ?? item.extraction ?? null;
+	          item.tags = item.tags !== undefined ? item.tags : serverGame.tags ?? [];
+	          item.lastError = serverGame.last_error ?? item.lastError ?? null;
           item.updatedAt = nowIso();
           if (serverGame.status === 'ready') {
             item.status = current.finalizeOperations.some((operation) => operation.linkedCaptureItemIds.includes(item.id))
@@ -682,10 +800,29 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         return current;
       });
     },
-    [updateStore],
-  );
+	    [updateStore],
+	  );
 
-  const processCaptureItem = useCallback(
+	  const syncCaptureItemTags = useCallback(async (captureItem: UploadsProcessingCaptureItem) => {
+	    if (!Array.isArray(captureItem.tags)) {
+	      return;
+	    }
+
+	    if (captureItem.liveSessionId && captureItem.serverLiveGameId) {
+	      await setLiveGameTags(captureItem.serverLiveGameId, captureItem.tags);
+	      return;
+	    }
+
+	    if (captureItem.recordingDraftId && captureItem.serverDraftGameId) {
+	      await setDraftGameTags(
+	        captureItem.sourceFlow as RecordingDraftMode,
+	        captureItem.serverDraftGameId,
+	        captureItem.tags,
+	      );
+	    }
+	  }, []);
+
+	  const processCaptureItem = useCallback(
     async (captureItem: UploadsProcessingCaptureItem) => {
       if (!user?.id || captureItem.status === 'discarded' || captureItem.status === 'synced') {
         return;
@@ -786,9 +923,12 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
               targetSession.updatedAt = currentItem.updatedAt;
             }
             return current;
-          });
-          await refreshLiveSessionServerState(workingItem.liveSessionId);
-          return;
+	          });
+	          if (Array.isArray(workingItem.tags)) {
+	            await setLiveGameTags(response.liveGameId, workingItem.tags);
+	          }
+	          await refreshLiveSessionServerState(workingItem.liveSessionId);
+	          return;
         }
 
         if (
@@ -865,21 +1005,30 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
             }
 
             return current;
-          });
-          await refreshRecordingDraftServerState(
+	          });
+	          if (Array.isArray(workingItem.tags) && createdGame?.draftGameId) {
+	            await setDraftGameTags(
+	              workingItem.sourceFlow as RecordingDraftMode,
+	              createdGame.draftGameId,
+	              workingItem.tags,
+	            );
+	          }
+	          await refreshRecordingDraftServerState(
             workingItem.recordingDraftId,
             workingItem.sourceFlow as RecordingDraftMode,
           );
           return;
         }
 
-        if (workingItem.liveSessionId && workingItem.serverLiveGameId) {
-          await refreshLiveSessionServerState(workingItem.liveSessionId);
-          return;
-        }
+	        if (workingItem.liveSessionId && workingItem.serverLiveGameId) {
+	          await syncCaptureItemTags(workingItem);
+	          await refreshLiveSessionServerState(workingItem.liveSessionId);
+	          return;
+	        }
 
-        if (workingItem.recordingDraftId && workingItem.serverDraftGameId) {
-          await refreshRecordingDraftServerState(
+	        if (workingItem.recordingDraftId && workingItem.serverDraftGameId) {
+	          await syncCaptureItemTags(workingItem);
+	          await refreshRecordingDraftServerState(
             workingItem.recordingDraftId,
             workingItem.sourceFlow as RecordingDraftMode,
           );
@@ -892,12 +1041,13 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
       }
     },
     [
-      markCaptureFailure,
-      refreshLiveSessionServerState,
-      refreshRecordingDraftServerState,
-      updateStore,
-      user?.id,
-    ],
+	      markCaptureFailure,
+	      refreshLiveSessionServerState,
+	      refreshRecordingDraftServerState,
+	      syncCaptureItemTags,
+	      updateStore,
+	      user?.id,
+	    ],
   );
 
   const finalizeOperationSucceeded = useCallback(
@@ -1019,10 +1169,15 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
               item.updatedAt = nowIso();
             }
           });
-          return current;
-        });
+	          return current;
+	        });
 
-        if (operation.sourceFlow === 'live_session' && operation.liveSessionId) {
+	        const linkedCaptureItems = storeRef.current.captureItems.filter((item) =>
+	          operation.linkedCaptureItemIds.includes(item.id),
+	        );
+	        await Promise.all(linkedCaptureItems.map(syncCaptureItemTags));
+	
+	        if (operation.sourceFlow === 'live_session' && operation.liveSessionId) {
           const liveSession = storeRef.current.liveSessions.find(
             (entry) => entry.id === operation.liveSessionId,
           );
@@ -1109,8 +1264,8 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         });
       }
     },
-    [finalizeOperationSucceeded, updateStore],
-  );
+	    [finalizeOperationSucceeded, syncCaptureItemTags, updateStore],
+	  );
 
   const runSyncPass = useCallback(async () => {
     if (syncRunningRef.current || !readyRef.current || !user?.id) {
@@ -1238,11 +1393,12 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
             localFileName: entry.persistedFile.localFileName,
             mimeType: entry.asset.mimeType ?? 'image/jpeg',
             fileSizeBytes: entry.asset.fileSize ?? null,
-            capturedAtHint: deriveCapturedAtHint(entry.asset),
-            status: 'captured_local',
-            retryCount: 0,
-            lastError: null,
-            liveSessionId: liveSessionEntry.id,
+	            capturedAtHint: deriveCapturedAtHint(entry.asset),
+	            status: 'captured_local',
+	            retryCount: 0,
+	            lastError: null,
+	            tags: [],
+	            liveSessionId: liveSessionEntry.id,
             liveGameId: createLocalId('live-game'),
             serverSessionId: liveSessionEntry.serverSessionId ?? null,
             serverLiveSessionId: liveSessionEntry.serverLiveSessionId ?? null,
@@ -1259,7 +1415,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
     [scheduleSyncNow, updateStore],
   );
 
-  const updateLiveSessionLocal = useCallback(
+	  const updateLiveSessionLocal = useCallback(
     (payload: {
       liveSession: LiveSession | null;
       nextSessionNumber?: number | null;
@@ -1278,10 +1434,39 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         return current;
       });
     },
-    [updateStore],
-  );
+	    [updateStore],
+	  );
 
-  const deleteLiveCapture = useCallback(
+	  const updateLiveGameTagsLocal = useCallback(
+	    (visibleGameId: string, tags: GameTag[]) => {
+	      updateStore((current) => {
+	        const currentTime = nowIso();
+	        const captureItem = current.captureItems.find(
+	          (entry) =>
+	            entry.liveSessionId &&
+	            (getLiveSessionVisibleId(entry) === visibleGameId || entry.id === visibleGameId),
+	        );
+	        if (!captureItem) {
+	          return current;
+	        }
+
+	        captureItem.tags = cloneGameTags(tags);
+	        captureItem.updatedAt = currentTime;
+
+	        const liveSession = current.liveSessions.find(
+	          (entry) => entry.id === captureItem.liveSessionId,
+	        );
+	        if (liveSession) {
+	          liveSession.updatedAt = currentTime;
+	        }
+	        return current;
+	      });
+	      scheduleSyncNow();
+	    },
+	    [scheduleSyncNow, updateStore],
+	  );
+
+	  const deleteLiveCapture = useCallback(
     async (visibleGameId: string) => {
       const captureItem = storeRef.current.captureItems.find(
         (entry) =>
@@ -1417,10 +1602,11 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
           playedAt: item.capturedAtHint ?? item.createdAt,
           linkedCaptureItemId: item.id,
           linkedSessionId: optimisticSession.id,
-          isReadOnlyUntilSynced: true,
-          selectedPlayerKey: selectedPlayer.selectedPlayerKey,
-          selectedPlayerName: selectedPlayer.selectedPlayerName,
-        };
+	          isReadOnlyUntilSynced: true,
+	          selectedPlayerKey: selectedPlayer.selectedPlayerKey,
+	          selectedPlayerName: selectedPlayer.selectedPlayerName,
+	          tags: cloneGameTags(item.tags ?? []),
+	        };
       });
 
       const finalizeOperation: UploadsProcessingFinalizeOperation = {
@@ -1550,11 +1736,12 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
             localFileName: entry.persisted.localFileName,
             mimeType: entry.asset.mimeType ?? 'image/jpeg',
             fileSizeBytes: entry.asset.fileSize ?? null,
-            capturedAtHint: entry.capturedAtHint,
-            status: 'captured_local',
-            retryCount: 0,
-            lastError: null,
-            recordingDraftId: draftEntry.id,
+	            capturedAtHint: entry.capturedAtHint,
+	            status: 'captured_local',
+	            retryCount: 0,
+	            lastError: null,
+	            tags: [],
+	            recordingDraftId: draftEntry.id,
             recordingDraftGameId: createLocalId('draft-game'),
             localDraftGroupId: groupId ?? null,
             captureOrder: existingCaptureOrder + index + 1,
@@ -1573,7 +1760,7 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
     [scheduleSyncNow, updateStore],
   );
 
-  const updateDraftLocal = useCallback(
+	  const updateDraftLocal = useCallback(
     (payload: UpdateDraftInput) => {
       updateStore((current) => {
         const existingDraft = current.drafts.find(
@@ -1606,10 +1793,39 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         return current;
       });
     },
-    [updateStore],
-  );
+	    [updateStore],
+	  );
 
-  const updateDraftGroupLocal = useCallback(
+	  const updateDraftGameTagsLocal = useCallback(
+	    (payload: { mode: RecordingDraftMode; visibleGameId: string; tags: GameTag[] }) => {
+	      updateStore((current) => {
+	        const currentTime = nowIso();
+	        const captureItem = current.captureItems.find(
+	          (entry) =>
+	            entry.sourceFlow === payload.mode &&
+	            entry.recordingDraftId &&
+	            (getDraftVisibleId(entry) === payload.visibleGameId ||
+	              entry.id === payload.visibleGameId),
+	        );
+	        if (!captureItem) {
+	          return current;
+	        }
+
+	        captureItem.tags = cloneGameTags(payload.tags);
+	        captureItem.updatedAt = currentTime;
+
+	        const draft = current.drafts.find((entry) => entry.id === captureItem.recordingDraftId);
+	        if (draft) {
+	          draft.updatedAt = currentTime;
+	        }
+	        return current;
+	      });
+	      scheduleSyncNow();
+	    },
+	    [scheduleSyncNow, updateStore],
+	  );
+
+	  const updateDraftGroupLocal = useCallback(
     (payload: UpdateDraftGroupInput) => {
       updateStore((current) => {
         const targetDraft = current.drafts.find((entry) => entry.mode === payload.mode);
@@ -1847,10 +2063,11 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
           playedAt: item.capturedAtHint ?? item.createdAt,
           linkedCaptureItemId: item.id,
           linkedSessionId: session.id,
-          isReadOnlyUntilSynced: true,
-          selectedPlayerKey: selectedPlayer.selectedPlayerKey,
-          selectedPlayerName: selectedPlayer.selectedPlayerName,
-        });
+	          isReadOnlyUntilSynced: true,
+	          selectedPlayerKey: selectedPlayer.selectedPlayerKey,
+	          selectedPlayerName: selectedPlayer.selectedPlayerName,
+	          tags: cloneGameTags(item.tags ?? []),
+	        });
       });
 
       const finalizeOperation: UploadsProcessingFinalizeOperation = {
@@ -2143,16 +2360,18 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
     () => ({
       store,
       summary: getUploadsProcessingSummary(store),
-      ready,
-      enqueueLiveCaptures,
-      updateLiveSessionLocal,
-      deleteLiveCapture,
+	      ready,
+	      enqueueLiveCaptures,
+	      updateLiveSessionLocal,
+	      updateLiveGameTagsLocal,
+	      deleteLiveCapture,
       discardLiveSessionLocal,
       finalizeLiveSessionLocal,
-      enqueueDraftCaptures,
-      updateDraftLocal,
-      updateDraftGroupLocal,
-      deleteDraftCapture,
+	      enqueueDraftCaptures,
+	      updateDraftLocal,
+	      updateDraftGroupLocal,
+	      updateDraftGameTagsLocal,
+	      deleteDraftCapture,
       discardDraftLocal,
       clearDraftLocalState,
       finalizeDraftLocal,
@@ -2176,10 +2395,12 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
       repairFailedLoggedGame,
       retryEntry,
       scheduleSyncNow,
-      store,
-      updateDraftGroupLocal,
-      updateDraftLocal,
-      updateLiveSessionLocal,
+	      store,
+	      updateDraftGameTagsLocal,
+	      updateDraftGroupLocal,
+	      updateDraftLocal,
+	      updateLiveGameTagsLocal,
+	      updateLiveSessionLocal,
     ],
   );
 

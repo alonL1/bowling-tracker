@@ -15,6 +15,7 @@ import type {
   AvatarPresetId,
   GameDetail,
   GameListItem,
+  GameTag,
   InviteLinkResponse,
   InviteLookupResponse,
   LeaderboardMetric,
@@ -295,6 +296,34 @@ export async function deleteGame(gameId: string) {
   });
 }
 
+export async function setGameTags(gameId: string, tags: GameTag[]) {
+  return apiJson<{ ok: boolean; tags: GameTag[] }>('/api/game/tags', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gameId, tags }),
+  });
+}
+
+export async function setLiveGameTags(liveGameId: string, tags: GameTag[]) {
+  return apiJson<{ ok: boolean }>('/api/live-session/game', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ liveGameId, tags }),
+  });
+}
+
+export async function setDraftGameTags(
+  mode: RecordingDraftMode,
+  draftGameId: string,
+  tags: GameTag[],
+) {
+  return apiJson<RecordingDraftResponse>('/api/recording-draft/game', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, draftGameId, tags }),
+  });
+}
+
 export type GameUpdatePayload = {
   gameId: string;
   playedAt?: string | null;
@@ -327,13 +356,18 @@ export type ChatResponse = {
   offlineNote?: string;
 };
 
-export async function sendChat(question: string, gameId?: string | null) {
+export async function sendChat(
+  question: string,
+  gameId?: string | null,
+  includeWarmup = false,
+) {
   return apiJson<ChatResponse>('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       question,
       gameId,
+      includeWarmup,
       timezoneOffsetMinutes: new Date().getTimezoneOffset(),
     }),
   });

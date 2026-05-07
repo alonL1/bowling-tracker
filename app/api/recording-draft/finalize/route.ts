@@ -14,6 +14,7 @@ import {
   getSelectedPlayersForExtraction,
   insertLoggedGameFromSelectedPlayer,
 } from "../../utils/logged-scoreboard";
+import { normalizeGameTags } from "../../utils/game-tags";
 import {
   getActiveRecordingDraftRecord,
   getRecordingDraftUserId,
@@ -346,6 +347,7 @@ export async function POST(request: Request) {
           selectedPlayer: selectedPlayers[0],
           fullExtraction,
           clientFinalizeOperationId: clientOperationId,
+          tags: normalizeGameTags((game as { tags?: unknown }).tags),
         });
         createdGameIds.push(created.gameId);
       }
