@@ -207,13 +207,23 @@ async function signInWithNativeAppleId() {
   const Crypto = await import('expo-crypto');
 
   try {
-    const nonce = Crypto.randomUUID();
+    // Supabase server validates the nonce by hashing whatever raw nonce we send
+    // it with SHA-256 and comparing it against the `nonce` claim in Apple's JWT.
+    // That means we must hand Apple a HASHED nonce (so the JWT carries the hash)
+    // and hand Supabase the RAW nonce (so its hash matches). Sending raw to both
+    // succeeds for already-linked accounts but breaks fresh sign-ins, which is
+    // why App Review caught this on a clean device.
+    const rawNonce = Crypto.randomUUID();
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce,
+    );
     const credential = await AppleAuthentication.signInAsync({
       requestedScopes: [
         AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
         AppleAuthentication.AppleAuthenticationScope.EMAIL,
       ],
-      nonce,
+      nonce: hashedNonce,
     });
 
     if (!credential.identityToken) {
@@ -223,7 +233,7 @@ async function signInWithNativeAppleId() {
     const { error } = await supabase.auth.signInWithIdToken({
       provider: 'apple',
       token: credential.identityToken,
-      nonce,
+      nonce: rawNonce,
     });
 
     if (error) {
