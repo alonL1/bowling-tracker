@@ -50,17 +50,9 @@ const METRIC_TAB_DETAILS: Record<
 > = {
   bestGame: { label: 'Score', description: 'Highest Scoring Game' },
   bestAverage: { label: 'Average', description: 'Average Score Across All Games' },
-  AverageScoreNoWarmup: {
-    label: 'Avg No Warmup',
-    description: 'Average Score Excluding Warmup Games',
-  },
   bestSeries: { label: 'Series', description: 'Best 3 Games Series' },
   bestSession: { label: 'Best Session', description: 'Best Single Session Average Score' },
   StrikeRate: { label: 'Strike Rate', description: 'Strike Rate' },
-  StrikeRateNoWarmup: {
-    label: 'Strike No Warmup',
-    description: 'Strike Rate Excluding Warmup Games',
-  },
   SpareRate: { label: 'Spare Rate', description: 'Spare Conversion Rate' },
   TotalStrikes: { label: 'Strikes', description: 'Total Number of Strikes' },
   TotalSpares: { label: 'Spares', description: 'Total Number of Spares' },
@@ -81,13 +73,13 @@ function formatMetricValue(metric: LeaderboardMetric, value: number) {
   if (!Number.isFinite(value)) {
     return '—';
   }
-  if (metric === 'bestAverage' || metric === 'AverageScoreNoWarmup' || metric === 'bestSession') {
+  if (metric === 'bestAverage' || metric === 'bestSession') {
     return formatTenths(value);
   }
   if (metric === 'bestSeries') {
     return Math.round(value).toLocaleString();
   }
-  if (metric === 'StrikeRate' || metric === 'StrikeRateNoWarmup' || metric === 'SpareRate') {
+  if (metric === 'StrikeRate' || metric === 'SpareRate') {
     return `${formatTenths(value)}%`;
   }
   return Math.round(value).toLocaleString();

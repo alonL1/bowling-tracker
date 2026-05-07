@@ -13,6 +13,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -413,13 +414,13 @@ export default function ChatScreen() {
     });
   };
 
-  const handleToggleIncludeWarmup = () => {
+  const handleToggleIncludeWarmup = (nextValue?: boolean) => {
     if (chatStatus === 'loading') {
       return;
     }
 
     setIncludeWarmup((current) => {
-      const next = !current;
+      const next = typeof nextValue === 'boolean' ? nextValue : !current;
       void AsyncStorage.setItem(INCLUDE_WARMUP_STORAGE_KEY, next ? '1' : '0').catch(
         () => undefined,
       );
@@ -507,18 +508,21 @@ export default function ChatScreen() {
               </View>
             </View>
             <View style={styles.headerActions}>
-              <IconAction
-                accessibilityLabel={`Include warmup games (currently ${includeWarmup ? 'on' : 'off'})`}
-                onPress={chatStatus === 'loading' ? undefined : handleToggleIncludeWarmup}
-                style={chatStatus === 'loading' && styles.headerActionDisabled}
-                icon={
-                  <Ionicons
-                    name={includeWarmup ? 'flask' : 'flask-outline'}
-                    size={22}
-                    color={includeWarmup ? palette.accent : palette.text}
-                  />
-                }
-              />
+              <View
+                style={[
+                  styles.warmupToggle,
+                  chatStatus === 'loading' && styles.headerActionDisabled,
+                ]}>
+                <Text style={styles.warmupToggleLabel}>Include Warmup Games</Text>
+                <Switch
+                  accessibilityLabel={`Include warmup games (currently ${includeWarmup ? 'on' : 'off'})`}
+                  disabled={chatStatus === 'loading'}
+                  value={includeWarmup}
+                  onValueChange={handleToggleIncludeWarmup}
+                  trackColor={{ false: palette.field, true: palette.accentSoft }}
+                  thumbColor={includeWarmup ? palette.text : palette.muted}
+                />
+              </View>
               {hasClearableTranscript ? (
                 <IconAction
                   accessibilityLabel="Clear chat"
@@ -734,6 +738,19 @@ const styles = StyleSheet.create({
   },
   headerActionDisabled: {
     opacity: 0.45,
+  },
+  warmupToggle: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  warmupToggleLabel: {
+    color: palette.muted,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
+    fontFamily: fontFamilySans,
   },
   pinImage: {
     width: 74,

@@ -99,7 +99,6 @@ export type QueuedJob = {
 export type LeaderboardMetric =
   | 'bestGame'
   | 'bestAverage'
-  | 'AverageScoreNoWarmup'
   | 'bestSeries'
   | 'bestSession'
   | 'mostGames'
@@ -108,7 +107,6 @@ export type LeaderboardMetric =
   | 'TotalPoints'
   | 'SessionLength'
   | 'StrikeRate'
-  | 'StrikeRateNoWarmup'
   | 'SpareRate'
   | 'TotalStrikes'
   | 'TotalSpares'

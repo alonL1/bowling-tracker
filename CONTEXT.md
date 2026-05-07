@@ -329,7 +329,9 @@
   - Stored as `text[]` on `games`, `live_session_games`, and `recording_draft_games`.
   - Users can tag logged games, active live-session games, and recording-draft games before finalization.
   - Finalization carries live/draft tags into logged `games`.
-  - Personal stats continue to include warmups; Friends adds no-warmup average and strike-rate metrics, and Chat has an include-warmup toggle that defaults off.
+  - Personal stats continue to include warmups. The Sessions list has explicit no-warmup sort options for average and strike rate.
+  - Friends leaderboards exclude warmup-tagged games from every metric, including counts and totals.
+  - Chat has an include-warmup toggle that defaults off.
 - Frame:
   - Server table: `frames`.
   - Belongs to a game.

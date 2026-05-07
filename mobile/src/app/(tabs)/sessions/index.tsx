@@ -18,7 +18,7 @@ import ScreenShell from '@/components/screen-shell';
 import SessionCard, { type SessionMetaSegment } from '@/components/session-card';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
-import { buildSessionGroups, type SessionGroup } from '@/lib/bowling';
+import { buildSessionGroups, formatAverage, type SessionGroup } from '@/lib/bowling';
 import { useLoggedGames } from '@/hooks/use-logged-data';
 import { buildLoggedSessionStats } from '@/lib/live-session';
 import { useAuth } from '@/providers/auth-provider';
@@ -27,28 +27,34 @@ type SessionSortOption =
   | 'createdAt'
   | 'firstGameDate'
   | 'average'
+  | 'averageNoWarmup'
   | 'bestGame'
   | 'mostGames'
-  | 'strikeRate';
+  | 'strikeRate'
+  | 'strikeRateNoWarmup';
 
 type SessionSortEntry = {
   session: SessionGroup;
   createdAtTs: number;
   firstGameTs: number;
   averageValue: number | null;
+  averageNoWarmupValue: number | null;
   bestGameValue: number | null;
   strikeRateValue: number | null;
+  strikeRateNoWarmupValue: number | null;
   metaSegments: SessionMetaSegment[];
 };
 
-const SORT_MENU_WIDTH = 212;
+const SORT_MENU_WIDTH = 292;
 const sortOptions: Array<{ key: SessionSortOption; label: string }> = [
   { key: 'firstGameDate', label: 'First Game Date' },
   { key: 'createdAt', label: 'Created At Date' },
   { key: 'average', label: 'Average' },
+  { key: 'averageNoWarmup', label: 'Average (without warmup games)' },
   { key: 'bestGame', label: 'Best Game' },
   { key: 'mostGames', label: 'Most Games' },
   { key: 'strikeRate', label: 'Strike Rate' },
+  { key: 'strikeRateNoWarmup', label: 'Strike Rate (without warmup games)' },
 ];
 
 function parseDateValue(value?: string | null) {
@@ -94,14 +100,29 @@ function getFirstGameTimestamp(session: SessionGroup) {
   return parseDateValue(session.session?.started_at);
 }
 
+function isWarmupGame(game: SessionGroup['games'][number]) {
+  return Array.isArray(game.tags) && game.tags.includes('warmup');
+}
+
+function getAverageLabel(games: SessionGroup['games']) {
+  const scores = games
+    .map((game) => game.total_score)
+    .filter((score): score is number => typeof score === 'number');
+  return formatAverage(scores);
+}
+
 function buildMetaSegments(
   session: SessionGroup,
   sortOption: SessionSortOption,
   bestGameLabel: string,
   strikeRateLabel: string,
+  averageNoWarmupLabel: string,
+  strikeRateNoWarmupLabel: string,
 ): SessionMetaSegment[] {
   const gameLabel = `${session.gameCount} ${session.gameCount === 1 ? 'game' : 'games'}`;
   const averageLabel = `Avg ${session.averageLabel}`;
+  const averageNoWarmupMetaLabel = `Avg w/o warmup ${averageNoWarmupLabel}`;
+  const strikeRateNoWarmupMetaLabel = `Strike w/o warmup ${strikeRateNoWarmupLabel}`;
 
   if (sortOption === 'mostGames') {
     return [
@@ -114,6 +135,13 @@ function buildMetaSegments(
     return [
       { label: gameLabel },
       { label: averageLabel, emphasized: true },
+    ];
+  }
+
+  if (sortOption === 'averageNoWarmup') {
+    return [
+      { label: gameLabel },
+      { label: averageNoWarmupMetaLabel, emphasized: true },
     ];
   }
 
@@ -130,6 +158,14 @@ function buildMetaSegments(
       { label: gameLabel },
       { label: averageLabel },
       { label: strikeRateLabel, emphasized: true },
+    ];
+  }
+
+  if (sortOption === 'strikeRateNoWarmup') {
+    return [
+      { label: gameLabel },
+      { label: averageLabel },
+      { label: strikeRateNoWarmupMetaLabel, emphasized: true },
     ];
   }
 
@@ -161,19 +197,26 @@ export default function SessionsScreen() {
     const sortedNormalSessions = normalSessions
       .map<SessionSortEntry>((session) => {
         const stats = buildLoggedSessionStats(session.games);
+        const noWarmupGames = session.games.filter((game) => !isWarmupGame(game));
+        const noWarmupAverageLabel = getAverageLabel(noWarmupGames);
+        const noWarmupStats = buildLoggedSessionStats(noWarmupGames);
 
         return {
           session,
           createdAtTs: getCreatedAtTimestamp(session),
           firstGameTs: getFirstGameTimestamp(session),
           averageValue: parseMetricValue(session.averageLabel),
+          averageNoWarmupValue: parseMetricValue(noWarmupAverageLabel),
           bestGameValue: parseMetricValue(stats.bestScoreLabel),
           strikeRateValue: parseMetricValue(stats.strikeRateLabel),
+          strikeRateNoWarmupValue: parseMetricValue(noWarmupStats.strikeRateLabel),
           metaSegments: buildMetaSegments(
             session,
             sortOption,
             stats.bestScoreLabel,
             stats.strikeRateLabel,
+            noWarmupAverageLabel,
+            noWarmupStats.strikeRateLabel,
           ),
         };
       })
@@ -190,6 +233,9 @@ export default function SessionsScreen() {
           case 'average':
             diff = compareNullableDesc(left.averageValue, right.averageValue);
             break;
+          case 'averageNoWarmup':
+            diff = compareNullableDesc(left.averageNoWarmupValue, right.averageNoWarmupValue);
+            break;
           case 'bestGame':
             diff = compareNullableDesc(left.bestGameValue, right.bestGameValue);
             break;
@@ -198,6 +244,9 @@ export default function SessionsScreen() {
             break;
           case 'strikeRate':
             diff = compareNullableDesc(left.strikeRateValue, right.strikeRateValue);
+            break;
+          case 'strikeRateNoWarmup':
+            diff = compareNullableDesc(left.strikeRateNoWarmupValue, right.strikeRateNoWarmupValue);
             break;
         }
 
@@ -225,9 +274,11 @@ export default function SessionsScreen() {
         createdAtTs: 0,
         firstGameTs: 0,
         averageValue: null,
+        averageNoWarmupValue: null,
         bestGameValue: null,
         strikeRateValue: null,
-        metaSegments: buildMetaSegments(session, sortOption, '—', '—'),
+        strikeRateNoWarmupValue: null,
+        metaSegments: buildMetaSegments(session, sortOption, '—', '—', '—', '—'),
       })),
     ];
   }, [gamesQuery.games, sortOption]);

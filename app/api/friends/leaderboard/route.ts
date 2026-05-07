@@ -8,7 +8,6 @@ export const runtime = "nodejs";
 type LeaderboardMetrics = {
   bestGame: number;
   bestAverage: number;
-  AverageScoreNoWarmup: number;
   bestSeries: number;
   bestSession: number;
   mostGames: number;
@@ -17,7 +16,6 @@ type LeaderboardMetrics = {
   TotalPoints: number;
   SessionLength: number;
   StrikeRate: number;
-  StrikeRateNoWarmup: number;
   SpareRate: number;
   TotalStrikes: number;
   TotalSpares: number;
@@ -29,12 +27,8 @@ type LeaderboardMetric = keyof LeaderboardMetrics;
 type MutableMetrics = LeaderboardMetrics & {
   totalScoreSum: number;
   totalScoreCount: number;
-  totalScoreSumNoWarmup: number;
-  totalScoreCountNoWarmup: number;
   sessionIds: Set<string>;
   totalFrames: number;
-  totalFramesNoWarmup: number;
-  TotalStrikesNoWarmup: number;
   spareOpportunityCount: number;
 };
 
@@ -71,7 +65,6 @@ type GameRow = {
 const LEADERBOARD_METRICS: LeaderboardMetric[] = [
   "bestGame",
   "bestAverage",
-  "AverageScoreNoWarmup",
   "bestSeries",
   "bestSession",
   "mostGames",
@@ -80,7 +73,6 @@ const LEADERBOARD_METRICS: LeaderboardMetric[] = [
   "TotalPoints",
   "SessionLength",
   "StrikeRate",
-  "StrikeRateNoWarmup",
   "SpareRate",
   "TotalStrikes",
   "TotalSpares",
@@ -89,7 +81,6 @@ const LEADERBOARD_METRICS: LeaderboardMetric[] = [
 
 const FRAME_STAT_METRICS = new Set<LeaderboardMetric>([
   "StrikeRate",
-  "StrikeRateNoWarmup",
   "SpareRate",
   "TotalStrikes",
   "TotalSpares",
@@ -127,7 +118,6 @@ function createBlankMetrics(): MutableMetrics {
   return {
     bestGame: 0,
     bestAverage: 0,
-    AverageScoreNoWarmup: 0,
     bestSeries: 0,
     bestSession: 0,
     mostGames: 0,
@@ -136,19 +126,14 @@ function createBlankMetrics(): MutableMetrics {
     TotalPoints: 0,
     SessionLength: 0,
     StrikeRate: 0,
-    StrikeRateNoWarmup: 0,
     SpareRate: 0,
     TotalStrikes: 0,
     TotalSpares: 0,
     MostNines: 0,
     totalScoreSum: 0,
     totalScoreCount: 0,
-    totalScoreSumNoWarmup: 0,
-    totalScoreCountNoWarmup: 0,
     sessionIds: new Set<string>(),
     totalFrames: 0,
-    totalFramesNoWarmup: 0,
-    TotalStrikesNoWarmup: 0,
     spareOpportunityCount: 0
   };
 }
@@ -212,7 +197,6 @@ function normalizeMetrics(metrics: MutableMetrics): LeaderboardMetrics {
   return {
     bestGame: metrics.bestGame,
     bestAverage: roundToTenths(metrics.bestAverage),
-    AverageScoreNoWarmup: roundToTenths(metrics.AverageScoreNoWarmup),
     bestSeries: metrics.bestSeries,
     bestSession: roundToTenths(metrics.bestSession),
     mostGames: metrics.mostGames,
@@ -221,7 +205,6 @@ function normalizeMetrics(metrics: MutableMetrics): LeaderboardMetrics {
     TotalPoints: metrics.TotalPoints,
     SessionLength: metrics.SessionLength,
     StrikeRate: roundToTenths(metrics.StrikeRate),
-    StrikeRateNoWarmup: roundToTenths(metrics.StrikeRateNoWarmup),
     SpareRate: roundToTenths(metrics.SpareRate),
     TotalStrikes: metrics.TotalStrikes,
     TotalSpares: metrics.TotalSpares,
@@ -314,10 +297,13 @@ export async function GET(request: Request) {
       return;
     }
 
+    const isWarmup = Array.isArray(game.tags) && game.tags.includes("warmup");
+    if (isWarmup) {
+      return;
+    }
+
     const metrics = metricsByUser.get(userId) ?? createBlankMetrics();
     metrics.mostGames += 1;
-
-    const isWarmup = Array.isArray(game.tags) && game.tags.includes("warmup");
 
     const score = typeof game.total_score === "number" ? game.total_score : null;
     if (score !== null) {
@@ -325,10 +311,6 @@ export async function GET(request: Request) {
       metrics.totalScoreSum += score;
       metrics.totalScoreCount += 1;
       metrics.TotalPoints += score;
-      if (!isWarmup) {
-        metrics.totalScoreSumNoWarmup += score;
-        metrics.totalScoreCountNoWarmup += 1;
-      }
     }
 
     const sessionId = typeof game.session_id === "string" ? game.session_id : null;
@@ -356,14 +338,8 @@ export async function GET(request: Request) {
     const frames = Array.isArray(game.frames) ? game.frames : [];
     frames.forEach((frame) => {
       metrics.totalFrames += 1;
-      if (!isWarmup) {
-        metrics.totalFramesNoWarmup += 1;
-      }
       if (frame.is_strike) {
         metrics.TotalStrikes += 1;
-        if (!isWarmup) {
-          metrics.TotalStrikesNoWarmup += 1;
-        }
       }
       const spareStats = getSpareStatsForFrame(frame);
       metrics.TotalSpares += spareStats.conversions;
@@ -403,10 +379,6 @@ export async function GET(request: Request) {
       metrics.totalScoreCount > 0
         ? metrics.totalScoreSum / metrics.totalScoreCount
         : 0;
-    metrics.AverageScoreNoWarmup =
-      metrics.totalScoreCountNoWarmup > 0
-        ? metrics.totalScoreSumNoWarmup / metrics.totalScoreCountNoWarmup
-        : 0;
     metrics.bestSeries = Array.from(scoresByUserSession.entries()).reduce((bestSeries, [key, scores]) => {
       if (!key.startsWith(`${userId}:`)) {
         return bestSeries;
@@ -416,10 +388,6 @@ export async function GET(request: Request) {
     metrics.StrikeRate =
       metrics.totalFrames > 0
         ? (metrics.TotalStrikes / metrics.totalFrames) * 100
-        : 0;
-    metrics.StrikeRateNoWarmup =
-      metrics.totalFramesNoWarmup > 0
-        ? (metrics.TotalStrikesNoWarmup / metrics.totalFramesNoWarmup) * 100
         : 0;
     metrics.SpareRate =
       metrics.spareOpportunityCount > 0
