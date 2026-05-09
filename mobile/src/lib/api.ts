@@ -57,10 +57,47 @@ export function getApiBaseUrl() {
 type ApiRequestInit = RequestInit & {
   authRequired?: boolean;
   accessToken?: string | null;
+  timeoutMs?: number;
 };
 
+const DEFAULT_API_TIMEOUT_MS = 30_000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+) {
+  // RN's fetch has no built-in timeout; an unresponsive server can keep a
+  // request hanging forever, which has caused the upload-processing queue to
+  // deadlock (the `await` never resolves, `runSyncPass`'s `finally` never
+  // fires, and `syncRunningRef.current` stays `true`). Wrap every call in an
+  // AbortController so a stuck fetch becomes a normal rejection.
+  const controller = new AbortController();
+  const externalSignal = init.signal ?? null;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener('abort', () => controller.abort(externalSignal.reason));
+    }
+  }
+  const timeoutHandle = setTimeout(() => {
+    controller.abort(new Error(`Request timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
 export async function apiFetch(path: string, init?: ApiRequestInit) {
-  const { authRequired = true, accessToken: accessTokenOverride, ...requestInit } = init ?? {};
+  const {
+    authRequired = true,
+    accessToken: accessTokenOverride,
+    timeoutMs = DEFAULT_API_TIMEOUT_MS,
+    ...requestInit
+  } = init ?? {};
   const sessionSnapshot = accessTokenOverride ? null : await getExistingSessionSnapshot();
   const accessToken = accessTokenOverride ?? sessionSnapshot?.accessToken ?? null;
   if (authRequired && !accessToken) {
@@ -73,7 +110,7 @@ export async function apiFetch(path: string, init?: ApiRequestInit) {
   }
 
   const targetUrl = path.startsWith('http') ? path : `${getApiBaseUrl()}${path}`;
-  const response = await fetch(targetUrl, { ...requestInit, headers });
+  const response = await fetchWithTimeout(targetUrl, { ...requestInit, headers }, timeoutMs);
   if (!authRequired || response.status !== 401) {
     return response;
   }
@@ -89,7 +126,7 @@ export async function apiFetch(path: string, init?: ApiRequestInit) {
 
   const retryHeaders = new Headers(requestInit.headers || {});
   retryHeaders.set('Authorization', `Bearer ${data.session.access_token}`);
-  return fetch(targetUrl, { ...requestInit, headers: retryHeaders });
+  return fetchWithTimeout(targetUrl, { ...requestInit, headers: retryHeaders }, timeoutMs);
 }
 
 export async function parseJsonResponse<T>(response: Response) {

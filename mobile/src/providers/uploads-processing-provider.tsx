@@ -1025,6 +1025,20 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
           return;
         }
 
+	        // For items already tracked by the server, the only outstanding work
+        // is propagating local-only tag edits. Skip it entirely while the item
+        // is queued for finalize: the finalize call carries draft-game tags
+        // through into the logged `games.tags` column on its own. Running an
+        // extra PATCH here just multiplies network roundtrips (14× for a
+        // 14-game upload) and risks deadlocking `runSyncPass` if any of those
+        // requests hang.
+        if (
+	          workingItem.status === 'finalize_pending' ||
+	          workingItem.status === 'ready_pending_finalize'
+	        ) {
+	          return;
+	        }
+
 	        if (workingItem.liveSessionId && workingItem.serverLiveGameId) {
 	          await syncCaptureItemTags(workingItem);
 	          return;
@@ -1140,10 +1154,42 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         return;
       }
 
-      const allReady = captureItems.every(
-        (item) => item.status === 'ready_pending_finalize' || item.status === 'finalize_pending',
-      );
-      if (!allReady) {
+      const isAllReady = (items: UploadsProcessingCaptureItem[]) =>
+        items.every(
+          (item) =>
+            item.status === 'ready_pending_finalize' ||
+            item.status === 'finalize_pending',
+        );
+
+      let readyCheckItems = captureItems;
+      if (!isAllReady(readyCheckItems)) {
+        // Local state can lag behind the server: an item may show `processing_pending`
+        // locally even though the worker has already flipped its server-side draft
+        // game to `ready`. The form's canFinalize check uses the merged (server-aware)
+        // view, so the user can validly press "Log Session" while the local store is
+        // stale, leaving `finalizeDraftLocal` unable to flip that item to
+        // `finalize_pending`. Refresh from the server once, then re-evaluate; if it's
+        // still not ready we genuinely need to wait.
+        try {
+          if (operation.recordingDraftId) {
+            const draft = storeRef.current.drafts.find(
+              (entry) => entry.id === operation.recordingDraftId,
+            );
+            if (draft) {
+              await refreshRecordingDraftServerState(draft.id, draft.mode);
+            }
+          } else if (operation.liveSessionId) {
+            await refreshLiveSessionServerState(operation.liveSessionId);
+          }
+        } catch (refreshError) {
+          console.log('[finalize-debug] refresh failed', refreshError);
+        }
+        readyCheckItems = storeRef.current.captureItems.filter((item) =>
+          operation.linkedCaptureItemIds.includes(item.id),
+        );
+      }
+
+      if (!isAllReady(readyCheckItems)) {
         updateStore((current) => {
           const targetOperation = current.finalizeOperations.find((entry) => entry.id === operation.id);
           if (targetOperation) {
@@ -1264,7 +1310,13 @@ export function UploadsProcessingProvider({ children }: { children: React.ReactN
         });
       }
     },
-	    [finalizeOperationSucceeded, syncCaptureItemTags, updateStore],
+	    [
+	      finalizeOperationSucceeded,
+	      refreshLiveSessionServerState,
+	      refreshRecordingDraftServerState,
+	      syncCaptureItemTags,
+	      updateStore,
+	    ],
 	  );
 
   const runSyncPass = useCallback(async () => {
