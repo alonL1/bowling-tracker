@@ -177,7 +177,7 @@ function getSpareStatsForFrame(frame: FrameRow) {
   return { conversions, opportunities };
 }
 
-function computeBestSeries(scores: number[]) {
+function computeBestSeriesInRun(scores: number[]) {
   if (scores.length < 3) {
     return 0;
   }
@@ -191,6 +191,10 @@ function computeBestSeries(scores: number[]) {
   }
 
   return bestSeries;
+}
+
+function computeBestSeries(runs: number[][]) {
+  return runs.reduce((best, scores) => Math.max(best, computeBestSeriesInRun(scores)), 0);
 }
 
 function normalizeMetrics(metrics: MutableMetrics): LeaderboardMetrics {
@@ -289,7 +293,7 @@ export async function GET(request: Request) {
   });
 
   const sessionAggregates = new Map<string, SessionAggregate>();
-  const scoresByUserSession = new Map<string, number[]>();
+  const scoresByUserSession = new Map<string, number[][]>();
 
   ((games as unknown as GameRow[] | null) || []).forEach((game) => {
     const userId = game.user_id;
@@ -299,6 +303,14 @@ export async function GET(request: Request) {
 
     const isWarmup = Array.isArray(game.tags) && game.tags.includes("warmup");
     if (isWarmup) {
+      const warmupSessionId = typeof game.session_id === "string" ? game.session_id : null;
+      if (warmupSessionId) {
+        const key = `${userId}:${warmupSessionId}`;
+        const runs = scoresByUserSession.get(key);
+        if (runs && runs[runs.length - 1].length > 0) {
+          runs.push([]);
+        }
+      }
       return;
     }
 
@@ -328,9 +340,9 @@ export async function GET(request: Request) {
       if (score !== null) {
         aggregate.total += score;
         aggregate.count += 1;
-        const scores = scoresByUserSession.get(key) ?? [];
-        scores.push(score);
-        scoresByUserSession.set(key, scores);
+        const runs = scoresByUserSession.get(key) ?? [[]];
+        runs[runs.length - 1].push(score);
+        scoresByUserSession.set(key, runs);
       }
       sessionAggregates.set(key, aggregate);
     }
@@ -379,11 +391,11 @@ export async function GET(request: Request) {
       metrics.totalScoreCount > 0
         ? metrics.totalScoreSum / metrics.totalScoreCount
         : 0;
-    metrics.bestSeries = Array.from(scoresByUserSession.entries()).reduce((bestSeries, [key, scores]) => {
+    metrics.bestSeries = Array.from(scoresByUserSession.entries()).reduce((bestSeries, [key, runs]) => {
       if (!key.startsWith(`${userId}:`)) {
         return bestSeries;
       }
-      return Math.max(bestSeries, computeBestSeries(scores));
+      return Math.max(bestSeries, computeBestSeries(runs));
     }, 0);
     metrics.StrikeRate =
       metrics.totalFrames > 0
