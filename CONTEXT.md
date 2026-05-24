@@ -422,14 +422,14 @@
   - Submit latest build: `npx eas submit --platform ios --latest`.
   - App Store release name from user: PinPoint Bowling.
   - iOS bundle ID in `mobile/app.config.ts`: production `com.alonl.pinpoint`, development `com.alonl.pinpoint.dev`.
-  - App version in `mobile/app.config.ts`: `1.0.8`.
-  - iOS build number in app config currently `20260430.1`, but EAS remote app version source ignores this for submitted builds and auto-increments the remote build number.
+  - App version in `mobile/app.config.ts`: `1.0.9`.
+  - iOS build number in app config currently `20260510.1`, but EAS remote app version source ignores this for submitted builds and auto-increments the remote build number.
   - Uses Apple Sign In.
 - Android:
   - Google Play closed testing release name from user: PinPoint.
   - Production package in `mobile/app.config.ts` and `mobile/android/app/build.gradle`: `com.alonl.pinpoint`.
   - Development package suffix/config: `com.alonl.pinpoint.dev`.
-  - Android version code currently `20260430`; version name `1.0.8`.
+  - Android version code currently `20260510`; version name `1.0.9`.
   - Local release signing reads `mobile/credentials.json` / credential paths; be careful with signing files.
   - Android manifest includes Internet, external storage, record audio, system alert window, and vibration permissions. Some may be Expo/default generated; review before release if Play policy asks.
 - Web/Vercel:

@@ -9,7 +9,14 @@
       "PowerShell(head -30)",
       "Bash(kill -0 b08tx9u6d)",
       "Bash(npm install *)",
-      "Bash(npm audit *)"
+      "Bash(npm audit *)",
+      "Bash(mkdir -p ~/.gradle)",
+      "Read(//Users/Apple/.gradle/**)",
+      "Bash(jarsigner -verify -verbose /Users/Apple/Documents/bowling-tracker/mobile/android/app/build/outputs/bundle/release/app-release.aab)",
+      "Bash(jarsigner -verify -verbose -certs /Users/Apple/Documents/bowling-tracker/mobile/android/app/build/outputs/bundle/release/app-release.aab)",
+      "Bash(jarsigner -verify /Users/Apple/Documents/bowling-tracker/mobile/android/app/build/outputs/bundle/release/app-release.aab)",
+      "Bash(find ~/Library/Developer/Xcode/DerivedData -name \"PinPoint*.app\" -maxdepth 6 2>/dev/null | head -10)",
+      "Read(//Users/Apple/Library/Developer/Xcode/DerivedData/**)"
     ]
   }
 }

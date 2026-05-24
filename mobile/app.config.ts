@@ -56,7 +56,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: isDevelopment ? 'PinPoint Dev' : 'PinPoint',
     slug: 'bowling-tracker-mobile',
-    version: '1.0.8',
+    version: '1.0.9',
     orientation: 'portrait',
     icon: './assets/images/icon.png',
     scheme: isDevelopment ? 'pinpoint-dev' : 'pinpoint',
@@ -64,7 +64,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       icon: './assets/images/icon.png',
       usesAppleSignIn: true,
-      buildNumber: isDevelopment ? '20260430.1' : '20260430.1',
+      buildNumber: isDevelopment ? '20260510.1' : '20260510.1',
       bundleIdentifier: isDevelopment
         ? 'com.alonl.pinpoint.dev'
         : 'com.alonl.pinpoint',
@@ -76,7 +76,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     android: {
       icon: './assets/images/icon.png',
       package: isDevelopment ? 'com.alonl.pinpoint.dev' : 'com.alonl.pinpoint',
-      versionCode: 20260430,
+      versionCode: 20260510,
       softwareKeyboardLayoutMode: 'resize',
       adaptiveIcon: {
         backgroundColor: '#E6F4FE',
