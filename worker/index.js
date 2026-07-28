@@ -465,6 +465,43 @@ Analyze the image and return ONLY the JSON object. Do not include markdown or co
 `;
 }
 
+// Structured-output schema for the extraction. Passing this as responseSchema
+// makes Gemini use constrained decoding, so the response is guaranteed to be
+// valid JSON matching this shape — this is what prevents the malformed-JSON
+// parse failures ("Expected ',' or '}' ... at position N") the free-form JSON
+// mode occasionally produced on complex scoreboards.
+const LIVE_EXTRACTION_SCHEMA = {
+  type: "object",
+  properties: {
+    players: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          playerName: { type: "string" },
+          totalScore: { type: "number", nullable: true },
+          frames: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                frame: { type: "number" },
+                shots: {
+                  type: "array",
+                  items: { type: "number", nullable: true }
+                }
+              },
+              required: ["frame", "shots"]
+            }
+          }
+        },
+        required: ["playerName", "frames"]
+      }
+    }
+  },
+  required: ["players"]
+};
+
 function resolveThinkingConfig(mode) {
   if (!mode) {
     return null;
@@ -699,41 +736,83 @@ async function processJob() {
   const base64 = buffer.toString("base64");
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  // Thinking models (Gemini 2.5 / 3.x) charge their thinking tokens against the
+  // same output-token budget as the response. On a complex scoreboard the model
+  // can spend several thousand tokens thinking; if the budget is too small the
+  // JSON gets truncated mid-response (finishReason MAX_TOKENS) and fails
+  // JSON.parse ("Expected ',' or '}' ... at position N"). The model's default
+  // cap (~8k) is what was truncating in production, so set a generous budget so
+  // thinking + the JSON both fit.
+  //
+  // Do NOT force thinking off here: some models (e.g. gemini-3.x-pro) reject
+  // thinkingBudget: 0 ("this model only works in thinking mode"). Only send a
+  // thinking config when WORKER_THINKING_MODE explicitly asks for one.
   const thinkingConfig = resolveThinkingConfig(process.env.WORKER_THINKING_MODE);
-  const model = genAI.getGenerativeModel({
-    model: GEMINI_MODEL,
-    generationConfig: {
-      temperature: 0.2,
-      responseMimeType: "application/json",
-      ...(thinkingConfig ? { thinkingConfig } : {})
-    }
-  });
-
-  let extraction;
-  try {
-    const result = await model.generateContent([
-      {
-        text:
-          buildLivePrompt()
-      },
-      {
-        inlineData: {
-          mimeType: imageData.type || "image/jpeg",
-          data: base64
-        }
+  const maxOutputTokens = parsePositiveInteger(process.env.WORKER_MAX_OUTPUT_TOKENS, 32768);
+  const contentParts = [
+    { text: buildLivePrompt() },
+    {
+      inlineData: {
+        mimeType: imageData.type || "image/jpeg",
+        data: base64
       }
-    ]);
+    }
+  ];
 
-    const responseText = result.response.text();
-    extraction = JSON.parse(cleanJson(responseText));
-  } catch (error) {
+  // Gemini occasionally returns malformed/truncated JSON even with
+  // responseMimeType "application/json" and finishReason STOP. At a low
+  // temperature the same image reproduces the same bad output deterministically,
+  // so a plain retry won't help — retry with escalating temperature to break out
+  // of the bad sample before giving up. maxOutputTokens is generous so thinking +
+  // the JSON both fit (a real length truncation shows finishReason MAX_TOKENS).
+  const attemptTemperatures = [0.2, 0.6, 0.9];
+  let extraction;
+  let lastError;
+  let lastFinishReason;
+  let lastResponseLength = 0;
+  for (let attempt = 0; attempt < attemptTemperatures.length; attempt += 1) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: GEMINI_MODEL,
+        generationConfig: {
+          temperature: attemptTemperatures[attempt],
+          responseMimeType: "application/json",
+          responseSchema: LIVE_EXTRACTION_SCHEMA,
+          maxOutputTokens,
+          ...(thinkingConfig ? { thinkingConfig } : {})
+        }
+      });
+      const result = await model.generateContent(contentParts);
+      lastFinishReason = result.response?.candidates?.[0]?.finishReason;
+      const responseText = result.response.text();
+      lastResponseLength = responseText.length;
+      extraction = JSON.parse(cleanJson(responseText));
+      if (attempt > 0) {
+        console.log(`Job ${job.id} succeeded on extraction attempt ${attempt + 1}.`);
+      }
+      break;
+    } catch (error) {
+      lastError = error;
+      console.warn(
+        `Job ${job.id} extraction attempt ${attempt + 1}/${attemptTemperatures.length} failed ` +
+          `(finishReason=${lastFinishReason ?? "n/a"}, responseLen=${lastResponseLength}): ` +
+          `${error instanceof Error ? error.message : error}`
+      );
+    }
+  }
+
+  if (extraction === undefined) {
+    const detail =
+      lastError instanceof Error ? lastError.message : "Gemini extraction failed.";
     await setJobError(
       supabase,
       job.id,
       null,
       liveSessionGameId,
       recordingDraftGameId,
-      error instanceof Error ? error.message : "Gemini extraction failed."
+      lastFinishReason && lastFinishReason !== "STOP"
+        ? `Gemini response was cut off (finishReason: ${lastFinishReason}).`
+        : detail
     );
     await supabase.storage.from(BUCKET).remove([job.storage_key]);
     return { status: "error", jobId: job.id };

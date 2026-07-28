@@ -919,9 +919,16 @@ export function mergeLiveSessionWithUploadsProcessing(
   }
 
   if (localLiveSession.state !== 'active') {
+    // A non-active local entry should only mask the specific session it
+    // represents (locally ended/finalized/errored, pending sweep). If the
+    // server reports a *different* active session — e.g. one started on another
+    // device — surface it instead of hiding it behind this stale local entry.
+    const localMatchesServer =
+      sanitizedLiveSession !== null &&
+      localLiveSession.serverLiveSessionId === sanitizedLiveSession.id;
     return {
       ...payload,
-      liveSession: null,
+      liveSession: localMatchesServer ? null : sanitizedLiveSession,
     };
   }
 
@@ -1033,9 +1040,14 @@ export function mergeRecordingDraftWithUploadsProcessing(
   }
 
   if (localDraft.state !== 'active') {
+    // Only mask the specific draft this local entry represents. If the server
+    // reports a *different* active draft for this mode (e.g. created on another
+    // device), surface it instead of hiding it behind this stale local entry.
+    const localMatchesServer =
+      sanitizedDraft !== null && localDraft.serverDraftId === sanitizedDraft.id;
     return {
       ...payload,
-      draft: null,
+      draft: localMatchesServer ? null : sanitizedDraft,
     };
   }
 
@@ -1196,28 +1208,31 @@ export function mergeRecordEntryStatusWithUploadsProcessing(
     .filter((entry) => entry.mode === 'add_existing_session')
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
 
-  // For each entity, if the local store has an entry that was synced to the server
-  // (has a server id) but the server reports `false`, trust the server: the row was
-  // discarded/finalized externally (e.g., from another device).
+  // For each entity: if the local store has an entry that was synced to the
+  // server (has a server id) but the server reports `false`, trust the server —
+  // the row was discarded/finalized externally. Otherwise trust the server's
+  // `true` OR a locally-active (optimistic) entry, so a stale non-active local
+  // entry can't hide an active session/draft that exists on the server (e.g.
+  // one created on another device).
   const liveSessionFlag = latestLiveSession
     ? latestLiveSession.serverLiveSessionId && !status.liveSession
       ? false
-      : latestLiveSession.state === 'active'
+      : status.liveSession || latestLiveSession.state === 'active'
     : status.liveSession;
   const uploadSessionFlag = latestUploadDraft
     ? latestUploadDraft.serverDraftId && !status.uploadSessionDraft
       ? false
-      : latestUploadDraft.state === 'active'
+      : status.uploadSessionDraft || latestUploadDraft.state === 'active'
     : status.uploadSessionDraft;
   const multipleSessionsFlag = latestMultipleDraft
     ? latestMultipleDraft.serverDraftId && !status.addMultipleSessionsDraft
       ? false
-      : latestMultipleDraft.state === 'active'
+      : status.addMultipleSessionsDraft || latestMultipleDraft.state === 'active'
     : status.addMultipleSessionsDraft;
   const existingSessionFlag = latestExistingDraft
     ? latestExistingDraft.serverDraftId && !status.addExistingSessionDraft
       ? false
-      : latestExistingDraft.state === 'active'
+      : status.addExistingSessionDraft || latestExistingDraft.state === 'active'
     : status.addExistingSessionDraft;
 
   return {
