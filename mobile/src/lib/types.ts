@@ -112,6 +112,9 @@ export type LeaderboardMetric =
   | 'TotalSpares'
   | 'MostNines';
 
+// Time window for leaderboard metrics: all history, or the most recent 30 days.
+export type LeaderboardRange = 'allTime' | 'last30';
+
 export type LeaderboardRow = {
   userId: string;
   username: string;

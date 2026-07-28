@@ -21,6 +21,7 @@ import type {
   LeaderboardMetric,
   LeaderboardMetricResponse,
   LeaderboardMetricRow,
+  LeaderboardRange,
   LeaderboardRow,
   LivePlayer,
   LiveSessionCaptureResponse,
@@ -190,7 +191,8 @@ export const queryKeys = {
   recordEntryStatus: ['record-entry-status'] as const,
   recordingDraft: (mode: RecordingDraftMode) => ['recording-draft', mode] as const,
   leaderboard: ['leaderboard'] as const,
-  leaderboardMetric: (metric: LeaderboardMetric) => ['leaderboard', metric] as const,
+  leaderboardMetric: (metric: LeaderboardMetric, range: LeaderboardRange = 'allTime') =>
+    ['leaderboard', metric, range] as const,
   inviteLookup: (token: string) => ['invite-lookup', token] as const,
   profile: ['profile'] as const,
 };
@@ -393,9 +395,10 @@ export async function fetchLeaderboard() {
 
 export async function fetchLeaderboardMetric(
   metric: LeaderboardMetric,
+  range: LeaderboardRange = 'allTime',
 ): Promise<LeaderboardMetricResponse> {
   const payload = await apiJson<unknown>(
-    `/api/friends/leaderboard?metric=${encodeURIComponent(metric)}`,
+    `/api/friends/leaderboard?metric=${encodeURIComponent(metric)}&range=${encodeURIComponent(range)}`,
   );
 
   validateLeaderboardMetricPayload(payload, metric);

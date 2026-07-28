@@ -98,6 +98,23 @@ function parseLeaderboardMetric(request: Request) {
     : "invalid";
 }
 
+const LAST_30_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+// "last30" restricts metrics to games from the most recent 30 days; anything
+// else (including absent) means all history.
+function getRangeCutoffMs(request: Request): number | null {
+  const range = new URL(request.url).searchParams.get("range");
+  return range === "last30" ? Date.now() - LAST_30_DAYS_MS : null;
+}
+
+// A game's effective date is when it was played, falling back to when it was
+// logged. Games with no usable date are excluded from a bounded window.
+function isGameWithinCutoff(game: GameRow, cutoffMs: number): boolean {
+  const raw = game.played_at ?? game.created_at ?? null;
+  const time = raw ? Date.parse(raw) : NaN;
+  return Number.isFinite(time) && time >= cutoffMs;
+}
+
 function getGamesSelect(metric: LeaderboardMetric | null): string {
   if (metric && !FRAME_STAT_METRICS.has(metric)) {
     return "id,user_id,total_score,session_id,played_at,created_at,tags";
@@ -236,6 +253,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid leaderboard metric." }, { status: 400 });
   }
 
+  const rangeCutoffMs = getRangeCutoffMs(request);
+
   const user = await getUserFromRequest(request);
   if (!user.userId || !user.accessToken) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -298,6 +317,10 @@ export async function GET(request: Request) {
   ((games as unknown as GameRow[] | null) || []).forEach((game) => {
     const userId = game.user_id;
     if (!userId) {
+      return;
+    }
+
+    if (rangeCutoffMs !== null && !isGameWithinCutoff(game, rangeCutoffMs)) {
       return;
     }
 

@@ -5,7 +5,7 @@ import {
   DEFAULT_LEADERBOARD_METRIC,
   getLeaderboardMetricWarmupOrder,
 } from '@/lib/leaderboard';
-import type { LeaderboardMetric } from '@/lib/types';
+import type { LeaderboardMetric, LeaderboardRange } from '@/lib/types';
 
 const LEADERBOARD_WARMUP_DELAY_MS = 150;
 
@@ -17,10 +17,14 @@ function wait(milliseconds: number) {
   });
 }
 
-async function prefetchLeaderboardMetric(queryClient: QueryClient, metric: LeaderboardMetric) {
+async function prefetchLeaderboardMetric(
+  queryClient: QueryClient,
+  metric: LeaderboardMetric,
+  range: LeaderboardRange,
+) {
   await queryClient.prefetchQuery({
-    queryKey: queryKeys.leaderboardMetric(metric),
-    queryFn: () => fetchLeaderboardMetric(metric),
+    queryKey: queryKeys.leaderboardMetric(metric, range),
+    queryFn: () => fetchLeaderboardMetric(metric, range),
     retry: false,
   });
 }
@@ -28,6 +32,7 @@ async function prefetchLeaderboardMetric(queryClient: QueryClient, metric: Leade
 export function startLeaderboardMetricWarmup(
   queryClient: QueryClient,
   anchorMetric: LeaderboardMetric = DEFAULT_LEADERBOARD_METRIC,
+  range: LeaderboardRange = 'allTime',
 ) {
   const warmupId = activeLeaderboardWarmupId + 1;
   activeLeaderboardWarmupId = warmupId;
@@ -41,7 +46,7 @@ export function startLeaderboardMetricWarmup(
       }
 
       try {
-        await prefetchLeaderboardMetric(queryClient, metric);
+        await prefetchLeaderboardMetric(queryClient, metric, range);
       } catch {
         // Individual tab failures are surfaced by the visible query when that tab is opened.
       }

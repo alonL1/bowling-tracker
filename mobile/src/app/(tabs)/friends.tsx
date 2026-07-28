@@ -32,11 +32,21 @@ import { fontFamilySans } from '@/constants/typography';
 import { DEFAULT_LEADERBOARD_METRIC, LEADERBOARD_METRIC_ORDER } from '@/lib/leaderboard';
 import { startLeaderboardMetricWarmup } from '@/lib/leaderboard-warmup';
 import { formatHandle } from '@/lib/profile';
-import type { InviteLinkResponse, LeaderboardMetric, LeaderboardMetricRow } from '@/lib/types';
+import type {
+  InviteLinkResponse,
+  LeaderboardMetric,
+  LeaderboardMetricRow,
+  LeaderboardRange,
+} from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 
 const TAB_HORIZONTAL_PADDING = 14;
 const BOTTOM_DOTS_DOCK_HEIGHT = 34;
+
+const RANGE_OPTIONS: { range: LeaderboardRange; label: string }[] = [
+  { range: 'allTime', label: 'All time' },
+  { range: 'last30', label: 'Last 30 days' },
+];
 
 type MetricTabWidths = Partial<Record<LeaderboardMetric, number>>;
 type MetricTabLayout = { x: number; width: number };
@@ -96,6 +106,7 @@ export default function FriendsScreen() {
   const [enabledMetrics, setEnabledMetrics] = useState<LeaderboardMetric[]>([
     DEFAULT_LEADERBOARD_METRIC,
   ]);
+  const [selectedRange, setSelectedRange] = useState<LeaderboardRange>('allTime');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [inviteStatus, setInviteStatus] = useState('');
@@ -125,8 +136,8 @@ export default function FriendsScreen() {
   );
   const leaderboardMetricQueries = useQueries({
     queries: METRIC_TABS.map((entry) => ({
-      queryKey: queryKeys.leaderboardMetric(entry.metric),
-      queryFn: () => fetchLeaderboardMetric(entry.metric),
+      queryKey: queryKeys.leaderboardMetric(entry.metric, selectedRange),
+      queryFn: () => fetchLeaderboardMetric(entry.metric, selectedRange),
       enabled: !authLoading && !isGuest && enabledMetrics.includes(entry.metric),
       retry: false,
     })),
@@ -152,8 +163,8 @@ export default function FriendsScreen() {
       return;
     }
 
-    return startLeaderboardMetricWarmup(queryClient, selectedMetric);
-  }, [authLoading, isGuest, queryClient, selectedMetric]);
+    return startLeaderboardMetricWarmup(queryClient, selectedMetric, selectedRange);
+  }, [authLoading, isGuest, queryClient, selectedMetric, selectedRange]);
 
   const inviteMutation = useMutation({
     mutationFn: createInvite,
@@ -321,7 +332,7 @@ export default function FriendsScreen() {
         refetchType: 'none',
       });
       await leaderboardMetricQueries[selectedMetricIndex]?.refetch();
-      startLeaderboardMetricWarmup(queryClient, selectedMetric);
+      startLeaderboardMetricWarmup(queryClient, selectedMetric, selectedRange);
     } finally {
       setIsRefreshing(false);
     }
@@ -378,6 +389,28 @@ export default function FriendsScreen() {
               </Text>
             </View>
           ))}
+        </View>
+      ) : null}
+      {!isGuest ? (
+        <View style={styles.rangeToggle}>
+          {RANGE_OPTIONS.map((option) => {
+            const active = selectedRange === option.range;
+            return (
+              <Pressable
+                key={option.range}
+                onPress={() => setSelectedRange(option.range)}
+                style={({ pressed }) => [
+                  styles.rangeOption,
+                  active && styles.rangeOptionActive,
+                  pressed && styles.pressed,
+                ]}>
+                <Text
+                  style={[styles.rangeOptionText, active && styles.rangeOptionTextActive]}>
+                  {option.label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       ) : null}
       <ScrollView
@@ -614,6 +647,33 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontWeight: '700',
     fontFamily: fontFamilySans,
+  },
+  rangeToggle: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    backgroundColor: palette.surface,
+    borderRadius: radii.pill,
+    padding: 3,
+    gap: 3,
+    marginBottom: spacing.sm,
+  },
+  rangeOption: {
+    borderRadius: radii.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rangeOptionActive: {
+    backgroundColor: palette.accent,
+  },
+  rangeOptionText: {
+    color: palette.navIcon,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  rangeOptionTextActive: {
+    color: palette.text,
   },
   tabsRow: {
     gap: 10,
