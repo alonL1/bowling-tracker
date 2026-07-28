@@ -16,7 +16,16 @@
       "Bash(jarsigner -verify -verbose -certs /Users/Apple/Documents/bowling-tracker/mobile/android/app/build/outputs/bundle/release/app-release.aab)",
       "Bash(jarsigner -verify /Users/Apple/Documents/bowling-tracker/mobile/android/app/build/outputs/bundle/release/app-release.aab)",
       "Bash(find ~/Library/Developer/Xcode/DerivedData -name \"PinPoint*.app\" -maxdepth 6 2>/dev/null | head -10)",
-      "Read(//Users/Apple/Library/Developer/Xcode/DerivedData/**)"
+      "Read(//Users/Apple/Library/Developer/Xcode/DerivedData/**)",
+      "Bash(gcloud run *)",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);const c=j.spec.template.spec.containers[0];const env=\\(c.env||[]\\).find\\(e=>e.name==='GEMINI_MODEL'\\);console.log\\('serving revision:', j.status.latestReadyRevisionName\\);console.log\\('GEMINI_MODEL   :', env?env.value:'\\(not set\\)'\\);console.log\\('traffic        :', JSON.stringify\\(j.status.traffic?.map\\(t=>t.revisionName+'='+t.percent+'%'\\)\\)\\);}\\);\")",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);const c=j.spec.template.spec.containers[0];const g=\\(c.env||[]\\).find\\(e=>e.name==='GEMINI_MODEL'\\);const t=\\(c.env||[]\\).find\\(e=>e.name==='WORKER_THINKING_MODE'\\);console.log\\('revision:',j.status.latestReadyRevisionName,'| traffic',JSON.stringify\\(j.status.traffic?.map\\(x=>x.percent+'%'\\)\\)\\);console.log\\('GEMINI_MODEL=',g?.value,'| WORKER_THINKING_MODE=',t?.value\\);}\\);\")",
+      "Bash(gcloud logging *)",
+      "Bash(awk '/create table.*analysis_jobs/,/\\\\\\);/' db/schema.sql)",
+      "Bash(awk '/claim_next_job/,/language sql|language plpgsql|\\\\$\\\\$;/' db/schema.sql)",
+      "Bash(awk '/create or replace function claim_next_job/,/\\\\$\\\\$;/' db/schema.sql)",
+      "Bash(node -c index.js)",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);const t=j.spec.template.spec;const c=t.containers[0];const e=Object.fromEntries\\(\\(c.env||[]\\).map\\(x=>[x.name,x.value]\\)\\);console.log\\('revision      :', j.status.latestReadyRevisionName\\);console.log\\('max-instances :', j.spec.template.metadata?.annotations?.['autoscaling.knative.dev/maxScale']\\);console.log\\('concurrency   :', t.containerConcurrency, '\\(unchanged = 1\\)'\\);console.log\\('timeout \\(s\\)   :', t.timeoutSeconds ?? 300\\);console.log\\('GEMINI_MODEL  :', e.GEMINI_MODEL\\);console.log\\('THINKING_MODE :', e.WORKER_THINKING_MODE\\);console.log\\('MAX_JOBS_PER_RUN:', e.MAX_JOBS_PER_RUN\\);}\\);\")"
     ]
   }
 }

@@ -11,6 +11,11 @@ const BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "scoreboards-temp";
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
 const DEFAULT_MAX_JOBS_PER_RUN = 6;
 const DEFAULT_MAX_RUN_DURATION_MS = 240000;
+// Max times a job may be claimed before we give up. Transient failures (rate
+// limits / 5xx / network) requeue the job instead of erroring it; this cap stops
+// a genuinely stuck job from requeueing forever. claim_next_job increments
+// attempts on every claim, so this counts total claims.
+const MAX_JOB_ATTEMPTS = 6;
 
 function requireEnv(value, name) {
   if (!value) {
@@ -616,6 +621,39 @@ async function removeGame(supabase, gameId) {
   await supabase.from("games").delete().eq("id", gameId);
 }
 
+// Transient errors (Gemini rate limits / quota, 5xx, network) are worth
+// retrying on a later run once the rate window resets, rather than failing the
+// game and deleting its image. Everything else (malformed image, bad request)
+// is treated as a permanent failure.
+function isTransientGeminiError(error) {
+  const message = (
+    error instanceof Error ? error.message : String(error || "")
+  ).toLowerCase();
+  return (
+    /\b429\b|rate limit|quota|resource[_ ]?exhausted|too many requests/.test(
+      message
+    ) ||
+    /\b5\d\d\b|internal error|unavailable|overloaded|deadline|timeout|timed out|econnreset|etimedout|enotfound|socket hang up|fetch failed|network/.test(
+      message
+    )
+  );
+}
+
+// Put a job back in the queue for a later run to pick up. Keeps the image and
+// leaves the live-session/draft game in its current (processing) state so the
+// UI keeps showing "Processing" instead of "needs attention".
+async function requeueJob(supabase, jobId, message) {
+  console.warn(`Job ${jobId} requeued after a transient error: ${message}`);
+  await supabase
+    .from("analysis_jobs")
+    .update({
+      status: "queued",
+      last_error: message,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", jobId);
+}
+
 async function processJob() {
   requireEnv(process.env.SUPABASE_URL, "SUPABASE_URL");
   requireEnv(process.env.SUPABASE_SERVICE_ROLE_KEY, "SUPABASE_SERVICE_ROLE_KEY");
@@ -798,12 +836,40 @@ async function processJob() {
           `(finishReason=${lastFinishReason ?? "n/a"}, responseLen=${lastResponseLength}): ` +
           `${error instanceof Error ? error.message : error}`
       );
+      // Only re-roll on malformed/truncated JSON — a different sample can fix
+      // that. API/quota/safety errors won't be helped by retrying and would just
+      // burn extra (expensive) model calls, so stop early and let the job error.
+      const message = error instanceof Error ? error.message : String(error);
+      const isJsonError = error instanceof SyntaxError || /JSON/i.test(message);
+      if (!isJsonError) {
+        break;
+      }
     }
   }
 
   if (extraction === undefined) {
     const detail =
       lastError instanceof Error ? lastError.message : "Gemini extraction failed.";
+
+    // Rate limits / quota / transient server errors shouldn't burn the game —
+    // requeue it so a later run retries once the rate window clears, keeping the
+    // image. Cap total attempts so a genuinely stuck job still errors out.
+    if (isTransientGeminiError(lastError)) {
+      const { data: jobRow } = await supabase
+        .from("analysis_jobs")
+        .select("attempts")
+        .eq("id", job.id)
+        .maybeSingle();
+      const attempts = jobRow?.attempts ?? MAX_JOB_ATTEMPTS;
+      if (attempts < MAX_JOB_ATTEMPTS) {
+        await requeueJob(supabase, job.id, detail);
+        return { status: "requeued", jobId: job.id };
+      }
+      console.warn(
+        `Job ${job.id} exhausted ${MAX_JOB_ATTEMPTS} attempts on transient errors; failing.`
+      );
+    }
+
     await setJobError(
       supabase,
       job.id,
@@ -1093,6 +1159,12 @@ async function processJobBatch() {
       break;
     }
     results.push(result);
+    if (result.status === "requeued") {
+      // A rate limit / transient error will hit the next call in this run too,
+      // so stop and let a later trigger drain the requeued jobs once it clears.
+      console.log("Stopping batch: job requeued after a transient error.");
+      break;
+    }
   }
 
   if (results.length === 0) {
@@ -1107,9 +1179,11 @@ async function processJobBatch() {
 
   const loggedCount = results.filter((result) => result.status === "logged").length;
   const errorCount = results.filter((result) => result.status === "error").length;
+  const requeuedCount = results.filter((result) => result.status === "requeued").length;
 
   console.log(
-    `Batch complete: processed ${results.length} job(s), logged ${loggedCount}, errors ${errorCount}.`
+    `Batch complete: processed ${results.length} job(s), logged ${loggedCount}, ` +
+      `errors ${errorCount}, requeued ${requeuedCount}.`
   );
 
   return {
