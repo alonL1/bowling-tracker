@@ -25,7 +25,15 @@
       "Bash(awk '/claim_next_job/,/language sql|language plpgsql|\\\\$\\\\$;/' db/schema.sql)",
       "Bash(awk '/create or replace function claim_next_job/,/\\\\$\\\\$;/' db/schema.sql)",
       "Bash(node -c index.js)",
-      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);const t=j.spec.template.spec;const c=t.containers[0];const e=Object.fromEntries\\(\\(c.env||[]\\).map\\(x=>[x.name,x.value]\\)\\);console.log\\('revision      :', j.status.latestReadyRevisionName\\);console.log\\('max-instances :', j.spec.template.metadata?.annotations?.['autoscaling.knative.dev/maxScale']\\);console.log\\('concurrency   :', t.containerConcurrency, '\\(unchanged = 1\\)'\\);console.log\\('timeout \\(s\\)   :', t.timeoutSeconds ?? 300\\);console.log\\('GEMINI_MODEL  :', e.GEMINI_MODEL\\);console.log\\('THINKING_MODE :', e.WORKER_THINKING_MODE\\);console.log\\('MAX_JOBS_PER_RUN:', e.MAX_JOBS_PER_RUN\\);}\\);\")"
+      "Bash(node -e \"let s='';process.stdin.on\\('data',d=>s+=d\\).on\\('end',\\(\\)=>{const j=JSON.parse\\(s\\);const t=j.spec.template.spec;const c=t.containers[0];const e=Object.fromEntries\\(\\(c.env||[]\\).map\\(x=>[x.name,x.value]\\)\\);console.log\\('revision      :', j.status.latestReadyRevisionName\\);console.log\\('max-instances :', j.spec.template.metadata?.annotations?.['autoscaling.knative.dev/maxScale']\\);console.log\\('concurrency   :', t.containerConcurrency, '\\(unchanged = 1\\)'\\);console.log\\('timeout \\(s\\)   :', t.timeoutSeconds ?? 300\\);console.log\\('GEMINI_MODEL  :', e.GEMINI_MODEL\\);console.log\\('THINKING_MODE :', e.WORKER_THINKING_MODE\\);console.log\\('MAX_JOBS_PER_RUN:', e.MAX_JOBS_PER_RUN\\);}\\);\")",
+      "Bash(npm run *)",
+      "Bash(npx next *)",
+      "Bash(curl -s -o /dev/null http://localhost:3111/api/friends/leaderboard)",
+      "Bash(break)",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" \"http://localhost:3111/api/friends/leaderboard?compare=abc\")",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" \"http://localhost:3111/api/friends/leaderboard?metric=nope\")",
+      "Bash(pkill -f \"next start -p 3111\")",
+      "Bash(git checkout *)"
     ]
   }
 }

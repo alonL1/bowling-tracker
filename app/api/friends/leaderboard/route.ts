@@ -98,6 +98,15 @@ function parseLeaderboardMetric(request: Request) {
     : "invalid";
 }
 
+// "compare" switches the route into a two-person head-to-head mode. When it is
+// present, "metric" and "range" are ignored: every metric is returned for both
+// time windows in a single response.
+function parseCompareUserId(request: Request) {
+  const raw = new URL(request.url).searchParams.get("compare");
+  const value = typeof raw === "string" ? raw.trim() : "";
+  return value.length > 0 ? value : null;
+}
+
 const LAST_30_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 // "last30" restricts metrics to games from the most recent 30 days; anything
@@ -237,75 +246,33 @@ function getMetricValue(metrics: LeaderboardMetrics, metric: LeaderboardMetric) 
   return metrics[metric] ?? 0;
 }
 
-export async function GET(request: Request) {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+type PublicProfilesByUserId = Awaited<ReturnType<typeof buildPublicProfilesByUserId>>;
 
-  if (!supabaseUrl || !supabaseServiceKey) {
-    return NextResponse.json(
-      { error: "Missing Supabase configuration." },
-      { status: 500 }
-    );
-  }
+function buildParticipantIdentity(
+  participantId: string,
+  publicProfiles: PublicProfilesByUserId
+) {
+  const publicProfile = publicProfiles.get(participantId);
 
-  const requestedMetric = parseLeaderboardMetric(request);
-  if (requestedMetric === "invalid") {
-    return NextResponse.json({ error: "Invalid leaderboard metric." }, { status: 400 });
-  }
+  return {
+    userId: participantId,
+    displayName: publicProfile?.displayName || publicProfile?.username || "bowler",
+    username: publicProfile?.username || "bowler",
+    avatarKind: publicProfile?.avatarKind || "initials",
+    avatarPresetId: publicProfile?.avatarPresetId || null,
+    avatarUrl: publicProfile?.avatarUrl || null,
+    initials: publicProfile?.initials || "P"
+  };
+}
 
-  const rangeCutoffMs = getRangeCutoffMs(request);
-
-  const user = await getUserFromRequest(request);
-  if (!user.userId || !user.accessToken) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-  }
-  if (user.isGuest) {
-    return NextResponse.json(
-      { error: "Sign in with an account to view friends leaderboards." },
-      { status: 403 }
-    );
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseServiceKey, {
-    auth: { persistSession: false }
-  });
-
-  const { data: friends, error: friendsError } = await supabase
-    .from("friendships")
-    .select("friend_user_id")
-    .eq("user_id", user.userId);
-
-  if (friendsError) {
-    return NextResponse.json(
-      { error: friendsError.message || "Failed to load friends." },
-      { status: 500 }
-    );
-  }
-
-  const participantIds = Array.from(
-    new Set([
-      user.userId,
-      ...(friends || [])
-        .map((row) => row.friend_user_id)
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-    ])
-  );
-
-  const { data: games, error: gamesError } = await supabase
-    .from("games")
-    .select(getGamesSelect(requestedMetric))
-    .in("user_id", participantIds)
-    .order("played_at", { ascending: true })
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true });
-
-  if (gamesError) {
-    return NextResponse.json(
-      { error: gamesError.message || "Failed to load game stats." },
-      { status: 500 }
-    );
-  }
-
+// Aggregates every metric for each participant over the games that fall inside
+// `rangeCutoffMs` (null means all history). All accumulators are function-local
+// so the same game rows can be reduced more than once for different windows.
+function computeMetricsByUser(
+  games: GameRow[],
+  participantIds: string[],
+  rangeCutoffMs: number | null
+): Map<string, LeaderboardMetrics> {
   const metricsByUser = new Map<string, MutableMetrics>();
   participantIds.forEach((participantId) => {
     metricsByUser.set(participantId, createBlankMetrics());
@@ -314,7 +281,7 @@ export async function GET(request: Request) {
   const sessionAggregates = new Map<string, SessionAggregate>();
   const scoresByUserSession = new Map<string, number[][]>();
 
-  ((games as unknown as GameRow[] | null) || []).forEach((game) => {
+  games.forEach((game) => {
     const userId = game.user_id;
     if (!userId) {
       return;
@@ -430,6 +397,162 @@ export async function GET(request: Request) {
         : 0;
   });
 
+  const normalized = new Map<string, LeaderboardMetrics>();
+  metricsByUser.forEach((metrics, userId) => {
+    normalized.set(userId, normalizeMetrics(metrics));
+  });
+
+  return normalized;
+}
+
+export async function GET(request: Request) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    return NextResponse.json(
+      { error: "Missing Supabase configuration." },
+      { status: 500 }
+    );
+  }
+
+  const requestedMetric = parseLeaderboardMetric(request);
+  if (requestedMetric === "invalid") {
+    return NextResponse.json({ error: "Invalid leaderboard metric." }, { status: 400 });
+  }
+
+  const rangeCutoffMs = getRangeCutoffMs(request);
+  const compareUserId = parseCompareUserId(request);
+
+  const user = await getUserFromRequest(request);
+  if (!user.userId || !user.accessToken) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+  if (user.isGuest) {
+    return NextResponse.json(
+      { error: "Sign in with an account to view friends leaderboards." },
+      { status: 403 }
+    );
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { persistSession: false }
+  });
+
+  const { data: friends, error: friendsError } = await supabase
+    .from("friendships")
+    .select("friend_user_id")
+    .eq("user_id", user.userId);
+
+  if (friendsError) {
+    return NextResponse.json(
+      { error: friendsError.message || "Failed to load friends." },
+      { status: 500 }
+    );
+  }
+
+  const participantIds = Array.from(
+    new Set([
+      user.userId,
+      ...(friends || [])
+        .map((row) => row.friend_user_id)
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    ])
+  );
+
+  if (compareUserId) {
+    if (compareUserId === user.userId) {
+      return NextResponse.json(
+        { error: "Pick a friend to compare with." },
+        { status: 400 }
+      );
+    }
+    if (!participantIds.includes(compareUserId)) {
+      return NextResponse.json(
+        { error: "You are not friends with this user." },
+        { status: 404 }
+      );
+    }
+
+    const comparisonIds = [user.userId, compareUserId];
+
+    // Narrowing to two users keeps the frames+shots select far cheaper than the
+    // all-participants leaderboard modes.
+    const { data: comparisonGames, error: comparisonGamesError } = await supabase
+      .from("games")
+      .select(getGamesSelect(null))
+      .in("user_id", comparisonIds)
+      .order("played_at", { ascending: true })
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+
+    if (comparisonGamesError) {
+      return NextResponse.json(
+        { error: comparisonGamesError.message || "Failed to load game stats." },
+        { status: 500 }
+      );
+    }
+
+    // Range filtering happens in memory, so both windows come from one query.
+    const comparisonRows = (comparisonGames as unknown as GameRow[] | null) || [];
+    const allTimeMetrics = computeMetricsByUser(comparisonRows, comparisonIds, null);
+    const last30Metrics = computeMetricsByUser(
+      comparisonRows,
+      comparisonIds,
+      Date.now() - LAST_30_DAYS_MS
+    );
+
+    let comparisonProfiles;
+    try {
+      comparisonProfiles = await buildPublicProfilesByUserId(supabase, comparisonIds);
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to load participant profiles."
+        },
+        { status: 500 }
+      );
+    }
+
+    const blank = normalizeMetrics(createBlankMetrics());
+
+    return NextResponse.json({
+      selfUserId: user.userId,
+      opponentUserId: compareUserId,
+      participants: comparisonIds.map((participantId) => ({
+        ...buildParticipantIdentity(participantId, comparisonProfiles),
+        metricsByRange: {
+          allTime: allTimeMetrics.get(participantId) ?? blank,
+          last30: last30Metrics.get(participantId) ?? blank
+        }
+      }))
+    });
+  }
+
+  const { data: games, error: gamesError } = await supabase
+    .from("games")
+    .select(getGamesSelect(requestedMetric))
+    .in("user_id", participantIds)
+    .order("played_at", { ascending: true })
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (gamesError) {
+    return NextResponse.json(
+      { error: gamesError.message || "Failed to load game stats." },
+      { status: 500 }
+    );
+  }
+
+  const metricsByUser = computeMetricsByUser(
+    (games as unknown as GameRow[] | null) || [],
+    participantIds,
+    rangeCutoffMs
+  );
+
   let publicProfiles;
   try {
     publicProfiles = await buildPublicProfilesByUserId(supabase, participantIds);
@@ -445,22 +568,11 @@ export async function GET(request: Request) {
     );
   }
 
-  const participants = participantIds.map((participantId) => {
-      const metrics = metricsByUser.get(participantId) ?? createBlankMetrics();
-      const publicProfile = publicProfiles.get(participantId);
-      const normalizedMetrics = normalizeMetrics(metrics);
-
-      return {
-        userId: participantId,
-        displayName: publicProfile?.displayName || publicProfile?.username || "bowler",
-        username: publicProfile?.username || "bowler",
-        avatarKind: publicProfile?.avatarKind || "initials",
-        avatarPresetId: publicProfile?.avatarPresetId || null,
-        avatarUrl: publicProfile?.avatarUrl || null,
-        initials: publicProfile?.initials || "P",
-        metrics: normalizedMetrics
-      };
-    });
+  const blankMetrics = normalizeMetrics(createBlankMetrics());
+  const participants = participantIds.map((participantId) => ({
+    ...buildParticipantIdentity(participantId, publicProfiles),
+    metrics: metricsByUser.get(participantId) ?? blankMetrics
+  }));
 
   if (requestedMetric) {
     const sortedParticipants = [...participants].sort((left, right) => {

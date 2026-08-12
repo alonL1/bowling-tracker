@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 
 import { apiFetch, apiJson, parseJsonResponse } from '@/lib/api';
+import { LEADERBOARD_METRIC_ORDER } from '@/lib/leaderboard';
 import { cacheOfflineChatGames, loadOfflineChatGames } from '@/lib/offline-chat';
 import { buildLegacyUsernameFallback, getProfileInitials } from '@/lib/profile';
 import {
@@ -18,9 +19,11 @@ import type {
   GameTag,
   InviteLinkResponse,
   InviteLookupResponse,
+  LeaderboardCompareResponse,
   LeaderboardMetric,
   LeaderboardMetricResponse,
   LeaderboardMetricRow,
+  LeaderboardMetricValues,
   LeaderboardRange,
   LeaderboardRow,
   LivePlayer,
@@ -153,6 +156,87 @@ function validateLeaderboardMetricPayload(
   }
 }
 
+function normalizeCompareMetricValues(value: unknown): LeaderboardMetricValues {
+  const source = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
+
+  return LEADERBOARD_METRIC_ORDER.reduce((accumulator, metric) => {
+    const raw = source[metric];
+    accumulator[metric] = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
+    return accumulator;
+  }, {} as LeaderboardMetricValues);
+}
+
+function validateLeaderboardComparePayload(
+  payload: unknown,
+  requestedOpponentUserId: string,
+): asserts payload is {
+  selfUserId: string;
+  opponentUserId: string;
+  participants: Array<
+    Partial<LeaderboardRow> & {
+      userId: string;
+      displayName?: string;
+      metricsByRange: Record<string, unknown>;
+    }
+  >;
+} {
+  const contractError = new Error(
+    'Leaderboard API response did not match the friend comparison contract. Make sure the backend API is deployed with the latest leaderboard changes.',
+  );
+
+  if (!payload || typeof payload !== 'object') {
+    throw contractError;
+  }
+
+  const candidate = payload as {
+    selfUserId?: unknown;
+    opponentUserId?: unknown;
+    participants?: unknown;
+  };
+
+  if (
+    typeof candidate.selfUserId !== 'string' ||
+    candidate.opponentUserId !== requestedOpponentUserId ||
+    !Array.isArray(candidate.participants) ||
+    candidate.participants.length !== 2
+  ) {
+    throw contractError;
+  }
+
+  const participantsAreValid = candidate.participants.every((participant) => {
+    if (!participant || typeof participant !== 'object') {
+      return false;
+    }
+
+    const entry = participant as { userId?: unknown; metricsByRange?: unknown };
+    if (typeof entry.userId !== 'string') {
+      return false;
+    }
+
+    const byRange = entry.metricsByRange as Record<string, unknown> | undefined;
+    return Boolean(
+      byRange &&
+        typeof byRange === 'object' &&
+        byRange.allTime &&
+        typeof byRange.allTime === 'object' &&
+        byRange.last30 &&
+        typeof byRange.last30 === 'object',
+    );
+  });
+
+  if (!participantsAreValid) {
+    throw contractError;
+  }
+
+  const userIds = candidate.participants.map(
+    (participant) => (participant as { userId: string }).userId,
+  );
+
+  if (!userIds.includes(candidate.selfUserId) || !userIds.includes(requestedOpponentUserId)) {
+    throw contractError;
+  }
+}
+
 function normalizeInviteLookupPayload(payload: InviteLookupResponse): InviteLookupResponse {
   if (!payload.inviter) {
     return payload;
@@ -193,6 +277,8 @@ export const queryKeys = {
   leaderboard: ['leaderboard'] as const,
   leaderboardMetric: (metric: LeaderboardMetric, range: LeaderboardRange = 'allTime') =>
     ['leaderboard', metric, range] as const,
+  leaderboardCompare: (opponentUserId: string) =>
+    ['leaderboard', 'compare', opponentUserId] as const,
   inviteLookup: (token: string) => ['invite-lookup', token] as const,
   profile: ['profile'] as const,
 };
@@ -407,6 +493,28 @@ export async function fetchLeaderboardMetric(
     selfUserId: payload.selfUserId,
     metric: payload.metric,
     rows: (payload.rows || []).map(normalizeLeaderboardMetricRow),
+  };
+}
+
+export async function fetchLeaderboardCompare(
+  opponentUserId: string,
+): Promise<LeaderboardCompareResponse> {
+  const payload = await apiJson<unknown>(
+    `/api/friends/leaderboard?compare=${encodeURIComponent(opponentUserId)}`,
+  );
+
+  validateLeaderboardComparePayload(payload, opponentUserId);
+
+  return {
+    selfUserId: payload.selfUserId,
+    opponentUserId: payload.opponentUserId,
+    participants: payload.participants.map((participant) => ({
+      ...normalizeLeaderboardIdentity(participant),
+      metricsByRange: {
+        allTime: normalizeCompareMetricValues(participant.metricsByRange.allTime),
+        last30: normalizeCompareMetricValues(participant.metricsByRange.last30),
+      },
+    })),
   };
 }
 

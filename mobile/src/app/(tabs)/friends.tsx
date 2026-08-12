@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ActionButton from '@/components/action-button';
 import EmptyStateCard from '@/components/empty-state-card';
+import FriendComparisonModal from '@/components/friend-comparison-modal';
 import IconAction from '@/components/icon-action';
 import InfoBanner from '@/components/info-banner';
 import InlineLoadingCard from '@/components/inline-loading-card';
@@ -26,10 +27,15 @@ import ProfileAvatar from '@/components/profile-avatar';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
 import { createInvite, fetchLeaderboardMetric, queryKeys } from '@/lib/backend';
-import { formatTenths } from '@/lib/number-format';
 import { palette, radii, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
-import { DEFAULT_LEADERBOARD_METRIC, LEADERBOARD_METRIC_ORDER } from '@/lib/leaderboard';
+import {
+  DEFAULT_LEADERBOARD_METRIC,
+  formatLeaderboardMetricValue,
+  LEADERBOARD_METRIC_DETAILS,
+  LEADERBOARD_METRIC_ORDER,
+  LEADERBOARD_RANGE_LABELS,
+} from '@/lib/leaderboard';
 import { startLeaderboardMetricWarmup } from '@/lib/leaderboard-warmup';
 import { formatHandle } from '@/lib/profile';
 import type {
@@ -43,57 +49,17 @@ import { useAuth } from '@/providers/auth-provider';
 const TAB_HORIZONTAL_PADDING = 14;
 const BOTTOM_DOTS_DOCK_HEIGHT = 34;
 
-const RANGE_OPTIONS: { range: LeaderboardRange; label: string }[] = [
-  { range: 'allTime', label: 'All time' },
-  { range: 'last30', label: 'Last 30 days' },
-];
+const RANGE_OPTIONS: { range: LeaderboardRange; label: string }[] = (
+  ['allTime', 'last30'] as const
+).map((range) => ({ range, label: LEADERBOARD_RANGE_LABELS[range] }));
 
 type MetricTabWidths = Partial<Record<LeaderboardMetric, number>>;
 type MetricTabLayout = { x: number; width: number };
 
-const METRIC_TAB_DETAILS: Record<
-  LeaderboardMetric,
-  {
-    label: string;
-    description: string;
-  }
-> = {
-  bestGame: { label: 'Score', description: 'Highest Scoring Game' },
-  bestAverage: { label: 'Average', description: 'Average Score Across All Games' },
-  bestSeries: { label: 'Series', description: 'Best 3 Games Series' },
-  bestSession: { label: 'Best Session', description: 'Best Single Session Average Score' },
-  StrikeRate: { label: 'Strike Rate', description: 'Strike Rate' },
-  SpareRate: { label: 'Spare Rate', description: 'Spare Conversion Rate' },
-  TotalStrikes: { label: 'Strikes', description: 'Total Number of Strikes' },
-  TotalSpares: { label: 'Spares', description: 'Total Number of Spares' },
-  mostGames: { label: 'Games', description: 'Total Games Logged' },
-  mostSessions: { label: 'Sessions', description: 'Total Sessions Logged' },
-  SessionScore: { label: 'Session Score', description: 'Most Points Scored in a Session' },
-  TotalPoints: { label: 'Points', description: 'Total Points Across All Games' },
-  SessionLength: { label: 'Session Length', description: 'Most Games Played in a Session' },
-  MostNines: { label: '9 King', description: 'Total Frames with Score of 9' },
-};
-
 const METRIC_TABS = LEADERBOARD_METRIC_ORDER.map((metric) => ({
   metric,
-  ...METRIC_TAB_DETAILS[metric],
+  ...LEADERBOARD_METRIC_DETAILS[metric],
 }));
-
-function formatMetricValue(metric: LeaderboardMetric, value: number) {
-  if (!Number.isFinite(value)) {
-    return '—';
-  }
-  if (metric === 'bestAverage' || metric === 'bestSession') {
-    return formatTenths(value);
-  }
-  if (metric === 'bestSeries') {
-    return Math.round(value).toLocaleString();
-  }
-  if (metric === 'StrikeRate' || metric === 'SpareRate') {
-    return `${formatTenths(value)}%`;
-  }
-  return Math.round(value).toLocaleString();
-}
 
 export default function FriendsScreen() {
   const router = useRouter();
@@ -107,6 +73,7 @@ export default function FriendsScreen() {
     DEFAULT_LEADERBOARD_METRIC,
   ]);
   const [selectedRange, setSelectedRange] = useState<LeaderboardRange>('allTime');
+  const [comparisonOpponent, setComparisonOpponent] = useState<LeaderboardMetricRow | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [invitePanelOpen, setInvitePanelOpen] = useState(false);
   const [inviteStatus, setInviteStatus] = useState('');
@@ -187,6 +154,7 @@ export default function FriendsScreen() {
     setInvitePayload(null);
     setInviteLinkCopied(false);
     setInviteStatus('');
+    setComparisonOpponent(null);
   }, [isGuest]);
 
   const fallbackSelfUserId =
@@ -549,30 +517,44 @@ export default function FriendsScreen() {
                         tone="raised"
                       />
                     ) : null}
-                    {page.rankedRows.map((row) => (
-                      <View key={row.userId} style={styles.leaderboardRow}>
-                        <Text style={styles.rankText}>{row.rank}</Text>
-                        <ProfileAvatar
-                          size={42}
-                          avatarKind={row.avatarKind}
-                          avatarPresetId={row.avatarPresetId}
-                          avatarUrl={row.avatarUrl}
-                          initials={row.initials}
-                          username={row.username}
-                        />
-                        <Text
-                          style={[
-                            styles.rowName,
-                            row.userId === page.selfUserId && styles.rowNameSelf,
-                          ]}
-                          numberOfLines={1}>
-                          {formatHandle(row.username)}
-                        </Text>
-                        <Text style={styles.rowValue}>
-                          {formatMetricValue(page.metric, row.metricValue)}
-                        </Text>
-                      </View>
-                    ))}
+                    {page.rankedRows.map((row) => {
+                      const isSelfRow = row.userId === page.selfUserId;
+
+                      return (
+                        <Pressable
+                          key={row.userId}
+                          disabled={isSelfRow || isGuest}
+                          accessibilityRole={isSelfRow ? undefined : 'button'}
+                          accessibilityLabel={
+                            isSelfRow
+                              ? undefined
+                              : `Compare your stats with ${formatHandle(row.username)}`
+                          }
+                          onPress={() => setComparisonOpponent(row)}
+                          style={({ pressed }) => [
+                            styles.leaderboardRow,
+                            pressed && !isSelfRow && styles.leaderboardRowPressed,
+                          ]}>
+                          <Text style={styles.rankText}>{row.rank}</Text>
+                          <ProfileAvatar
+                            size={42}
+                            avatarKind={row.avatarKind}
+                            avatarPresetId={row.avatarPresetId}
+                            avatarUrl={row.avatarUrl}
+                            initials={row.initials}
+                            username={row.username}
+                          />
+                          <Text
+                            style={[styles.rowName, isSelfRow && styles.rowNameSelf]}
+                            numberOfLines={1}>
+                            {formatHandle(row.username)}
+                          </Text>
+                          <Text style={styles.rowValue}>
+                            {formatLeaderboardMetricValue(page.metric, row.metricValue)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
                   </>
                 )}
               </View>
@@ -623,6 +605,18 @@ export default function FriendsScreen() {
           </SurfaceCard>
         </View>
       </Modal>
+
+      <FriendComparisonModal
+        visible={Boolean(comparisonOpponent)}
+        opponent={comparisonOpponent}
+        selfRow={
+          metricPages[selectedMetricIndex]?.rankedRows.find(
+            (row) => row.userId === fallbackSelfUserId,
+          ) ?? null
+        }
+        selfUserId={fallbackSelfUserId}
+        onClose={() => setComparisonOpponent(null)}
+      />
     </ScreenShell>
   );
 }
@@ -805,10 +799,17 @@ const styles = StyleSheet.create({
   },
   leaderboardRow: {
     paddingVertical: 12,
-    paddingHorizontal: 2,
+    // Padding plus the negative margin keeps every element at the x position it
+    // had before the row became pressable, while giving the press highlight room.
+    paddingHorizontal: spacing.sm,
+    marginHorizontal: -6,
+    borderRadius: radii.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  leaderboardRowPressed: {
+    backgroundColor: palette.surface,
   },
   rankText: {
     color: palette.muted,

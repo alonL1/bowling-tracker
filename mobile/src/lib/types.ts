@@ -137,6 +137,19 @@ export type LeaderboardMetricResponse = {
   rows: LeaderboardMetricRow[];
 };
 
+export type LeaderboardMetricValues = Record<LeaderboardMetric, number>;
+
+// Head-to-head comparison: every metric, for both time windows, per participant.
+export type LeaderboardCompareParticipant = Omit<LeaderboardRow, 'metrics'> & {
+  metricsByRange: Record<LeaderboardRange, LeaderboardMetricValues>;
+};
+
+export type LeaderboardCompareResponse = {
+  selfUserId: string;
+  opponentUserId: string;
+  participants: LeaderboardCompareParticipant[];
+};
+
 export type PublicProfile = {
   userId: string;
   username: string;

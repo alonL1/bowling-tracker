@@ -136,7 +136,7 @@
   - Live session recording: `mobile/src/app/(tabs)/record/live.tsx`.
   - Upload/add flows: `mobile/src/app/(tabs)/record/upload-session.tsx`, `add-multiple-sessions.tsx`, `add-existing-session.tsx`.
   - Chat: `mobile/src/app/(tabs)/chat.tsx`.
-  - Friends/leaderboards: `mobile/src/app/(tabs)/friends.tsx`.
+  - Friends/leaderboards: `mobile/src/app/(tabs)/friends.tsx`. Leaderboard rows are tappable and open the friend comparison popup.
   - Account/settings/legal/data deletion: `mobile/src/app/(tabs)/account.tsx`, `mobile/src/app/delete-account.tsx`, `mobile/src/app/delete-data.tsx`.
 - State management:
   - React Query for server state and cache invalidation.
@@ -157,6 +157,7 @@
   - Web persists `games`, `game`, `sessions`, and `leaderboard` query roots for up to 24 hours.
   - Native persists only `leaderboard` in React Query because logged game data is intended to come from SQLite.
   - Friends leaderboards use metric-scoped lazy React Query entries under the `leaderboard` root key. Signed-in app startup begins a sequential background warmup anchored on the default Score tab, and the Friends screen reprioritizes the warmup around the current tab when the user taps or swipes.
+  - Friend head-to-head comparisons use `['leaderboard', 'compare', <opponentUserId>]`. It is fetched lazily only when the comparison modal opens (never warmed up), is not range-scoped because the response carries both windows, and inherits the `leaderboard` root's stale/gc times and native persistence. Pull-to-refresh on Friends invalidates the `leaderboard` root, which also marks comparisons stale.
   - `AuthProvider` clears the query cache when the signed-in user changes and stores the cache owner under `pinpoint-query-cache-owner`.
 - Local storage / offline mode approach:
   - Native saved logs are loaded from SQLite through `mobile/src/lib/local-logs-db.native.ts`.
@@ -210,12 +211,16 @@
   - Mobile offline chat handles simple local questions from cached/native local games.
   - Signed-in chat transcripts are saved locally with AsyncStorage, capped to the last 100 messages, and can be cleared from the chat screen.
 - Friends and leaderboards
-  - Files: `mobile/src/app/(tabs)/friends.tsx`, `app/api/friends/leaderboard/route.ts`, invite routes under `app/api/friends/invite/`.
+  - Files: `mobile/src/app/(tabs)/friends.tsx`, `mobile/src/components/friend-comparison-modal.tsx`, `app/api/friends/leaderboard/route.ts`, invite routes under `app/api/friends/invite/`.
   - Supports persistent invite links and metric-based leaderboards.
   - `GET /api/friends/leaderboard` remains the legacy all-metrics response. `GET /api/friends/leaderboard?metric=<LeaderboardMetric>` returns a ranked single-metric response for lazy tab loading.
-  - The frontend validates the per-metric leaderboard response shape so frontend/backend deploy mismatches fail clearly instead of rendering empty leaderboard rows.
-  - Leaderboard metric warmup order is centralized in `mobile/src/lib/leaderboard.ts`; sequential background prefetch is in `mobile/src/lib/leaderboard-warmup.ts`.
-  - The leaderboard API avoids loading shot rows for strike-rate/total-strike metric requests; spare-rate/total-spare and `MostNines` need shots so 10th-frame bonus spares such as `X 9 /` are counted correctly.
+  - `GET /api/friends/leaderboard?compare=<friendUserId>` is the head-to-head mode. It narrows the participant set to `[self, friend]`, returns every metric for **both** time windows in one response (`participants[].metricsByRange.allTime` / `.last30`), and includes no ranks. `metric` and `range` are ignored when `compare` is present. It 400s on comparing with yourself and 404s when the id is not in the caller's friend set, so it cannot be used to read stats for arbitrary user ids. Both ranges are cheap to compute together because range filtering happens in memory, not in SQL, so one query feeds both accumulation passes over `computeMetricsByUser`.
+  - Tapping a friend's leaderboard row opens `FriendComparisonModal`, a near-fullscreen popup with an All time and a Last 30 days section, one split bar per metric. Your own row is not pressable.
+  - The API returns `0`, never `null`/`NaN`, for a user with no games in a window. The modal therefore derives "no data" from `mostGames === 0` per player per range, not from `Number.isFinite`; otherwise a friend who has not bowled recently renders as a 14-way 0-0 tie.
+  - All leaderboard metrics are higher-is-better — the API sorts every metric with one descending comparator and no per-metric direction table, and the comparison modal's winner logic relies on that. Adding a lower-is-better metric would require a direction map in both places.
+  - The frontend validates both the per-metric and the comparison response shapes so frontend/backend deploy mismatches fail clearly instead of rendering empty leaderboard rows. Deploy the API before the app.
+  - Leaderboard metric warmup order, metric labels/descriptions (`LEADERBOARD_METRIC_DETAILS`), range labels, and metric value formatting (`formatLeaderboardMetricValue`) are centralized in `mobile/src/lib/leaderboard.ts` so the Friends screen and the comparison modal cannot drift; sequential background prefetch is in `mobile/src/lib/leaderboard-warmup.ts`.
+  - The leaderboard API avoids loading shot rows for strike-rate/total-strike metric requests; spare-rate/total-spare and `MostNines` need shots so 10th-frame bonus spares such as `X 9 /` are counted correctly. Compare mode always uses the full frames+shots select, but only over two users.
 - Profile, avatars, legal, and data deletion
   - Files: profile routes under `app/api/account/profile/`, `mobile/src/lib/profile.ts`, `mobile/src/app/edit-profile.tsx`, `mobile/src/app/privacy.tsx`, `mobile/src/app/terms.tsx`, `mobile/src/app/delete-account.tsx`, `mobile/src/app/delete-data.tsx`.
   - Avatar presets and uploads are supported.
@@ -310,6 +315,7 @@
   - Offline Chat simple stat questions after local logs have synced.
   - Cross-device game-tag round trip: tag a game on one device, let another device sync, and confirm chips plus chat/leaderboard scope update.
   - Chat history persistence after app close/reload, clear chat, sign-out/sign-in, user switch, and delete data/account.
+  - Friend comparison popup: tap a friend's leaderboard row from several metric tabs and both range settings, confirm both sections show all metrics, that the X and Android back close it, that your own row is not tappable, and that a friend with no games in the last 30 days shows dashes rather than a 0-0 tie.
 
 ## Data Model
 
@@ -469,6 +475,7 @@
   - Current code expects `db/add_leaderboard_metric_indexes.sql` / matching `db/schema.sql` indexes for `games`, `frames`, and `shots`.
   - Until the migration is applied in production Supabase, frame-heavy leaderboard tabs may still hit statement timeouts.
   - Frame-heavy tabs still need frame rows for all participants; monitor this if friend graphs or history size grow substantially.
+  - Head-to-head compare mode (`?compare=`) uses the same heavy frames+shots select but restricted to two users, so it is strictly cheaper than any all-participants tab and needs no new migration. If a very large single account still times out, the escape hatch is two parallel per-user queries merged before aggregation.
 - Priority 3 - Upload queue/finalization is complex:
   - `uploads-processing-provider.tsx` is large and handles local files, Supabase Storage upload, API row creation, polling, retries, optimistic UI, and finalization.
   - Be cautious with cleanup paths that delete local files or server rows.
@@ -531,6 +538,10 @@
 - App Store / Google Play behavior:
   - Camera/photo library usage is explained in `mobile/app.config.ts`.
   - App is portrait, dark UI, custom icon/splash.
+- Modal conventions:
+  - Modals use React Native `Modal` directly; there is no bottom-sheet library. Short centered dialogs use `animationType="fade"` with a `palette.overlay` backdrop and a `SurfaceCard tone="raised"`; edit sheets use `animationType="slide"` (see `mobile/src/components/scoreboard-game-edit-sheet.tsx`).
+  - Short centered dialogs do not need safe-area handling because `ScreenShell` covers it at the screen level, but near-fullscreen modals must apply `useSafeAreaInsets` themselves or their corner controls land under the iOS notch. `mobile/src/components/friend-comparison-modal.tsx` is the reference for that case.
+  - New modals should pass `onRequestClose` so Android hardware back dismisses them; some older modals omit it.
 - Web behavior:
   - Browser users run the same Expo route tree hosted by root Next/Vercel.
   - `EXPO_PUBLIC_API_BASE_URL` can be omitted on deployed web to use same-origin API.
