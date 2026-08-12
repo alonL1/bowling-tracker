@@ -27,6 +27,9 @@ import InlineLoadingCard from '@/components/inline-loading-card';
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
 import LiveGameEditSheet from '@/components/live-game-edit-sheet';
 import LiveSessionGameCard from '@/components/live-session-game-card';
+import ProcessingProgressBar, {
+  PendingScoreboardTitle,
+} from '@/components/processing-progress-bar';
 import StackBadge from '@/components/stack-badge';
 import SurfaceCard from '@/components/surface-card';
 import UploadsProcessingBanner from '@/components/uploads-processing-banner';
@@ -51,6 +54,12 @@ import {
 } from '@/lib/live-session';
 import { navigateBackOrFallback } from '@/lib/navigation';
 import { showWarmupTagTipIfNeeded } from '@/lib/onboarding';
+import { getPendingScoreboardPhase } from '@/lib/pending-scoreboard';
+import {
+  completeProcessingAnchor,
+  dropProcessingAnchor,
+  markScopeRendered,
+} from '@/lib/processing-progress';
 import { formatTenths } from '@/lib/number-format';
 import { confirmAction } from '@/lib/confirm';
 import { localLogQueryKeys } from '@/hooks/use-logged-data';
@@ -61,6 +70,7 @@ import { fontFamilySans } from '@/constants/typography';
 import { useAuth } from '@/providers/auth-provider';
 import { useUploadsProcessing } from '@/providers/uploads-processing-provider';
 const BASE_CONTENT_BOTTOM_PADDING = 132;
+const PROCESSING_SCOPE = 'live-session';
 
 function updateLiveSessionCache(
   current: LiveSessionResponse | undefined,
@@ -280,6 +290,36 @@ export default function LiveSessionScreen() {
 
   const liveSession = liveSessionQuery.data?.liveSession ?? null;
   const isInitialLiveSessionLoading = authLoading || (liveSessionQuery.isPending && !liveSessionQuery.data);
+
+  const pendingGameCount = (liveSession?.games ?? []).filter(
+    (game) => game.status === 'queued' || game.status === 'processing',
+  ).length;
+
+  // Anchors created on this screen's very first commit belong to games that were
+  // already processing before we looked, so their durations are not measurable.
+  useEffect(() => {
+    markScopeRendered(PROCESSING_SCOPE);
+  }, []);
+
+  // The pending card unmounts the moment a game turns `ready`, so the completion
+  // has to be detected here by diffing the previous statuses.
+  const previousGameStatusesRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const previous = previousGameStatusesRef.current;
+    const next = new Map<string, string>();
+
+    (liveSession?.games ?? []).forEach((game) => {
+      next.set(game.id, game.status);
+      const wasProcessing = previous.get(game.id) === 'processing';
+      if (wasProcessing && game.status === 'ready') {
+        completeProcessingAnchor(game.id);
+      } else if (game.status === 'error') {
+        dropProcessingAnchor(game.id);
+      }
+    });
+
+    previousGameStatusesRef.current = next;
+  }, [liveSession?.games]);
 
   useEffect(() => {
     if (!liveSession) {
@@ -1023,9 +1063,11 @@ export default function LiveSessionScreen() {
                               <View style={styles.pendingSummary}>
                                 <StackBadge lines={['Game', String(index + 1)]} />
                                 <View style={styles.pendingTextBlock}>
-                                  <Text style={styles.pendingTitle}>
-                                    {game.status === 'error' ? 'Scoreboard needs attention' : 'Processing scoreboard'}
-                                  </Text>
+                                  <PendingScoreboardTitle
+                                    phase={getPendingScoreboardPhase(game)}
+                                    gameId={game.id}
+                                    style={styles.pendingTitle}
+                                  />
                                   {game.last_error ? (
                                     <Text style={styles.pendingError}>{game.last_error}</Text>
                                   ) : null}
@@ -1055,6 +1097,13 @@ export default function LiveSessionScreen() {
                                 )}
                               </View>
                             </View>
+                            {getPendingScoreboardPhase(game) === 'processing' ? (
+                              <ProcessingProgressBar
+                                gameId={game.id}
+                                scope={PROCESSING_SCOPE}
+                                queuePosition={pendingGameCount}
+                              />
+                            ) : null}
                           </View>
                         ),
                       )}
@@ -1587,6 +1636,10 @@ const styles = StyleSheet.create({
     minHeight: 52,
     justifyContent: 'center',
     gap: 2,
+    // The parent row centers its children, which leaves this block sized to its
+    // text rather than to the row. Stretching it means justifyContent actually
+    // has room to work and the title stays centered however tall the row gets.
+    alignSelf: 'stretch',
   },
   pendingTitle: {
     color: palette.text,
@@ -1594,6 +1647,10 @@ const styles = StyleSheet.create({
     lineHeight: 25,
     fontWeight: '600',
     fontFamily: fontFamilySans,
+    // Android adds ascender/descender padding inside the text box by default,
+    // which makes the line sit high even when its container centers it.
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   pendingError: {
     color: palette.error,

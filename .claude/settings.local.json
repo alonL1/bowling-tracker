@@ -33,7 +33,8 @@
       "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" \"http://localhost:3111/api/friends/leaderboard?compare=abc\")",
       "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" \"http://localhost:3111/api/friends/leaderboard?metric=nope\")",
       "Bash(pkill -f \"next start -p 3111\")",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(grep -A 4 -E \"record/live\\\\.tsx$|components/upload-session-form\\\\.tsx$\")"
     ]
   }
 }

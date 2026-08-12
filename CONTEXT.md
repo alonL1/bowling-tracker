@@ -46,9 +46,14 @@
   - Frontend auth client is in `mobile/src/lib/supabase.ts`.
   - Backend auth helpers are in `app/api/utils/auth.ts`.
 - AI/OCR:
-  - Google Gemini through `@google/generative-ai`.
-  - Chat route: `app/api/chat/route.ts`.
-  - Scoreboard image worker: `worker/index.js`.
+  - Google Gemini, reached two different ways:
+    - Worker (`worker/index.js`) uses the `@google/generative-ai` SDK, pinned to `0.14.1` in `worker/package.json`.
+    - Chat route (`app/api/chat/route.ts`) calls the Gemini REST endpoint (`generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`) directly with `fetch`. There is no Gemini SDK dependency in the root `package.json`.
+  - Both read the model from `GEMINI_MODEL` and fall back to `gemini-flash-latest` in code, but they run in **two independent deployment environments**, so the same variable name resolves to two different models:
+    - Chat (root Next app on Vercel, and local `.env.local`): `gemini-3-flash-preview`. This is the value in `.env.example`.
+    - Scoreboard worker (Cloud Run, env set on the service): `gemini-3.6-flash`.
+  - Do not "fix" one to match the other, and do not read `.env.example` as the worker's config — it only describes the root app. The chat model and the image-processing model are chosen separately and intentionally differ. The `gemini-flash-latest` fallback in code applies to neither in production.
+  - Thinking budgets are env-driven: `WORKER_THINKING_MODE` (currently `high`) and `CHAT_THINKING_MODE` (currently `minimal`). `resolveThinkingConfig` in `worker/index.js` maps `minimal|low|medium|high` to budgets `0|128|512|2048`, and also accepts a raw integer. Leaving it unset sends no thinking config at all, which is deliberate: some models (e.g. `gemini-3.x-pro`) reject `thinkingBudget: 0`.
 - Analytics/crash reporting:
   - Unknown. I did not find a dedicated analytics or crash reporting package/config.
 - Deployment/build tools:
@@ -101,7 +106,8 @@
   - `schema.sql` plus migration files. This is the source of truth for Supabase tables, triggers, indexes, policies, storage bucket setup, and sync tombstones.
   - `db/add_leaderboard_metric_indexes.sql` adds indexes used by leaderboard metric queries; run it in production Supabase if those indexes are not already present.
 - `worker/`
-  - Express worker that claims `analysis_jobs`, downloads scoreboard images from Supabase Storage, sends them to Gemini, writes extracted scoreboard data back to Postgres, and deletes processed images.
+  - Express worker that claims `analysis_jobs` via the `claim_next_job` RPC, downloads scoreboard images from Supabase Storage, sends them to Gemini with a structured-output schema, writes extracted scoreboard data back to Postgres, and deletes processed images.
+  - Processes a batch per trigger (`MAX_JOBS_PER_RUN`, code default 6, deployed value 10) bounded by `DEFAULT_MAX_RUN_DURATION_MS` (240s), retries extraction at escalating temperature, and requeues jobs that hit transient Gemini errors.
 - `scripts/`
   - `dev.mjs` exports/syncs Expo web and starts Next dev.
   - `sync-expo-web.mjs` runs Expo export and copies output into `public/expo-web`.
@@ -186,9 +192,24 @@
 - Local uploads and processing queue
   - Files: `mobile/src/lib/uploads-processing-store.ts`, `mobile/src/providers/uploads-processing-provider.tsx`, `mobile/src/app/uploads-processing.tsx`, `mobile/src/components/uploads-processing-banner.tsx`.
   - Stores selected images locally, uploads them later, polls/refreshes server state, retries failed steps, and merges optimistic sessions/games into the UI.
+- Pending scoreboard cards (uploading vs processing, and the processing progress bar)
+  - Files: `mobile/src/lib/pending-scoreboard.ts`, `mobile/src/lib/processing-progress.ts`, `mobile/src/lib/processing-duration-store.ts`, `mobile/src/components/processing-progress-bar.tsx`, plus the two card sites in `mobile/src/app/(tabs)/record/live.tsx` and `mobile/src/components/upload-session-form.tsx`.
+  - `getPendingScoreboardPhase` is the single definition of `uploading | processing | error`. It keys off `local_sync`, which the merge functions strip from every server row, so its presence means the game has not reached the server yet. Both the label and the bar derive from one call per card so they cannot disagree. The diagnostics screen keeps its own capture-state labels and is the more precise reference.
+  - There is no upload progress bar. Uploads are typically sub-second and `supabase.storage.upload()` uses `fetch`, which exposes no progress; real byte progress would mean replacing that call with XHR or an expo upload task.
+  - The processing bar is time-based, not real progress — the worker exposes no intermediate signal. It eases to 90% over the current estimate, then crawls toward 98.5% over two minutes so a retried or requeued job still looks alive. It never completes on a timer: the pending card unmounts the instant the game turns `ready`.
+  - Because the card unmounts on completion, the bar cannot record its own duration. Each screen owns a status-diff effect that calls `completeProcessingAnchor` on `processing -> ready`. Anchors live in a module-level map in `processing-progress.ts`, not component state, because the draft list is a `DraggableFlatList` whose windowing unmounts off-screen rows.
+  - Anchors are client-clock. Server timestamps are the wrong clock for this: `created_at` is the start of the queue wait, and `updated_at` is re-stamped on every status write so it would reset the bar mid-flight.
+  - Samples are tagged `clean` (app stayed foregrounded — the poll suspends while backgrounded, so completions are noticed late) and `trusted` (we watched the game enter processing rather than opening the screen mid-flight). Only clean+trusted samples feed the median; everything is stored so the slow tail stays visible.
+  - Estimate = median of clean+trusted samples once there are at least `MIN_SAMPLES_FOR_MEDIAN`, else `PROCESSING_ESTIMATE_SEED_MS`. Samples live under AsyncStorage key `pinpoint-processing-durations-v1` (global, not per-user — processing time is server-side) and are written directly, never through `updateStore()`, which clones and re-persists the whole upload queue on every call.
+  - **`PROCESSING_DEBUG` in `processing-duration-store.ts` is temporary.** While true it appends elapsed/estimate to the card label and renders a timing card on the Uploads & Processing screen. It exists to measure a real median so the seed can be replaced; turn it off and delete the debug card once that is done. Batched uploads inflate durations, so pick the seed from low-`queuePosition` samples.
 - Scoreboard OCR and processing
   - Files: `worker/index.js`, `app/api/live-session/capture/route.ts`, `app/api/recording-draft/upload/route.ts`, `db/schema.sql`.
   - Worker uses Gemini to extract all visible player rows and writes normalized extraction data to live/draft game rows.
+  - Extraction uses **structured output**: `LIVE_EXTRACTION_SCHEMA` is passed as `responseSchema` alongside `responseMimeType: "application/json"`, so Gemini uses constrained decoding. This is what fixed the malformed-JSON parse failures that free-form JSON mode produced on complex scoreboards. Changing that schema changes the extraction contract — keep it in sync with `LiveExtraction` in `mobile/src/lib/types.ts`.
+  - `maxOutputTokens` defaults to `32768` (override with `WORKER_MAX_OUTPUT_TOKENS`). It has to be generous because thinking tokens are charged against the same output budget as the response; the model's own ~8k default was truncating JSON mid-response in production (`finishReason MAX_TOKENS`).
+  - Each job gets up to 3 extraction attempts at escalating temperature (`0.2`, `0.6`, `0.9`). At low temperature a bad sample reproduces deterministically, so re-rolling the temperature is what breaks out of it. The loop only re-rolls on JSON/parse errors; API, quota, and safety errors break out immediately rather than burning extra model calls.
+  - Transient failures do not fail the game. `isTransientGeminiError` matches rate limits, quota, 5xx, and network errors; those call `requeueJob`, which sets `analysis_jobs.status` back to `queued`, keeps the image, and leaves the live/draft game in `processing` so the UI keeps showing "Processing" instead of "needs attention". `MAX_JOB_ATTEMPTS = 6` caps this — `claim_next_job` increments `attempts` on every claim, so it counts total claims, and past the cap the job errors out normally.
+  - A requeue also stops the rest of that batch: a rate limit will hit the next call in the same run, so the worker returns early and lets a later trigger drain the queue once the window clears.
 - Reviewing and finalizing live sessions/drafts
   - Files: `mobile/src/app/(tabs)/record/live.tsx`, upload/add screens, `app/api/live-session/end/route.ts`, `app/api/recording-draft/finalize/route.ts`.
   - User selects which player is themselves before logging games.
@@ -214,6 +235,7 @@
   - Files: `mobile/src/app/(tabs)/friends.tsx`, `mobile/src/components/friend-comparison-modal.tsx`, `app/api/friends/leaderboard/route.ts`, invite routes under `app/api/friends/invite/`.
   - Supports persistent invite links and metric-based leaderboards.
   - `GET /api/friends/leaderboard` remains the legacy all-metrics response. `GET /api/friends/leaderboard?metric=<LeaderboardMetric>` returns a ranked single-metric response for lazy tab loading.
+  - `?range=last30` restricts every metric to games from the last 30 days; anything else (including absent) means all history. The Friends screen exposes this as an All time / Last 30 days toggle, and the range is part of the per-metric query key. Filtering is done in memory per game via `isGameWithinCutoff`, using `played_at` falling back to `created_at` — games with no usable date are excluded from the bounded window. The server does not echo `range` back in the single-metric response.
   - `GET /api/friends/leaderboard?compare=<friendUserId>` is the head-to-head mode. It narrows the participant set to `[self, friend]`, returns every metric for **both** time windows in one response (`participants[].metricsByRange.allTime` / `.last30`), and includes no ranks. `metric` and `range` are ignored when `compare` is present. It 400s on comparing with yourself and 404s when the id is not in the caller's friend set, so it cannot be used to read stats for arbitrary user ids. Both ranges are cheap to compute together because range filtering happens in memory, not in SQL, so one query feeds both accumulation passes over `computeMetricsByUser`.
   - Tapping a friend's leaderboard row opens `FriendComparisonModal`, a near-fullscreen popup with an All time and a Last 30 days section, one split bar per metric. Your own row is not pressable.
   - The API returns `0`, never `null`/`NaN`, for a user with no games in a window. The modal therefore derives "no data" from `mostGames === 0` per player per range, not from `Number.isFinite`; otherwise a friend who has not bowled recently renders as a 14-way 0-0 tie.
@@ -302,6 +324,7 @@
   - Upload finalization idempotency uses `mobile_sync_operations` and client operation IDs.
   - Game tags are part of the normal server sync/upsert payload; no special conflict resolver exists beyond the standard server timestamp/upsert behavior.
   - Cross-device reconciliation for in-progress capture: if the server reports no active live session or recording draft for the user but the local store still has an entry pinned to a server id, the merge functions in `mobile/src/lib/uploads-processing-store.ts` return `null` (no phantom synthesis) and the React Query cache subscription in `UploadsProcessingProvider` sweeps the orphan local entry — marking the live-session entry `discarded` and removing the draft entry, plus deleting any tied capture items, local image files, and finalize operations. This handles the case where the user discards/finalizes from another device.
+  - A stale local entry only masks the specific session/draft it represents. The merge functions compare `serverLiveSessionId` / `serverDraftId` against the id the server reports, and return `null` only when they match; if the server reports a *different* active session or draft (one started on another device) it is surfaced instead of being hidden. Likewise the record-entry-status merge trusts either the server's `true` or a locally-active optimistic entry, so a stale non-active local entry cannot hide a real server-side one.
   - Unknown: there is no explicit general-purpose conflict resolution for simultaneous edits from multiple devices beyond server timestamps and overwrite/upsert behavior.
 - Files/flows to test carefully:
   - First launch online on native, then open Sessions offline.
@@ -316,6 +339,7 @@
   - Cross-device game-tag round trip: tag a game on one device, let another device sync, and confirm chips plus chat/leaderboard scope update.
   - Chat history persistence after app close/reload, clear chat, sign-out/sign-in, user switch, and delete data/account.
   - Friend comparison popup: tap a friend's leaderboard row from several metric tabs and both range settings, confirm both sections show all metrics, that the X and Android back close it, that your own row is not tappable, and that a friend with no games in the last 30 days shows dashes rather than a 0-0 tie.
+  - Pending scoreboard cards: confirm the label reads "Uploading scoreboard" then flips to "Processing scoreboard" with the bar starting only at the flip; navigate away mid-processing and back (bar resumes rather than restarting); background the app for ~20s and return (bar jumps forward to real elapsed); and confirm an errored capture shows no bar and records no sample.
 
 ## Data Model
 
@@ -389,6 +413,9 @@
 - Root environment:
   - Copy/fill `.env.local` from `.env.example`.
   - Important vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`, `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_BASE_URL`, `GEMINI_API_KEY`, `WORKER_AUTH_TOKEN`, `GEMINI_MODEL`, `WORKER_URL`, chat env vars, `API_CORS_ALLOWED_ORIGINS`.
+  - Worker tuning vars, all optional with code defaults, and set on the Cloud Run service rather than in root env files: `GEMINI_MODEL` (`gemini-3.6-flash`), `WORKER_THINKING_MODE` (`high`), `MAX_JOBS_PER_RUN` (code default 6, deployed 10), `WORKER_MAX_OUTPUT_TOKENS` (default 32768).
+  - Chat tuning vars, set in the root/Vercel environment: `GEMINI_MODEL` (`gemini-3-flash-preview`), `CHAT_THINKING_MODE` (`minimal`), `CHAT_MODE`, `CHAT_DEBUG`, `CHAT_SHOW_METHOD`, `CHAT_SHOW_TIMING`.
+  - `.env.example` and the README env block describe the **root app only**. The worker's `GEMINI_MODEL` is a separate value on a separate service; changing `.env.example` does not affect scoreboard processing.
 - Mobile environment:
   - `mobile/.env.local` can be pulled from EAS with `npm run env:pull:preview` or `npm run env:pull:production`.
   - Required frontend vars: `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_BASE_URL`.
@@ -454,6 +481,9 @@
 - Worker:
   - Worker uses `WORKER_URL` and `WORKER_AUTH_TOKEN` for API-triggered processing.
   - Before redeploying worker, ensure DB schema/migrations match worker expectations.
+  - Cloud Run deployment settings are not in the repo and cannot be read from code. Current values per the project owner: **max instances 8**, `MAX_JOBS_PER_RUN` **10**, `GEMINI_MODEL` **gemini-3.6-flash**, `WORKER_THINKING_MODE` **high**. The in-code defaults (6 jobs per run, `gemini-flash-latest`, no thinking config) are only the fallbacks — do not assume they describe production.
+  - The worker's env is set on the Cloud Run service and is separate from the root/Vercel env, even though several variable names are shared. In particular the worker runs a different Gemini model than chat does; see the AI/OCR section.
+  - Concurrency interacts with Gemini rate limits: raising max instances or `MAX_JOBS_PER_RUN` increases the chance of 429s, which now requeue rather than fail, so the visible symptom is slower processing rather than errored games.
 - Handle carefully before release:
   - Bundle IDs/package names.
   - App version/build numbers/version code.

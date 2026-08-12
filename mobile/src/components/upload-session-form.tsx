@@ -21,6 +21,9 @@ import EmptyStateCard from '@/components/empty-state-card';
 import InfoBanner from '@/components/info-banner';
 import InlineLoadingCard from '@/components/inline-loading-card';
 import KeyboardAwareScrollView from '@/components/keyboard-aware-scroll-view';
+import ProcessingProgressBar, {
+  PendingScoreboardTitle,
+} from '@/components/processing-progress-bar';
 import RecordingDraftGameCard from '@/components/recording-draft-game-card';
 import RecordingDraftGameEditSheet from '@/components/recording-draft-game-edit-sheet';
 import StackBadge from '@/components/stack-badge';
@@ -51,6 +54,12 @@ import { localLogQueryKeys } from '@/hooks/use-logged-data';
 import { syncLocalLogsForUser } from '@/lib/local-logs-sync';
 import { navigateBackOrFallback } from '@/lib/navigation';
 import { showWarmupTagTipIfNeeded } from '@/lib/onboarding';
+import { getPendingScoreboardPhase } from '@/lib/pending-scoreboard';
+import {
+  completeProcessingAnchor,
+  dropProcessingAnchor,
+  markScopeRendered,
+} from '@/lib/processing-progress';
 import { supabase } from '@/lib/supabase';
 import type {
   RecordingDraftGame,
@@ -315,6 +324,8 @@ function PendingDraftGameCard({
   deleting,
   onStartDrag,
   dragActive,
+  scope,
+  queuePosition,
 }: {
   gameNumber: number;
   game: RecordingDraftGame;
@@ -322,16 +333,18 @@ function PendingDraftGameCard({
   deleting: boolean;
   onStartDrag?: () => void;
   dragActive?: boolean;
+  scope: string;
+  queuePosition: number;
 }) {
+  const phase = getPendingScoreboardPhase(game);
+
   return (
     <View style={[styles.pendingCard, dragActive && styles.pendingCardActive]}>
       <View style={styles.pendingCardRow}>
         <View style={styles.pendingSummary}>
           <StackBadge lines={['Game', String(gameNumber)]} />
           <View style={styles.pendingTextBlock}>
-            <Text style={styles.pendingTitle}>
-              {game.status === 'error' ? 'Scoreboard needs attention' : 'Processing scoreboard'}
-            </Text>
+            <PendingScoreboardTitle phase={phase} gameId={game.id} style={styles.pendingTitle} />
             {game.last_error ? <Text style={styles.pendingError}>{game.last_error}</Text> : null}
           </View>
         </View>
@@ -368,6 +381,9 @@ function PendingDraftGameCard({
           </Pressable>
         </View>
       </View>
+      {phase === 'processing' ? (
+        <ProcessingProgressBar gameId={game.id} scope={scope} queuePosition={queuePosition} />
+      ) : null}
     </View>
   );
 }
@@ -444,6 +460,34 @@ export default function UploadSessionForm({
   const playerOptions = draft?.playerOptions ?? [];
   const progress = draft?.progress ?? null;
   const progressVisible = Boolean(progress && progress.total > 1);
+  const processingScope = `recording-draft:${mode}`;
+  const pendingGameCount = (progress?.queued ?? 0) + (progress?.processing ?? 0);
+
+  // Anchors created on this screen's very first commit belong to games that were
+  // already processing before we looked, so their durations are not measurable.
+  useEffect(() => {
+    markScopeRendered(processingScope);
+  }, [processingScope]);
+
+  // The pending card unmounts the moment a game turns `ready`, so the completion
+  // has to be detected here by diffing the previous statuses.
+  const previousGameStatusesRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const previous = previousGameStatusesRef.current;
+    const next = new Map<string, string>();
+
+    allGames.forEach((game) => {
+      next.set(game.id, game.status);
+      const wasProcessing = previous.get(game.id) === 'processing';
+      if (wasProcessing && game.status === 'ready') {
+        completeProcessingAnchor(game.id);
+      } else if (game.status === 'error') {
+        dropProcessingAnchor(game.id);
+      }
+    });
+
+    previousGameStatusesRef.current = next;
+  }, [allGames]);
   const selectionError = useMemo(
     () => getFirstSelectionValidationError(readyGames, selectedPlayerKeys),
     [readyGames, selectedPlayerKeys],
@@ -1200,6 +1244,8 @@ export default function UploadSessionForm({
               onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
               onStartDrag={drag}
               dragActive={isActive}
+              scope={processingScope}
+              queuePosition={pendingGameCount}
             />
           )}
         </View>
@@ -1311,6 +1357,8 @@ export default function UploadSessionForm({
                         game={game}
                         deleting={isDeletingGame(game.id)}
                         onDelete={(draftGameId) => deleteGameMutation.mutate(draftGameId)}
+                        scope={processingScope}
+                        queuePosition={pendingGameCount}
                       />
                     </View>
                   ),
@@ -1737,6 +1785,8 @@ const styles = StyleSheet.create({
   pendingCard: {
     paddingHorizontal: 2,
     paddingVertical: 6,
+    // Spaces the processing progress bar below the card row, matching live.tsx.
+    gap: 10,
   },
   pendingCardActive: {
     opacity: 0.95,
@@ -1759,6 +1809,10 @@ const styles = StyleSheet.create({
     gap: 4,
     minHeight: 52,
     justifyContent: 'center',
+    // The parent row centers its children, which leaves this block sized to its
+    // text rather than to the row. Stretching it means justifyContent actually
+    // has room to work and the title stays centered however tall the row gets.
+    alignSelf: 'stretch',
   },
   pendingTitle: {
     color: palette.text,
@@ -1766,6 +1820,10 @@ const styles = StyleSheet.create({
     lineHeight: 25,
     fontWeight: '600',
     fontFamily: fontFamilySans,
+    // Android adds ascender/descender padding inside the text box by default,
+    // which makes the line sit high even when its container centers it.
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
   pendingError: {
     color: palette.error,

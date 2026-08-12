@@ -157,7 +157,7 @@ function ComparisonSection({
   const hasComparableRows = wins + losses + ties > 0;
 
   return (
-    <SurfaceCard style={styles.sectionCard}>
+    <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{LEADERBOARD_RANGE_LABELS[range]}</Text>
         {hasComparableRows ? (
@@ -171,7 +171,7 @@ function ComparisonSection({
       {rows.map((row) => (
         <ComparisonMetricRow key={row.metric} row={row} />
       ))}
-    </SurfaceCard>
+    </View>
   );
 }
 
@@ -495,12 +495,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    gap: spacing.md,
+    // The sections no longer sit on their own cards, so the gap between them is
+    // the only thing separating the two lists.
+    gap: spacing.xl,
     paddingBottom: spacing.sm,
   },
-  sectionCard: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+  section: {
     gap: spacing.sm,
   },
   sectionHeader: {

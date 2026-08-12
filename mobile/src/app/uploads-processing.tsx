@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import ActionButton from '@/components/action-button';
@@ -8,6 +8,13 @@ import InfoBanner from '@/components/info-banner';
 import ScreenShell from '@/components/screen-shell';
 import SurfaceCard from '@/components/surface-card';
 import { confirmAction } from '@/lib/confirm';
+import {
+  getProcessingEstimate,
+  loadProcessingDurations,
+  MIN_SAMPLES_FOR_MEDIAN,
+  PROCESSING_DEBUG,
+  subscribeToProcessingEstimate,
+} from '@/lib/processing-duration-store';
 import { shouldDisplayCaptureItemInUploadsProcessing } from '@/lib/uploads-processing-store';
 import { palette, spacing } from '@/constants/palette';
 import { fontFamilySans } from '@/constants/typography';
@@ -106,6 +113,15 @@ export default function UploadsProcessingScreen() {
     );
   }, [store.captureItems, store.finalizeOperations]);
 
+  const [estimate, setEstimate] = useState(() => getProcessingEstimate());
+  useEffect(() => {
+    if (!PROCESSING_DEBUG) {
+      return;
+    }
+    void loadProcessingDurations();
+    return subscribeToProcessingEstimate(setEstimate);
+  }, []);
+
   return (
     <ScreenShell
       title="Uploads & Processing"
@@ -123,6 +139,31 @@ export default function UploadsProcessingScreen() {
           <Text style={styles.summaryTitle}>Overview</Text>
           <Text style={styles.summaryBody}>
             {summary.pendingCount} pending, {summary.failedCount} failed, {summary.captureCount} captures, {summary.finalizeCount} finalize operations.
+          </Text>
+        </SurfaceCard>
+      ) : null}
+
+      {/* TEMPORARY: instrumentation for choosing PROCESSING_ESTIMATE_SEED_MS.
+          Delete this block and flip PROCESSING_DEBUG once a real median exists. */}
+      {PROCESSING_DEBUG ? (
+        <SurfaceCard style={styles.summaryCard}>
+          <Text style={styles.summaryTitle}>Processing timing (debug)</Text>
+          <Text style={styles.summaryBody}>
+            {`Estimate ${(estimate.estimateMs / 1000).toFixed(1)}s from ${
+              estimate.source === 'seed' ? 'seed' : 'median'
+            } · ${estimate.usableSampleCount} usable of ${estimate.samples.length} samples (need ${MIN_SAMPLES_FOR_MEDIAN}).`}
+          </Text>
+          <Text style={styles.summaryBody}>
+            {estimate.samples.length === 0
+              ? 'No samples yet. Upload a scoreboard a few at a time — batches inflate durations.'
+              : estimate.samples
+                  .map(
+                    (sample) =>
+                      `${(sample.ms / 1000).toFixed(1)}s q${sample.queuePosition}${
+                        sample.clean ? '' : ' bg'
+                      }${sample.trusted ? '' : ' partial'}`,
+                  )
+                  .join(' · ')}
           </Text>
         </SurfaceCard>
       ) : null}
